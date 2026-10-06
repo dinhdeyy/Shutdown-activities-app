@@ -2035,33 +2035,44 @@ const IO = {
 
 document.addEventListener('DOMContentLoaded', () => App.init());
 
-</script>
-
-https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const sb = supabase.createClient(
-  "https://vetbxnrkfgxrgsnribwe.supabase.co",
-  "DAN_KEY_VAO_DAY"
-);
+/* ===== KẾT NỐI SUPABASE ===== */
+const SUPABASE_URL = "https://vetbxnrkfgxrgsnribwe.supabase.co";
+const SUPABASE_KEY = "DAN_PUBLISHABLE_KEY_VAO_DAY"; // sb_publishable_... (KHÔNG dùng secret key)
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const CLIENT_ID = U.uid();
 let lastCloudAt = 0, cloudTimer;
 
 /* Nạp dữ liệu chung từ cloud */
 async function cloudLoad() {
-  const { data, error } = await sb.from('planner_state').select('data').eq('id', 1).single();
+  const { data, error } = await sb
+    .from('planner_state')
+    .select('data')
+    .eq('id', 1)
+    .maybeSingle();
+
   if (error) { toast('Không kết nối được cloud: ' + error.message, 'err'); return; }
+
   const d = data && data.data;
   if (d && Array.isArray(d.plans) && d.plans.length) applyCloud(d);
-  else cloudSave();                       // lần đầu: đẩy dữ liệu máy mình lên
+  else cloudSave(); // lần đầu: đẩy dữ liệu máy mình lên
   console.log('Supabase connected');
 }
 
+/* Áp dữ liệu cloud vào app */
 function applyCloud(d) {
   lastCloudAt = d.savedAt || 0;
-  const clean = Store.sanitize({ plans: d.plans, activePlanId: Store.state.activePlanId, ui: Store.state.ui });
+  const clean = Store.sanitize({
+    plans: d.plans,
+    activePlanId: Store.state.activePlanId,
+    ui: Store.state.ui
+  });
   Store.state.plans = clean.plans;
   Store.state.activePlanId = clean.activePlanId;
-  App.recompute(); App.render();
+  App.recompute();
+  App.render();
 }
 
 /* Lưu lên cloud (gom thay đổi trong 0.8 giây) */
@@ -2070,7 +2081,8 @@ function cloudSave() {
   cloudTimer = setTimeout(async () => {
     const payload = { plans: Store.state.plans, savedAt: Date.now(), by: CLIENT_ID };
     lastCloudAt = payload.savedAt;
-    const { error } = await sb.from('planner_state')
+    const { error } = await sb
+      .from('planner_state')
       .upsert({ id: 1, data: payload, updated_at: new Date().toISOString() });
     if (error) toast('Lưu cloud lỗi: ' + error.message, 'err');
   }, 800);
@@ -2082,18 +2094,23 @@ Store.flush = function () { _flush(); cloudSave(); };
 
 /* Người khác sửa → máy mình tự cập nhật */
 sb.channel('planner')
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'planner_state' }, p => {
-    const d = p.new && p.new.data;
-    if (!d || d.by === CLIENT_ID || (d.savedAt || 0) <= lastCloudAt) return;
-    if (Drag.active) return;
-    applyCloud(d);
-    toast('Kế hoạch vừa được người khác cập nhật', 'ok');
-  })
+  .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'planner_state' },
+      p => {
+        const d = p.new && p.new.data;
+        if (!d || d.by === CLIENT_ID || (d.savedAt || 0) <= lastCloudAt) return;
+        if (typeof Drag !== 'undefined' && Drag.active) return;
+        applyCloud(d);
+        toast('Kế hoạch vừa được người khác cập nhật', 'ok');
+      })
   .subscribe();
 
-document.addEventListener('DOMContentLoaded', () => cloudLoad());
+/* Chạy khi mở trang */
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', cloudLoad);
+} else {
+  cloudLoad();
+}
 </script>
-</body>
-</html>
 </body>
 </html>
