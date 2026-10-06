@@ -1,0 +1,2040 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shutdown Planner – Lập lịch Shutdown nhà máy</title>
+<!--
+  ỨNG DỤNG LẬP LỊCH SHUTDOWN NHÀ MÁY – 1 FILE DUY NHẤT
+  Thư viện ngoài duy nhất: SheetJS (đọc/ghi Excel)
+    CDN chính   : https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
+    CDN dự phòng: https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js
+  Không có Internet: mọi chức năng vẫn chạy, riêng Import/Export .xlsx tạm tắt (CSV/JSON vẫn dùng được).
+  Nếu trình duyệt chặn localStorage (VD: mở trong khung xem trước sandbox), app tự chuyển sang lưu tạm
+  trong bộ nhớ và hiện thông báo – không báo lỗi.
+
+  Cấu trúc code:
+    1. Utils     – ngày giờ (Date/ms), định dạng VN, parse dd/mm/yyyy HH:mm, Excel serial
+    2. Model     – task/plan, bộ task mẫu
+    3. Scheduler – engine lập lịch thuần (không đụng giao diện)
+    4. Store     – lưu trữ an toàn (localStorage hoặc bộ nhớ tạm), Undo/Redo
+    5. UI        – Trang chủ, Gantt, panel sửa task, bộ lọc, Dashboard
+    6. IO        – Import Excel (xem trước), Export Excel/CSV/JSON, In/PDF
+-->
+<script>
+  (function () {
+    function load(src, onErr) { var s = document.createElement('script'); s.setAttribute('data-dyn', '1'); s.src = src; s.async = false; s.onerror = onErr; document.head.appendChild(s); }
+    load('https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js', function () {
+      load('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', function () { window.__XLSX_FAILED__ = true; });
+    });
+  })();
+</script>
+<style>
+:root{
+  --bg:#f3f5f9; --panel:#ffffff; --panel2:#f8fafc; --text:#1e293b; --muted:#64748b; --border:#dbe2ea; --grid:#edf1f5; --grid2:#d5dde7;
+  --navy:#0f2a4a; --navy2:#173a63; --accent:#2563eb; --accent-soft:#e0ebff;
+  --st-todo:#94a3b8; --st-run:#2563eb; --st-done:#16a34a; --st-late:#dc2626; --st-warn:#f59e0b; --st-crit:#991b1b;
+  --shift1:#fffaf0; --shift2:#f3f8ff; --shift3:#f3f4f8;
+  --row-h:32px; --left-w:500px;
+  --shadow:0 4px 18px rgba(15,42,74,.12);
+  --font: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+body.dark{
+  --bg:#0d1420; --panel:#141d2b; --panel2:#182334; --text:#e2e8f0; --muted:#94a3b8; --border:#2a3a52; --grid:#1b2738; --grid2:#2a3a52;
+  --navy:#0a1828; --navy2:#11253d; --accent:#60a5fa; --accent-soft:#1e3a5f;
+  --shift1:#1b1912; --shift2:#122030; --shift3:#161a26; --shadow:0 4px 18px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:var(--font);font-size:13px;color:var(--text);background:var(--bg);display:flex;flex-direction:column;overflow:hidden}
+button,input,select,textarea{font-family:inherit;font-size:13px;color:inherit}
+button{cursor:pointer}
+input,select,textarea{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:6px 8px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+input[type=checkbox]{width:auto;padding:0}
+.hidden{display:none!important}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.nowrap{white-space:nowrap}
+
+/* ---------- Thông báo chế độ lưu tạm ---------- */
+.storebar{background:#fff7e0;color:#7a4b00;border-bottom:1px solid #f3d38a;padding:7px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12.5px}
+.storebar b{color:#5c3800}
+.storebar .sp{flex:1}
+body.dark .storebar{background:#33270d;color:#fbd38d;border-color:#7a5a14}
+body.dark .storebar b{color:#fde68a}
+
+/* ---------- Thanh điều hướng ---------- */
+.topbar{background:var(--navy);color:#fff;display:flex;align-items:center;gap:6px;padding:7px 12px;flex-wrap:wrap;z-index:30}
+.brand{font-weight:700;font-size:15px;margin-right:10px;white-space:nowrap;letter-spacing:.2px}
+.tb-btn{background:transparent;border:1px solid rgba(255,255,255,.18);color:#e8eef6;border-radius:6px;padding:6px 11px;white-space:nowrap}
+.tb-btn:hover{background:rgba(255,255,255,.1)}
+.tb-btn:disabled{opacity:.35;cursor:not-allowed}
+.tb-btn.primary{background:#f59e0b;border-color:#f59e0b;color:#1b1300;font-weight:600}
+.tb-btn.primary:hover{background:#fbbf24}
+.tb-btn.active{background:#fff;color:var(--navy);font-weight:600;border-color:#fff}
+.tb-sep{width:1px;height:22px;background:rgba(255,255,255,.18);margin:0 4px}
+.topbar select{background:var(--navy2);color:#fff;border-color:rgba(255,255,255,.18);max-width:240px}
+.topbar .spacer{flex:1}
+.seg{display:inline-flex;border:1px solid rgba(255,255,255,.18);border-radius:7px;overflow:hidden}
+.seg .tb-btn{border:0;border-radius:0}
+.dd{position:relative}
+.dd-menu{position:absolute;top:calc(100% + 4px);left:0;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);min-width:240px;padding:5px;z-index:100}
+.dd-menu.right{left:auto;right:0}
+.dd-menu button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;border-radius:5px}
+.dd-menu button:hover{background:var(--accent-soft)}
+.dd-menu hr{border:0;border-top:1px solid var(--border);margin:4px 0}
+
+/* ---------- Thanh kế hoạch ---------- */
+.planbar{background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;padding:8px 14px;flex-wrap:wrap}
+.planbar label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+.planbar input[type=text]{width:260px;font-weight:600;color:var(--text)}
+.kpi-mini{display:flex;gap:20px;flex-wrap:wrap;margin-left:auto;align-items:center}
+.kpi-mini div{display:flex;flex-direction:column;line-height:1.2}
+.kpi-mini b{font-size:14px}
+.kpi-mini span{font-size:11px;color:var(--muted)}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600}
+.badge.warn{background:#fff3db;color:#9a5b00;border:1px solid #f6c76a;cursor:pointer}
+.badge.ok{background:#e3f8ea;color:#166534;border:1px solid #9fdcb4}
+.badge.err{background:#fde2e2;color:#991b1b;border:1px solid #f3a3a3;cursor:pointer}
+body.dark .badge.warn{background:#3a2a07;color:#fbbf24;border-color:#7a5a14}
+body.dark .badge.ok{background:#0f2e1b;color:#86efac;border-color:#1f6b3a}
+body.dark .badge.err{background:#3b1111;color:#fca5a5;border-color:#7f1d1d}
+.chip-btn{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px}
+.chip-btn:hover{border-color:var(--accent)}
+
+/* ---------- Bộ lọc ---------- */
+.filterbar{background:var(--panel2);border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;padding:7px 14px;flex-wrap:wrap}
+.filterbar select,.filterbar input{padding:5px 7px;font-size:12px}
+.filterbar .search{width:220px}
+.filterbar label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
+
+/* ---------- Khu vực chính ---------- */
+.main{flex:1;display:flex;min-height:0;position:relative}
+.view{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+.legend{display:flex;gap:14px;align-items:center;padding:5px 14px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--border);background:var(--panel);flex-wrap:wrap}
+.legend .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:0}
+
+/* ---------- Gantt ---------- */
+#gscroll{flex:1;overflow:auto;position:relative;background:var(--panel)}
+#gcanvas{position:relative}
+.ghead{position:sticky;top:0;z-index:20;display:flex;background:var(--panel);border-bottom:1px solid var(--grid2)}
+.ghead-left{position:sticky;left:0;z-index:22;width:var(--left-w);min-width:var(--left-w);background:var(--panel2);border-right:1px solid var(--grid2);display:flex;align-items:flex-end;gap:8px;padding:0 10px 6px 34px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+.ghead-right{position:relative}
+.hrow{position:absolute;left:0;right:0}
+.hcell{position:absolute;top:0;bottom:0;border-left:1px solid var(--grid2);font-size:11px;display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap}
+.hdate{font-weight:700;background:var(--panel2)}
+.hshift{font-weight:600;color:var(--muted)}
+.hshift.s1{background:var(--shift1)} .hshift.s2{background:var(--shift2)} .hshift.s3{background:var(--shift3)}
+.htime{color:var(--muted);font-size:10.5px;justify-content:flex-start;padding-left:3px}
+
+.gbody{position:relative}
+.gbg{position:absolute;top:0;pointer-events:none}
+.band{position:absolute;top:0;bottom:0}
+.band.s1{background:var(--shift1)} .band.s2{background:var(--shift2)} .band.s3{background:var(--shift3)}
+.vline{position:absolute;top:0;bottom:0;width:0;border-left:1px solid var(--grid)}
+.vline.day{border-left:2px solid var(--grid2)}
+.nowline{position:absolute;top:0;bottom:0;width:0;border-left:2px solid #ef4444;z-index:6}
+.winline{position:absolute;top:0;bottom:0;width:0;border-left:2px dashed #0f766e;z-index:5}
+.winline.target{border-left-color:#b45309}
+
+.grow{display:flex;height:var(--row-h);border-bottom:1px solid var(--grid);position:relative}
+.grow:hover .gleft{background:var(--accent-soft)}
+.grow.sel .gleft{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.gleft{position:sticky;left:0;z-index:10;width:var(--left-w);min-width:var(--left-w);background:var(--panel);border-right:1px solid var(--grid2);display:flex;align-items:center;gap:8px;padding:0 10px;overflow:hidden;cursor:pointer}
+.gright{position:relative;flex:1}
+.grow.g-branch .gleft{background:var(--navy);color:#fff;font-weight:600}
+.grow.g-proc .gleft{background:var(--panel2);font-weight:600}
+.tw{display:inline-block;width:12px;text-align:center;color:var(--muted);font-size:9px;flex:none}
+.g-branch .tw{color:#cbd5e1}
+.c-stt{width:24px;flex:none;color:var(--muted);font-size:11.5px;text-align:right}
+.c-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-who{width:130px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.c-who.empty{color:var(--muted);font-style:italic}
+.c-dur{width:48px;flex:none;text-align:right;font-variant-numeric:tabular-nums;font-size:12px}
+.c-start{width:78px;flex:none;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted)}
+.c-sub{font-weight:400;color:var(--muted);font-size:12px}
+.g-branch .c-sub{color:#cbd5e1}
+.stdot{width:8px;height:8px;border-radius:50%;flex:none}
+
+.bar{position:absolute;top:6px;height:calc(var(--row-h) - 12px);border-radius:4px;color:#fff;font-size:11.5px;line-height:calc(var(--row-h) - 12px);padding:0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:grab;user-select:none;z-index:4;touch-action:none}
+.bar:active{cursor:grabbing}
+.bar .prog{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.3);pointer-events:none}
+.bar .lbl{position:relative}
+.bar .handle{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:ew-resize}
+.bar:hover .handle{background:rgba(255,255,255,.35)}
+.bar.crit{box-shadow:0 0 0 2px var(--st-crit)}
+.bar.warn{box-shadow:0 0 0 2px var(--st-warn)}
+.bar.locked{cursor:not-allowed;background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.18) 0 4px,transparent 4px 8px)}
+.bar.dragging{opacity:.85;z-index:50}
+.bar.sum{top:12px;height:calc(var(--row-h) - 24px);border-radius:2px;opacity:.45;cursor:default;padding:0}
+.outlbl{position:absolute;top:0;line-height:var(--row-h);font-size:11.5px;color:var(--muted);white-space:nowrap;pointer-events:none;z-index:3}
+.ms{position:absolute;width:12px;height:12px;transform:rotate(45deg);background:#7c3aed;border:2px solid #fff;top:calc(var(--row-h)/2 - 6px);z-index:7;cursor:pointer}
+#depsvg{position:absolute;top:0;pointer-events:none;z-index:5;overflow:visible}
+#depsvg path{fill:none;stroke:#94a3b8;stroke-width:1.2}
+#depsvg path.crit{stroke:var(--st-crit);stroke-width:1.8}
+#depsvg path.hl{stroke:var(--accent);stroke-width:2.2}
+.empty-state{padding:40px;text-align:center;color:var(--muted)}
+
+/* ---------- Tooltip ---------- */
+#tip{position:fixed;z-index:200;background:#0f172a;color:#e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px;max-width:380px;pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.35);line-height:1.5}
+#tip b{color:#fff}
+#tip table{border-collapse:collapse;margin-top:4px}
+#tip td{padding:1px 10px 1px 0;vertical-align:top}
+#tip td:first-child{color:#94a3b8;white-space:nowrap}
+
+/* ---------- Panel sửa task ---------- */
+.drawer{width:440px;max-width:100%;background:var(--panel);border-left:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column;z-index:25}
+.drawer-h{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.drawer-h h3{margin:0;font-size:15px;flex:1}
+.drawer-b{flex:1;overflow:auto;padding:14px 16px}
+.drawer-f{display:flex;gap:6px;padding:10px 16px;border-top:1px solid var(--border);flex-wrap:wrap}
+.fg{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.fg .full{grid-column:1/-1}
+.fl{display:flex;flex-direction:column;gap:4px}
+.fl>span{font-size:12px;color:var(--muted);font-weight:600}
+.fl input,.fl select,.fl textarea{width:100%}
+.inline{display:flex;gap:6px}
+.inline>*{flex:1}
+.inline>select{flex:0 0 80px}
+.chk{display:flex;align-items:center;gap:6px;font-size:12.5px}
+.deplist{border:1px solid var(--border);border-radius:6px;max-height:160px;overflow:auto;padding:4px}
+.deplist label{display:flex;gap:8px;align-items:center;padding:3px 5px;font-size:12px;border-radius:4px;cursor:pointer}
+.deplist label:hover{background:var(--accent-soft)}
+.deplist label.dis{opacity:.4;cursor:not-allowed}
+.deplist input{width:auto!important;flex:none;margin:0}
+.deplist .pr{color:var(--muted);min-width:70px}
+.calc{background:var(--panel2);border-radius:6px;padding:9px 11px;font-size:12.5px;line-height:1.6}
+details.adv{border-top:1px solid var(--border);margin-top:14px;padding-top:10px}
+details.adv summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:12.5px;margin-bottom:10px}
+.err-msg{color:var(--st-late);font-size:12px;min-height:16px;margin-top:6px}
+.btn{border:1px solid var(--border);background:var(--panel);border-radius:6px;padding:7px 13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn.danger{color:#b91c1c;border-color:#f3b4b4}
+.btn.danger:hover{background:#fde2e2}
+.btn.lg{padding:10px 18px;font-size:14px}
+.btn.icon{padding:4px 8px;color:var(--muted)}
+.btn.sm{padding:4px 10px;font-size:12px}
+body.dark .btn.danger:hover{background:#3b1111}
+
+/* ---------- Modal ---------- */
+.modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;z-index:150}
+.modal{background:var(--panel);border-radius:10px;box-shadow:var(--shadow);width:min(1000px,96vw);max-height:92vh;display:flex;flex-direction:column}
+.modal.sm{width:min(520px,96vw)}
+.modal-h{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center}
+.modal-h h3{margin:0;font-size:16px;flex:1}
+.modal-b{padding:16px 18px;overflow:auto}
+.modal-f{padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;align-items:center}
+.x{background:none;border:0;font-size:22px;color:var(--muted);line-height:1}
+table.tbl{border-collapse:collapse;width:100%;font-size:12.5px}
+table.tbl th,table.tbl td{border-bottom:1px solid var(--border);padding:6px 7px;text-align:left;vertical-align:middle}
+table.tbl th{background:var(--panel2);position:sticky;top:0;z-index:1;font-size:11.5px;color:var(--muted);font-weight:600}
+table.tbl tr.bad td{background:#fde2e2}
+body.dark table.tbl tr.bad td{background:#3b1111}
+table.tbl tr.warnrow td{background:#fff8e6}
+body.dark table.tbl tr.warnrow td{background:#33270d}
+table.tbl input{padding:4px 6px;width:100%}
+.prev-wrap{max-height:52vh;overflow:auto;border:1px solid var(--border);border-radius:6px}
+.opt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 16px;margin-bottom:12px}
+.warn-item{border:1px solid var(--border);border-left:4px solid var(--st-warn);border-radius:6px;padding:9px 11px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start}
+.warn-item.error{border-left-color:var(--st-late)}
+.warn-item.info{border-left-color:var(--accent)}
+.warn-item .wt{flex:1}
+.warn-item .wt b{cursor:pointer;text-decoration:underline dotted}
+.steps{display:flex;gap:8px;margin-bottom:14px}
+.steps span{flex:1;padding:8px 10px;border-radius:6px;background:var(--panel2);color:var(--muted);font-weight:600;font-size:12.5px}
+.steps span.on{background:var(--accent-soft);color:var(--accent)}
+.sumline{display:flex;gap:22px;flex-wrap:wrap;background:var(--panel2);border-radius:8px;padding:10px 14px;margin-bottom:10px}
+.sumline div{display:flex;flex-direction:column}
+.sumline span{font-size:11px;color:var(--muted)}
+.sumline b{font-size:14px}
+
+/* ---------- Trang chủ ---------- */
+#viewHome{overflow:auto;padding:28px 36px}
+.home-h{display:flex;align-items:flex-end;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.home-h h2{margin:0;font-size:22px}
+.home-h p{margin:4px 0 0;color:var(--muted)}
+.home-h .spacer{flex:1}
+.plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.plan-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px;cursor:pointer;transition:border-color .15s,box-shadow .15s;text-align:left}
+.plan-card:hover{border-color:var(--accent);box-shadow:var(--shadow)}
+.plan-card.active{border-left:4px solid var(--accent)}
+.plan-card h4{margin:0 0 10px;font-size:15px}
+.plan-card dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0 0 12px;font-size:12.5px}
+.plan-card dt{color:var(--muted)}
+.plan-card dd{margin:0;font-weight:600}
+.plan-card .acts{display:flex;gap:6px}
+.new-card{border:2px dashed var(--border);background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:180px;color:var(--accent);font-weight:600;font-size:15px;gap:4px}
+.new-card span{font-weight:400;color:var(--muted);font-size:12.5px}
+
+/* ---------- Dashboard ---------- */
+#viewDash{overflow:auto;padding:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.kpi .v{font-size:20px;font-weight:700;margin-top:3px}
+.kpi .l{font-size:11.5px;color:var(--muted);font-weight:600}
+.kpi .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(460px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+.card h4{margin:0 0 10px;font-size:13.5px}
+.card svg text{fill:var(--text);font-family:var(--font)}
+.card svg .ax{stroke:var(--grid2)}
+.progress-bar{height:6px;background:var(--grid);border-radius:4px;overflow:hidden;margin-top:6px}
+.progress-bar div{height:100%;background:var(--st-done)}
+
+/* ---------- Toast ---------- */
+#toasts{position:fixed;pointer-events:none;bottom:16px;left:50%;transform:translateX(-50%);z-index:300;display:flex;flex-direction:column;gap:6px;align-items:center}
+.toast{background:#0f172a;color:#fff;padding:8px 14px;border-radius:8px;box-shadow:var(--shadow);font-size:12.5px;max-width:80vw}
+.toast.err{background:#991b1b}.toast.ok{background:#166534}.toast.warn{background:#92400e}
+
+@media (max-width:1000px){
+  :root{--left-w:300px}
+  .c-start,.c-dur,.c-who{display:none}
+  .drawer{position:absolute;right:0;top:0;bottom:0}
+  .kpi-mini{margin-left:0}
+}
+@media print{
+  @page{size:A3 landscape;margin:8mm}
+  body{overflow:visible;height:auto;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .topbar,.filterbar,.drawer,#toasts,#tip,.modal-bg,#viewHome,#viewDash,.planbar button,.storebar{display:none!important}
+  .planbar{border:0}
+  .planbar input{border:0;font-weight:700}
+  .main,.view,#gscroll{overflow:visible!important;display:block;height:auto}
+  #viewGantt{display:block!important}
+  .ghead,.gleft,.ghead-left{position:static!important}
+}
+</style>
+</head>
+<body>
+<!-- ================= THANH ĐIỀU HƯỚNG ================= -->
+<div class="topbar">
+  <div class="brand">Shutdown Planner</div>
+  <button class="tb-btn" id="btnHome">Trang chủ</button>
+  <select id="planSelect" title="Chọn kế hoạch"></select>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnAddTask" title="Thêm task (phím N)">+ Thêm task</button>
+  <button class="tb-btn" id="btnImport">Import Excel</button>
+  <div class="dd">
+    <button class="tb-btn" id="btnExport">Export ▾</button>
+    <div class="dd-menu hidden" id="menuExport">
+      <button data-exp="xlsx-list">Excel – danh sách task</button>
+      <button data-exp="xlsx-timeline">Excel – timeline chi tiết</button>
+      <button data-exp="csv">CSV</button>
+      <button data-exp="json">JSON – backup toàn bộ</button>
+      <hr>
+      <button data-exp="print">In / Xuất PDF Gantt</button>
+    </div>
+  </div>
+  <div class="tb-sep"></div>
+  <button class="tb-btn primary" id="btnAuto">Tự động sắp lịch</button>
+  <button class="tb-btn" id="btnUndo" title="Hoàn tác (Ctrl+Z)">↶</button>
+  <button class="tb-btn" id="btnRedo" title="Làm lại (Ctrl+Y)">↷</button>
+  <div class="tb-sep"></div>
+  <select id="zoomSelect" title="Độ phân giải timeline">
+    <option value="0.5">30 phút</option>
+    <option value="1">1 giờ</option>
+    <option value="2" selected>2 giờ</option>
+    <option value="4">4 giờ</option>
+    <option value="24">1 ngày</option>
+  </select>
+  <button class="tb-btn" id="btnFilter">Bộ lọc</button>
+  <div class="spacer"></div>
+  <div class="seg"><button class="tb-btn" id="tabGantt">Gantt</button><button class="tb-btn" id="tabDash">Dashboard</button></div>
+  <div class="dd">
+    <button class="tb-btn" id="btnMore" title="Thêm">☰</button>
+    <div class="dd-menu right hidden" id="menuMore">
+      <button data-more="warnings">Cảnh báo &amp; kiểm tra dữ liệu</button>
+      <button data-more="level">Cân bằng nguồn lực (tự dời task trùng người)</button>
+      <button data-more="capacity">Năng lực người/đội (số task cùng lúc)</button>
+      <button data-more="renumber">Đánh lại STT theo giờ bắt đầu</button>
+      <button data-more="dark">Bật/tắt giao diện tối</button>
+      <hr>
+      <button data-more="save-app">Tải app kèm dữ liệu (file HTML)</button>
+      <button data-more="copy-data">Sao chép dữ liệu (dạng chữ)</button>
+      <button data-more="paste-data">Dán dữ liệu đã sao chép</button>
+      <button data-more="restore-json">Khôi phục từ file backup</button>
+      <button data-more="sample">Khôi phục kế hoạch mẫu</button>
+      <button data-more="stress">Tạo kế hoạch kiểm thử 300 task</button>
+      <button data-more="clear">Xóa toàn bộ dữ liệu</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= THÔNG BÁO KHI KHÔNG LƯU ĐƯỢC (sandbox / chặn localStorage) ================= -->
+<div class="storebar hidden" id="storeBar">
+  <span><b>Đang ở chế độ lưu tạm</b> (khung xem trước chặn bộ nhớ trình duyệt). Để không mất dữ liệu, chọn 1 cách:</span>
+  <span class="sp"></span>
+  <button class="btn sm primary" id="sbApp" title="Tải 1 file HTML có sẵn toàn bộ dữ liệu – lần sau mở file đó là có lại kế hoạch">Tải app kèm dữ liệu</button>
+  <button class="btn sm" id="sbCopy" title="Dùng khi không tải được file">Sao chép dữ liệu</button>
+  <button class="btn sm" id="sbPaste">Dán dữ liệu</button>
+  <button class="btn sm" id="sbRestore">Mở file backup</button>
+  <button class="btn sm" id="sbHide">Ẩn</button>
+</div>
+
+<!-- ================= THANH KẾ HOẠCH ================= -->
+<div class="planbar" id="planBar">
+  <label>Kế hoạch <input type="text" id="planName" maxlength="120"></label>
+  <label>Bắt đầu <input type="datetime-local" id="planStart" step="60"></label>
+  <button class="chip-btn" id="btnDayMinus" title="Dời cả kế hoạch sớm 1 ngày">−1 ngày</button>
+  <button class="chip-btn" id="btnDayPlus" title="Dời cả kế hoạch trễ 1 ngày">+1 ngày</button>
+  <label>Mục tiêu <input type="number" id="planTarget" min="1" step="0.5" style="width:70px"> giờ</label>
+  <div class="kpi-mini" id="kpiMini"></div>
+</div>
+
+<!-- ================= BỘ LỌC ================= -->
+<div class="filterbar hidden" id="filterBar">
+  <input type="search" class="search" id="fSearch" placeholder="Tìm theo tên task…">
+  <select id="fBranch"><option value="">Tất cả nhánh</option></select>
+  <select id="fProcess"><option value="">Tất cả process</option></select>
+  <select id="fOwner"><option value="">Tất cả người / đội</option></select>
+  <select id="fStatus">
+    <option value="">Mọi trạng thái</option>
+    <option value="todo">Chưa bắt đầu</option>
+    <option value="run">Đang thực hiện</option>
+    <option value="done">Hoàn thành</option>
+    <option value="late">Trễ</option>
+  </select>
+  <select id="fShift">
+    <option value="">Mọi ca</option>
+    <option value="1">Ca 1 (06–14)</option>
+    <option value="2">Ca 2 (14–22)</option>
+    <option value="3">Ca 3 (22–06)</option>
+  </select>
+  <label><input type="checkbox" id="fCrit"> Đường găng</label>
+  <label><input type="checkbox" id="fWarn"> Có cảnh báo</label>
+  <label>Từ <input type="datetime-local" id="fFrom"></label>
+  <label>đến <input type="datetime-local" id="fTo"></label>
+  <button class="chip-btn" id="btnClearFilter">Xóa lọc</button>
+  <span class="muted small" id="filterCount"></span>
+</div>
+
+<div class="main">
+  <div class="view" id="viewHome"></div>
+  <div class="view hidden" id="viewGantt">
+    <div class="legend" id="legend"></div>
+    <div id="gscroll"><div id="gcanvas"></div></div>
+  </div>
+  <div class="view hidden" id="viewDash"></div>
+  <div class="drawer hidden" id="drawer"></div>
+</div>
+
+<div id="tip" class="hidden"></div>
+<div id="toasts"></div>
+<div id="modalRoot"></div>
+<input type="file" id="fileImport" accept=".xlsx,.xls,.xlsm,.csv" class="hidden">
+<input type="file" id="fileJson" accept=".json,.html,.txt" class="hidden">
+<!-- Dữ liệu nhúng sẵn (do nút "Tải app kèm dữ liệu" ghi vào). Để trống = chưa có. -->
+<script id="spData" type="application/json"></script>
+<script>
+'use strict';
+/* Chụp lại mã nguồn gốc của app NGAY KHI NẠP (trước khi giao diện thay đổi DOM)
+   → dùng cho nút "Tải app kèm dữ liệu": tạo bản sao file HTML có nhúng sẵn dữ liệu. */
+const __APP_SRC__ = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+
+/* =====================================================================
+   1. UTILS – NGÀY GIỜ & CHUỖI
+   Mọi thời điểm trong engine là mili-giây (giờ địa phương).
+   Thời lượng (durationHours) lưu bằng GIỜ – độc lập với ngày.
+   end = start + durationHours → không lưu "ngày kết thúc".
+   ===================================================================== */
+const MS_H = 3600000, MS_MIN = 60000, MS_DAY = 86400000;
+const pad2 = n => String(n).padStart(2, '0');
+
+const U = {
+  parseLocalISO(s) {
+    if (!s) return NaN;
+    const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(s));
+    if (!m) return NaN;
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)).getTime();
+  },
+  toLocalISO(ms) { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; },
+  fmtDT(ms) { if (!isFinite(ms)) return ''; const d = new Date(ms); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; },
+  fmtDM(ms) { const d = new Date(ms); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; },
+  fmtHM(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; },
+  fmtDate(ms) { const d = new Date(ms); return `${U.WD[d.getDay()]} ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`; },
+  WD: ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'],
+  /** 2.5 -> "2 giờ 30 phút" (làm tròn phút chỉ để HIỂN THỊ, dữ liệu giữ nguyên) */
+  fmtDur(h, short) {
+    if (!isFinite(h)) return '–';
+    const totalMin = Math.round(h * 60), hh = Math.floor(totalMin / 60), mm = totalMin % 60;
+    if (short) return hh && mm ? `${hh}h${pad2(mm)}` : hh ? `${hh}h` : `${mm}p`;
+    if (!hh) return `${mm} phút`;
+    return mm ? `${hh} giờ ${mm} phút` : `${hh} giờ`;
+  },
+  fmtNum(n, d = 1) { if (!isFinite(n)) return '–'; const r = Math.round(n * 10 ** d) / 10 ** d; return r.toLocaleString('vi-VN'); },
+  excelSerialToMs(serial) {
+    const d = new Date(Math.round((serial - 25569) * MS_DAY));
+    const ms = new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()).getTime();
+    return Math.round(ms / MS_MIN) * MS_MIN;
+  },
+  msToExcelSerial(ms) { const d = new Date(ms); return (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()) - Date.UTC(1899, 11, 30)) / MS_DAY; },
+  /** Parse ngày: serial Excel, Date, "dd/mm/yyyy HH:mm" (NGÀY trước THÁNG – không đảo), "yyyy-mm-dd HH:mm" */
+  parseVNDate(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (v instanceof Date) return isNaN(v) ? null : new Date(v.getFullYear(), v.getMonth(), v.getDate(), v.getHours(), v.getMinutes()).getTime();
+    if (typeof v === 'number') return v > 20000 && v < 80000 ? U.excelSerialToMs(v) : null;
+    const s = String(v).trim();
+    if (/^\d+(\.\d+)?$/.test(s)) { const n = parseFloat(s); return n > 20000 && n < 80000 ? U.excelSerialToMs(n) : null; }
+    let m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})(?:[ T]+(\d{1,2})[:h](\d{2})(?::(\d{2}))?)?$/.exec(s);
+    if (m) {
+      const dd = +m[1], mo = +m[2], yy = +m[3];
+      if (mo < 1 || mo > 12 || dd < 1 || dd > 31) return null;
+      const t = new Date(yy, mo - 1, dd, +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+      if (t.getMonth() !== mo - 1) return null;
+      return t.getTime();
+    }
+    m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)).getTime();
+    return null;
+  },
+  /** Ca: 1 = 06–14, 2 = 14–22, 3 = 22–06 */
+  shiftOf(ms) { const d = new Date(ms); const h = d.getHours() + d.getMinutes() / 60; return h >= 6 && h < 14 ? 1 : h >= 14 && h < 22 ? 2 : 3; },
+  nextShiftBoundary(ms) {
+    const d = new Date(ms);
+    for (const h of [6, 14, 22, 30]) { const t = new Date(d.getFullYear(), d.getMonth(), d.getDate() + (h >= 24 ? 1 : 0), h % 24).getTime(); if (t > ms) return t; }
+    return ms + MS_DAY;
+  },
+  shiftHours(s, e) {
+    const out = [0, 0, 0]; let t = s, guard = 0;
+    while (t < e && guard++ < 5000) { const nb = Math.min(U.nextShiftBoundary(t), e); out[U.shiftOf(t) - 1] += (nb - t) / MS_H; t = nb; }
+    return out;
+  },
+  norm(s) { return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim(); },
+  esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); },
+  num(v, def = 0) { if (v === null || v === undefined || v === '') return def; const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : def; },
+  uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); },
+  clone(o) { return JSON.parse(JSON.stringify(o)); },
+  /** "Anh A + Chị B" / "A, B" -> ["Anh A","Chị B"] */
+  splitOwners(s) { return String(s || '').split(/\s*(?:\+|,|;|&|\/|\bvà\b)\s*/i).map(x => x.trim()).filter(Boolean); },
+};
+
+/* =====================================================================
+   2. MODEL
+   ===================================================================== */
+const EXEC_MODES = {
+  sequential: 'Tuần tự trong process',
+  parallel: 'Song song',
+  fixed: 'Cố định thời điểm',
+  after_dependency: 'Chạy sau task phụ thuộc',
+};
+const BRANCHES_DEFAULT = ['Nhánh Hạt', 'Nhánh Dịch'];
+const PROCESS_DEFAULT = ['EXT', 'IDR', 'FDR', 'REIN', 'REG', 'ADS', 'NSD', 'DGC Filling', 'CAF Filling', 'EVAP 1', 'EVAP 2', 'RO', 'GCH', 'ACH', 'CIP'];
+const PROCESS_COLORS = {
+  'EXT': '#1d4ed8', 'IDR': '#0891b2', 'FDR': '#7c3aed', 'REIN': '#db2777', 'REG': '#0d9488', 'ADS': '#4d7c0f',
+  'NSD': '#ea580c', 'DGC Filling': '#a16207', 'CAF Filling': '#9333ea', 'EVAP 1': '#0369a1', 'EVAP 2': '#4338ca',
+  'RO': '#047857', 'GCH': '#b45309', 'ACH': '#be123c', 'CIP': '#475569',
+};
+const STATUS = {
+  todo: { label: 'Chưa bắt đầu', color: '#94a3b8' },
+  run: { label: 'Đang thực hiện', color: '#2563eb' },
+  done: { label: 'Hoàn thành', color: '#16a34a' },
+  late: { label: 'Trễ', color: '#dc2626' },
+};
+function processColor(plan, proc) {
+  if (plan && plan.processColors && plan.processColors[proc]) return plan.processColors[proc];
+  if (PROCESS_COLORS[proc]) return PROCESS_COLORS[proc];
+  let h = 0; for (const c of String(proc)) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${h},55%,42%)`;
+}
+
+/**
+ * Task. Hai trường con người:
+ *  - assignee: TÊN NGƯỜI THỰC HIỆN cụ thể (VD "Nguyễn Văn A + Trần Văn B")
+ *  - owner   : ĐỘI / BỘ PHẬN phụ trách (VD "OP EXT", "Nhà thầu")
+ */
+function makeTask(over = {}) {
+  return Object.assign({
+    id: '', order: 0, branch: 'Nhánh Hạt', process: 'EXT', taskName: '',
+    durationHours: 1, standardHours: 1, quantity: 1, peopleRequired: 1,
+    assignee: '', owner: '',
+    executionMode: 'sequential', dependencyIds: [], lagHours: 0,
+    constraintType: 'ASAP', constraintOffsetHours: null,   // mốc tính bằng giờ kể từ đầu kế hoạch
+    milestone: false, locked: false, progress: 0, notes: '', method: '',
+  }, over);
+}
+function normalizeTask(t) {
+  const x = makeTask(t);
+  x.durationHours = U.num(x.durationHours, 0);
+  x.standardHours = U.num(x.standardHours, x.durationHours);
+  x.quantity = Math.max(0, U.num(x.quantity, 1));
+  x.peopleRequired = Math.max(0, U.num(x.peopleRequired, 1));
+  x.lagHours = U.num(x.lagHours, 0);
+  x.progress = Math.min(100, Math.max(0, U.num(x.progress, 0)));
+  x.order = U.num(x.order, 0);
+  if (!EXEC_MODES[x.executionMode]) x.executionMode = 'sequential';
+  if (!['ASAP', 'SNET', 'FIXED'].includes(x.constraintType)) x.constraintType = 'ASAP';
+  x.constraintOffsetHours = x.constraintOffsetHours === null || x.constraintOffsetHours === '' || x.constraintOffsetHours === undefined ? null : U.num(x.constraintOffsetHours, null);
+  if (x.executionMode === 'fixed') x.constraintType = 'FIXED';
+  else if (x.constraintType === 'FIXED') x.constraintType = 'SNET';
+  x.dependencyIds = Array.isArray(x.dependencyIds) ? [...new Set(x.dependencyIds.map(String))].filter(d => d !== x.id) : [];
+  x.milestone = !!x.milestone; x.locked = !!x.locked;
+  ['branch', 'process', 'taskName', 'assignee', 'owner', 'notes', 'method'].forEach(k => x[k] = String(x[k] ?? '').trim());
+  delete x.endDateTime; delete x.end;
+  return x;
+}
+function nextTaskId(plan) {
+  let max = 0;
+  for (const t of plan.tasks) { const m = /(\d+)\s*$/.exec(t.id); if (m) max = Math.max(max, +m[1]); }
+  return 'TASK-' + String(max + 1).padStart(3, '0');
+}
+function makePlan(over = {}) {
+  return Object.assign({ id: 'PLAN-' + U.uid(), name: 'Kế hoạch Shutdown', start: U.toLocalISO(Date.now()), targetHours: 48, tasks: [], processColors: {}, resourceCapacity: {}, createdAt: Date.now() }, over);
+}
+function defaultSampleStart() { const d = new Date(); return U.toLocalISO(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 6, 0).getTime()); }
+
+/**
+ * BỘ TASK MẪU (thời lượng cố định – dùng khi tạo kế hoạch mới)
+ *  - REG round 1 chạy sau ADS shutdown
+ *  - EXT tuần tự: CIP Clarifier → Manifold → WB → EXT Tank → LOTO → Vệ sinh HPR
+ *  - IDR vệ sinh tháp chạy sau EXT LOTO (song song với vệ sinh HPR)
+ *  - START UP EXT chờ IDR, FDR, REIN xong (đi qua nửa đêm)
+ *  - FDR, REIN, DGC, NSD, ADS chạy song song từ đầu
+ */
+function templateTasks() {
+  const T = (n, branch, process, taskName, dur, owner, mode, deps = [], extra = {}) => normalizeTask(Object.assign({
+    id: 'TASK-' + String(n).padStart(3, '0'), order: n, branch, process, taskName, durationHours: dur, standardHours: dur, owner, executionMode: mode,
+    dependencyIds: deps.map(d => 'TASK-' + String(d).padStart(3, '0')),
+  }, extra));
+  return [
+    T(1, 'Nhánh Dịch', 'ADS', 'Shutdown ADS/lùa dịch/balance dosing', 1, 'OP ADS-REG', 'sequential'),
+    T(2, 'Nhánh Hạt', 'EXT', 'Check list + CIP Clarifier', 2, 'OP EXT', 'sequential', [], { notes: 'CIP Group D' }),
+    T(3, 'Nhánh Dịch', 'REG', 'Chạy REG round 1', 1, 'OP ADS-REG', 'sequential', [1], { quantity: 15, notes: '15 cột' }),
+    T(4, 'Nhánh Hạt', 'EXT', 'Check list + CIP Extraction Manifold', 2, 'OP EXT', 'sequential'),
+    T(5, 'Nhánh Hạt', 'EXT', 'Check list + CIP WB', 1, 'OP EXT', 'sequential'),
+    T(6, 'Nhánh Hạt', 'EXT', 'Check list + CIP EXT Tank', 2, 'OP EXT', 'sequential'),
+    T(7, 'Nhánh Hạt', 'EXT', 'LOTO khu vực Receiving HPR', 1, 'OP EXT', 'sequential'),
+    T(8, 'Nhánh Hạt', 'EXT', 'Vệ sinh Receiving HPR', 3, 'OP EXT', 'sequential', [], { quantity: 8, peopleRequired: 2, notes: '8 hopper vệ sinh đồng thời – không nhân thời gian' }),
+    T(9, 'Nhánh Hạt', 'IDR', 'Vệ sinh bên trong tháp', 8, 'OP IDR + Nhà thầu', 'after_dependency', [7], { peopleRequired: 2, notes: 'Bắt đầu sau khi EXT LOTO xong' }),
+    T(10, 'Nhánh Hạt', 'FDR', 'Lắp line heat tháp', 8, 'OP FDR', 'sequential', [], { peopleRequired: 2 }),
+    T(11, 'Nhánh Hạt', 'REIN', 'Lắp và release line', 8, 'OP REIN', 'sequential', [], { peopleRequired: 2 }),
+    T(12, 'Nhánh Hạt', 'DGC Filling', 'Vệ sinh từ 9m xuống 0m', 8, 'OP DGC', 'sequential', [], { peopleRequired: 2 }),
+    T(13, 'Nhánh Hạt', 'EXT', 'START UP EXT', 8, 'OP EXT', 'sequential', [9, 10, 11], { milestone: true, notes: 'Chỉ start up khi IDR, FDR, REIN sẵn sàng' }),
+    T(14, 'Nhánh Dịch', 'NSD', 'Vệ sinh và thay filter DEHU', 7, 'OP NSD', 'sequential', [], { peopleRequired: 2 }),
+  ];
+}
+function samplePlan(startISO) {
+  return makePlan({ id: 'PLAN-SAMPLE', name: 'Shutdown nhà máy – Kế hoạch mẫu', start: startISO || defaultSampleStart(), targetHours: 32, tasks: templateTasks(), resourceCapacity: { 'Nhà thầu': 3 } });
+}
+
+/* =====================================================================
+   3. SCHEDULER – ENGINE LẬP LỊCH
+   ===================================================================== */
+const Scheduler = {
+  /** Đồ thị: cạnh dependency (có lag) + cạnh chuỗi tuần tự trong cùng process */
+  buildGraph(plan) {
+    const tasks = plan.tasks, byId = new Map(tasks.map(t => [t.id, t]));
+    const edges = [], issues = [];
+    for (const t of tasks) for (const d of t.dependencyIds) {
+      if (d === t.id) continue;
+      if (!byId.has(d)) { issues.push({ type: 'missing_dep', level: 'warn', taskIds: [t.id], msg: `Task tiền nhiệm "${d}" không tồn tại – đã bỏ qua.` }); continue; }
+      edges.push({ from: d, to: t.id, lag: t.lagHours || 0, kind: 'dep' });
+    }
+    const byProc = new Map();
+    for (const t of tasks) { if (!byProc.has(t.process)) byProc.set(t.process, []); byProc.get(t.process).push(t); }
+    for (const list of byProc.values()) {
+      const seq = list.filter(t => t.executionMode === 'sequential').sort((a, b) => a.order - b.order);
+      for (let i = 1; i < seq.length; i++) edges.push({ from: seq[i - 1].id, to: seq[i].id, lag: 0, kind: 'chain' });
+    }
+    const out = new Map(tasks.map(t => [t.id, []])), inn = new Map(tasks.map(t => [t.id, []]));
+    for (const e of edges) { out.get(e.from).push(e); inn.get(e.to).push(e); }
+    return { byId, edges, out, inn, issues };
+  },
+  topo(tasks, g) {
+    const indeg = new Map(tasks.map(t => [t.id, 0]));
+    for (const e of g.edges) indeg.set(e.to, indeg.get(e.to) + 1);
+    const q = tasks.filter(t => indeg.get(t.id) === 0).sort((a, b) => a.order - b.order).map(t => t.id);
+    const order = []; let qi = 0;
+    while (qi < q.length) { const id = q[qi++]; order.push(id); for (const e of g.out.get(id)) { indeg.set(e.to, indeg.get(e.to) - 1); if (indeg.get(e.to) === 0) q.push(e.to); } }
+    return { order, inCycle: tasks.filter(t => indeg.get(t.id) > 0).map(t => t.id) };
+  },
+  findCycle(g, nodes) {
+    const set = new Set(nodes), color = new Map(), stack = []; let found = null;
+    const dfs = u => {
+      color.set(u, 1); stack.push(u);
+      for (const e of g.out.get(u)) {
+        if (!set.has(e.to) || found) continue;
+        if (color.get(e.to) === 1) { found = stack.slice(stack.indexOf(e.to)).concat(e.to); return; }
+        if (!color.get(e.to)) dfs(e.to);
+      }
+      stack.pop(); color.set(u, 2);
+    };
+    for (const n of nodes) if (!color.get(n) && !found) dfs(n);
+    return found || nodes;
+  },
+  descendants(plan, taskId) {
+    const g = this.buildGraph(plan), seen = new Set([taskId]), st = [taskId];
+    while (st.length) { const u = st.pop(); for (const e of g.out.get(u) || []) if (!seen.has(e.to)) { seen.add(e.to); st.push(e.to); } }
+    return seen;
+  },
+
+  /**
+   * LẬP LỊCH: forward pass theo topo order → cửa sổ (sớm nhất → muộn nhất) → backward pass (slack, đường găng)
+   * → kiểm tra cửa sổ mục tiêu → xung đột nguồn lực → trạng thái.
+   */
+  schedule(plan, nowMs = Date.now()) {
+    const P = U.parseLocalISO(plan.start);
+    const tasks = plan.tasks, g = this.buildGraph(plan), issues = [...g.issues], R = new Map();
+    const { order, inCycle } = this.topo(tasks, g);
+    if (inCycle.length) {
+      const cyc = this.findCycle(g, inCycle);
+      issues.push({ type: 'cycle', level: 'error', taskIds: [...new Set(cyc)], msg: `Phụ thuộc vòng tròn: ${cyc.map(id => g.byId.get(id)?.taskName || id).join(' → ')}.` });
+    }
+    for (const t of tasks) {
+      if (!t.taskName) issues.push({ type: 'data', level: 'warn', taskIds: [t.id], msg: `${t.id}: chưa có tên task.` });
+      if (!(t.durationHours > 0) && !t.milestone) issues.push({ type: 'data', level: 'error', taskIds: [t.id], msg: `${t.taskName || t.id}: thời lượng phải lớn hơn 0.` });
+      if (t.executionMode === 'after_dependency' && !t.dependencyIds.length) issues.push({ type: 'data', level: 'info', taskIds: [t.id], msg: `${t.taskName || t.id}: chọn "Chạy sau task phụ thuộc" nhưng chưa chọn task tiền nhiệm.` });
+    }
+    const durMs = t => Math.max(0, Math.round((t.durationHours || 0) * MS_H));
+    const anchored = t => t.executionMode === 'fixed' || t.locked;
+    const fullOrder = order.concat(inCycle), cyc = new Set(inCycle);
+    for (const id of fullOrder) {
+      const t = g.byId.get(id);
+      let req = P, driver = 'plan';
+      for (const e of g.inn.get(id)) {
+        if (cyc.has(id) && (cyc.has(e.from) || !R.has(e.from))) continue;
+        const pr = R.get(e.from); if (!pr) continue;
+        const v = pr.end + Math.round(e.lag * MS_H);
+        if (v > req) { req = v; driver = e.kind === 'chain' ? 'chain' : 'dep'; }
+      }
+      let start = req;
+      if (anchored(t)) {
+        start = P + Math.round((t.constraintOffsetHours ?? 0) * MS_H); driver = 'fixed';
+        if (start < req - MS_MIN) issues.push({ type: 'fixed_violation', level: 'warn', taskIds: [id], msg: `${t.taskName}: ${t.locked ? 'đã khóa' : 'cố định'} lúc ${U.fmtDT(start)} nhưng task trước chỉ xong lúc ${U.fmtDT(req)}.` });
+      } else if (t.constraintType === 'SNET' && t.constraintOffsetHours !== null) {
+        const s = P + Math.round(t.constraintOffsetHours * MS_H);
+        if (s > start) { start = s; driver = 'snet'; }
+      }
+      R.set(id, { id, start, end: start + durMs(t), required: req, driver, critical: false, warn: false, issues: [] });
+    }
+    let wS = Infinity, wE = -Infinity;
+    for (const r of R.values()) { wS = Math.min(wS, r.start); wE = Math.max(wE, r.end); }
+    if (!tasks.length) { wS = P; wE = P; }
+    for (let i = fullOrder.length - 1; i >= 0; i--) {
+      const id = fullOrder[i], t = g.byId.get(id), r = R.get(id);
+      let lf = wE;
+      for (const e of g.out.get(id)) { const s = R.get(e.to); if (s && s.ls !== undefined) lf = Math.min(lf, s.ls - Math.round(e.lag * MS_H)); }
+      r.lf = lf; r.ls = lf - durMs(t); r.slackH = (r.ls - r.start) / MS_H;
+      r.critical = r.slackH <= 1 / 60 + 1e-9;
+    }
+    const critEdges = new Set();
+    for (const e of g.edges) { const a = R.get(e.from), b = R.get(e.to); if (a && b && a.critical && b.critical && Math.abs(a.end + e.lag * MS_H - b.start) < MS_MIN) critEdges.add(e.from + '>' + e.to); }
+    const targetEnd = P + Math.round((plan.targetHours || 0) * MS_H);
+    if (plan.targetHours > 0) for (const t of tasks) {
+      const r = R.get(t.id);
+      if (r.end > targetEnd + MS_MIN) issues.push({ type: 'window', level: 'warn', taskIds: [t.id], msg: `${t.taskName}: kết thúc ${U.fmtDT(r.end)} – vượt mục tiêu Shutdown (${U.fmtDT(targetEnd)}).` });
+      else if (r.start < P - MS_MIN) issues.push({ type: 'window', level: 'warn', taskIds: [t.id], msg: `${t.taskName}: bắt đầu trước giờ bắt đầu Shutdown.` });
+    }
+    const conflicts = this.resourceConflicts(plan, R);
+    issues.push(...conflicts);
+    for (const is of issues) for (const id of is.taskIds || []) { const r = R.get(id); if (r) { r.issues.push(is); if (is.level !== 'info') r.warn = true; } }
+    for (const t of tasks) { const r = R.get(t.id); r.status = t.progress >= 100 ? 'done' : nowMs >= r.end ? 'late' : (nowMs >= r.start || t.progress > 0) ? 'run' : 'todo'; }
+    return { P, R, g, issues, critEdges, windowStart: wS, windowEnd: wE, targetEnd, conflicts, kpi: this.kpis(plan, R, wS, wE, conflicts) };
+  },
+
+  /** Nguồn lực của task: ưu tiên NGƯỜI THỰC HIỆN; chưa nhập tên thì dùng ĐỘI phụ trách */
+  resourcesOf(t) { const a = U.splitOwners(t.assignee); return a.length ? a : U.splitOwners(t.owner); },
+
+  /** Phát hiện 1 người/đội bị giao nhiều task trùng giờ vượt năng lực (mặc định 1) */
+  resourceConflicts(plan, R) {
+    const res = new Map();
+    for (const t of plan.tasks) {
+      const r = R.get(t.id); if (!r || r.end <= r.start) continue;
+      for (const o of this.resourcesOf(t)) { const k = U.norm(o); if (!res.has(k)) res.set(k, { name: o, list: [] }); res.get(k).list.push(t); }
+    }
+    const capOf = name => { const cap = plan.resourceCapacity || {}; for (const k in cap) if (U.norm(k) === U.norm(name)) return Math.max(1, +cap[k] || 1); return 1; };
+    const out = [], seen = new Set();
+    for (const { name, list } of res.values()) {
+      const cap = capOf(name);
+      const sorted = list.slice().sort((a, b) => R.get(a.id).start - R.get(b.id).start);
+      let active = [];
+      for (const t of sorted) {
+        const rt = R.get(t.id);
+        active = active.filter(a => R.get(a.id).end > rt.start);
+        if (active.length + 1 > cap) for (const a of active) {
+          const key = [a.id, t.id].sort().join('|') + '@' + U.norm(name); if (seen.has(key)) continue; seen.add(key);
+          const ra = R.get(a.id), aFix = a.executionMode === 'fixed' || a.locked, tFix = t.executionMode === 'fixed' || t.locked;
+          let move = null, other = null;
+          if (!tFix) { move = t; other = a; } else if (!aFix) { move = a; other = t; }
+          const sug = move ? { taskId: move.id, toMs: R.get(other.id).end } : null;
+          out.push({
+            type: 'resource', level: 'warn', taskIds: [a.id, t.id], resource: name,
+            overlapStart: Math.max(ra.start, rt.start), overlapEnd: Math.min(ra.end, rt.end),
+            msg: `"${name}" bị trùng giờ: "${a.taskName}" và "${t.taskName}" (${U.fmtDM(Math.max(ra.start, rt.start))} → ${U.fmtDM(Math.min(ra.end, rt.end))}).`,
+            suggestion: sug, suggestionText: sug ? `Đề xuất dời "${move.taskName}" sang ${U.fmtDT(sug.toMs)}.` : 'Cả hai task đều cố định – cần thêm người hoặc đổi người thực hiện.',
+          });
+        }
+        active.push(t);
+      }
+    }
+    return out;
+  },
+
+  kpis(plan, R, wS, wE, conflicts) {
+    let manHours = 0, durSum = 0, progSum = 0, crit = 0; const ev = [];
+    for (const t of plan.tasks) {
+      const r = R.get(t.id);
+      manHours += (t.durationHours || 0) * (t.peopleRequired || 0);
+      durSum += t.durationHours || 0; progSum += (t.durationHours || 0) * (t.progress || 0);
+      if (r.critical) crit++;
+      if (r.end > r.start) { ev.push([r.start, 1]); ev.push([r.end, -1]); }
+    }
+    ev.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    let cur = 0, maxPar = 0, maxAt = null;
+    for (const [tm, d] of ev) { cur += d; if (cur > maxPar) { maxPar = cur; maxAt = tm; } }
+    return {
+      taskCount: plan.tasks.length, processCount: new Set(plan.tasks.map(t => t.process)).size,
+      start: wS, end: wE, windowHours: plan.tasks.length ? (wE - wS) / MS_H : 0, manHours, sumDuration: durSum,
+      maxParallel: maxPar, maxParallelAt: maxAt, conflictCount: conflicts.length, criticalCount: crit,
+      progress: durSum > 0 ? progSum / durSum : 0,
+      assignedCount: plan.tasks.filter(t => t.assignee).length,
+    };
+  },
+
+  /** Cân bằng nguồn lực: lặp dời task theo đề xuất tới khi hết xung đột */
+  levelResources(plan, maxIter = 400) {
+    const p = U.clone(plan), moved = new Set(), P = U.parseLocalISO(p.start); let it = 0;
+    while (it++ < maxIter) {
+      const c = this.schedule(p).conflicts.filter(c => c.suggestion).sort((a, b) => a.overlapStart - b.overlapStart)[0];
+      if (!c) break;
+      const t = p.tasks.find(x => x.id === c.suggestion.taskId);
+      t.constraintType = 'SNET'; t.constraintOffsetHours = (c.suggestion.toMs - P) / MS_H; moved.add(t.id);
+    }
+    const result = this.schedule(p);
+    return { plan: p, moved: [...moved], remaining: result.conflicts.length, result };
+  },
+};
+
+/* =====================================================================
+   4. LƯU TRỮ AN TOÀN
+   Khi app mở trong khung xem trước (iframe sandbox của Copilot/SharePoint/Teams) hoặc trình duyệt chặn
+   cookie/lưu trữ, CHỈ CẦN ĐỌC `window.localStorage` cũng ném lỗi SecurityError.
+   → Kiểm tra 1 lần lúc khởi động; nếu không dùng được thì lưu tạm trong bộ nhớ (RAM) và hiện thông báo,
+     KHÔNG báo lỗi đỏ sau mỗi thao tác.
+   ===================================================================== */
+const SafeStore = (() => {
+  let ls = null;
+  try {
+    const s = window.localStorage, k = '__sp_probe__';
+    s.setItem(k, '1'); s.removeItem(k); ls = s;
+  } catch (e) { ls = null; }
+  const mem = {};
+  let quotaWarned = false;
+  return {
+    persistent: !!ls,
+    get(key) { if (ls) { try { return ls.getItem(key); } catch (e) { } } return key in mem ? mem[key] : null; },
+    set(key, val) {
+      mem[key] = val;
+      if (!ls) return;
+      try { ls.setItem(key, val); }
+      catch (e) { if (!quotaWarned) { quotaWarned = true; toast('Bộ nhớ trình duyệt đã đầy – hãy Export JSON để lưu dữ liệu.', 'warn'); } }
+    },
+  };
+})();
+
+/* =====================================================================
+   5. STORE – TRẠNG THÁI, TỰ LƯU, UNDO / REDO
+   ===================================================================== */
+const LS_KEY = 'shutdownPlanner.v1';
+const Store = {
+  state: null, undo: [], redo: [], saveTimer: null,
+  /** Nạp dữ liệu: so sánh bản trong trình duyệt và bản NHÚNG trong file HTML, lấy bản mới hơn */
+  load() {
+    const parse = raw => { try { const s = JSON.parse(raw); return s && Array.isArray(s.plans) && s.plans.length ? s : null; } catch (e) { return null; } };
+    const local = parse(SafeStore.get(LS_KEY));
+    let emb = null; try { const el = document.getElementById('spData'); if (el && el.textContent.trim()) emb = parse(el.textContent); } catch (e) { }
+    const pick = local && emb ? ((emb.savedAt || 0) > (local.savedAt || 0) ? emb : local) : (local || emb);
+    if (pick) { this.state = this.sanitize(pick); this.loadedFrom = pick === emb ? 'embedded' : 'local'; return; }
+    const p = samplePlan();
+    this.state = this.sanitize({ version: 1, plans: [p], activePlanId: p.id, ui: {} });
+  },
+  sanitize(s) {
+    s.plans = s.plans.map(p => { const x = makePlan(p); x.tasks = (p.tasks || []).map(normalizeTask); x.resourceCapacity = x.resourceCapacity || {}; x.processColors = x.processColors || {}; return x; });
+    if (!s.plans.find(p => p.id === s.activePlanId)) s.activePlanId = s.plans[0].id;
+    s.ui = Object.assign({ zoom: 2, dark: false, collapsed: {}, filtersOpen: false }, s.ui || {});
+    return s;
+  },
+  save() { clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => this.flush(), 250); },
+  flush() { clearTimeout(this.saveTimer); this.state.savedAt = Date.now(); SafeStore.set(LS_KEY, JSON.stringify(this.state)); },
+  snap() { return JSON.stringify({ plans: this.state.plans, activePlanId: this.state.activePlanId }); },
+  restore(snap) { const s = JSON.parse(snap); this.state.plans = s.plans; this.state.activePlanId = s.activePlanId; },
+  /** Mọi thay đổi dữ liệu đi qua commit(): có Undo, tự lưu, lập lịch lại, vẽ lại */
+  commit(label, fn) {
+    const before = this.snap();
+    if (fn(this.plan()) === false) return false;
+    this.undo.push({ snap: before, label }); if (this.undo.length > 80) this.undo.shift();
+    this.redo = []; this.dirty = true;
+    App.afterChange(); return true;
+  },
+  doUndo() { const u = this.undo.pop(); if (!u) return; this.redo.push({ snap: this.snap(), label: u.label }); this.restore(u.snap); App.afterChange(); toast('Hoàn tác: ' + u.label); },
+  doRedo() { const r = this.redo.pop(); if (!r) return; this.undo.push({ snap: this.snap(), label: r.label }); this.restore(r.snap); App.afterChange(); toast('Làm lại: ' + r.label); },
+  plan() { return this.state.plans.find(p => p.id === this.state.activePlanId); },
+  ui() { return this.state.ui; },
+};
+
+/* =====================================================================
+   6. UI – TIỆN ÍCH
+   ===================================================================== */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+function toast(msg, type = '') {
+  const box = $('#toasts'); if (!box) return;
+  const el = document.createElement('div'); el.className = 'toast ' + type; el.textContent = msg;
+  box.appendChild(el); while (box.children.length > 3) box.firstElementChild.remove();
+  setTimeout(() => el.remove(), type === 'err' ? 6000 : 3000);
+}
+function openModal(html, cls = '') {
+  const root = $('#modalRoot');
+  root.innerHTML = `<div class="modal-bg"><div class="modal ${cls}">${html}</div></div>`;
+  const bg = root.firstElementChild;
+  bg.addEventListener('mousedown', e => { if (e.target === bg) closeModal(); });
+  $$('[data-close]', bg).forEach(b => b.onclick = closeModal);
+  return bg;
+}
+function closeModal() { $('#modalRoot').innerHTML = ''; }
+/** Hộp xác nhận tự làm (không dùng window.confirm vì sandbox có thể chặn) */
+function confirmBox(title, msg, okText = 'Đồng ý', danger = false) {
+  return new Promise(res => {
+    const m = openModal(`<div class="modal-h"><h3>${U.esc(title)}</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b">${msg}</div>
+      <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn ${danger ? 'danger' : 'primary'}" id="cfOk">${U.esc(okText)}</button></div>`, 'sm');
+    $('#cfOk', m).onclick = () => { closeModal(); res(true); };
+    $$('[data-close]', m).forEach(b => b.addEventListener('click', () => res(false)));
+  });
+}
+function download(name, blob) {
+  try {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  } catch (e) { toast('Trình duyệt chặn tải file – hãy tải app về máy và mở bằng Edge/Chrome.', 'err'); }
+}
+function safeName(s) { return String(s || 'KeHoach').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w\-]+/g, '_').slice(0, 60); }
+function stamp() { const d = new Date(); return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}`; }
+
+/* =====================================================================
+   7. APP – ĐIỀU PHỐI
+   ===================================================================== */
+const ZOOM_COLW = { 0.5: 46, 1: 44, 2: 48, 4: 56, 24: 150 };
+const SNAP = { 0.5: 0.25, 1: 0.25, 2: 0.5, 4: 0.5, 24: 1 };
+const ROW_H = 32, HEAD_H = 66;
+
+const App = {
+  res: null, view: 'home', selectedId: null, drawerTaskId: null, drawerIsNew: false, geo: null,
+  filters: { q: '', branch: '', process: '', owner: '', status: '', shift: '', crit: false, warn: false, from: '', to: '' },
+
+  init() {
+    Store.load();
+    const ui = Store.ui();
+    document.body.classList.toggle('dark', !!ui.dark);
+    $('#zoomSelect').value = String(ui.zoom);
+    this.bind();
+    // Không lưu được lâu dài → hiện thanh thông báo (thay cho lỗi đỏ)
+    if (!SafeStore.persistent) $('#storeBar').classList.remove('hidden');
+    if (Store.loadedFrom === 'embedded') setTimeout(() => toast('Đã mở dữ liệu lưu kèm trong file.', 'ok'), 300);
+    this.recompute();
+    this.switchView('home');
+    setInterval(() => { if (!Drag.active) { this.recompute(); this.renderMain(); this.renderPlanBar(); } }, 60000);
+    window.addEventListener('beforeunload', e => {
+      Store.flush();
+      if (!SafeStore.persistent && Store.dirty) { e.preventDefault(); e.returnValue = ''; }
+    });
+    setTimeout(() => { if (!window.XLSX) toast('Không tải được SheetJS – Import/Export .xlsx tạm không dùng được (CSV/JSON vẫn được).', 'warn'); }, 6000);
+  },
+  recompute() { this.res = Scheduler.schedule(Store.plan()); },
+  afterChange() {
+    this.recompute(); Store.save(); this.render();
+    if (this.drawerTaskId && !this.drawerIsNew) { if (!Store.plan().tasks.find(t => t.id === this.drawerTaskId)) Drawer.close(); else Drawer.refreshCalc(); }
+  },
+  render() { this.renderPlanSelect(); this.renderPlanBar(); this.renderFilterOptions(); this.renderMain(); $('#btnUndo').disabled = !Store.undo.length; $('#btnRedo').disabled = !Store.redo.length; },
+  renderMain() { if (this.view === 'gantt') Gantt.render(); else if (this.view === 'dash') Dash.render(); else Home.render(); },
+
+  renderPlanSelect() {
+    const s = Store.state;
+    $('#planSelect').innerHTML = s.plans.map(p => `<option value="${U.esc(p.id)}" ${p.id === s.activePlanId ? 'selected' : ''}>${U.esc(p.name)}</option>`).join('');
+  },
+  renderPlanBar() {
+    const p = Store.plan(), k = this.res.kpi;
+    if (document.activeElement !== $('#planName')) $('#planName').value = p.name;
+    if (document.activeElement !== $('#planStart')) $('#planStart').value = p.start;
+    if (document.activeElement !== $('#planTarget')) $('#planTarget').value = p.targetHours;
+    const errs = this.res.issues.filter(i => i.level === 'error').length, warns = this.res.issues.filter(i => i.level === 'warn').length;
+    const over = p.targetHours > 0 && k.windowHours > p.targetHours + 1e-6;
+    $('#kpiMini').innerHTML = `
+      <div><b>${k.taskCount ? U.fmtDT(k.end) : '–'}</b><span>Kết thúc dự kiến</span></div>
+      <div><b style="color:${over ? 'var(--st-late)' : 'inherit'}">${U.fmtDur(k.windowHours)}</b><span>Tổng thời gian Shutdown</span></div>
+      <div><b>${k.assignedCount}/${k.taskCount}</b><span>Task đã có người</span></div>
+      ${errs ? `<span class="badge err" data-open-warn>${errs} lỗi</span>` : ''}${warns ? `<span class="badge warn" data-open-warn>${warns} cảnh báo</span>` : ''}${!errs && !warns ? '<span class="badge ok">Không xung đột</span>' : ''}`;
+    $$('[data-open-warn]').forEach(b => b.onclick = () => Panels.warnings());
+  },
+  renderFilterOptions() {
+    const p = Store.plan(), f = this.filters;
+    const uniq = arr => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
+    const fill = (sel, label, vals, cur) => { sel.innerHTML = `<option value="">${label}</option>` + vals.map(v => `<option ${v === cur ? 'selected' : ''}>${U.esc(v)}</option>`).join(''); };
+    fill($('#fBranch'), 'Tất cả nhánh', uniq(p.tasks.map(t => t.branch)), f.branch);
+    fill($('#fProcess'), 'Tất cả process', uniq(p.tasks.map(t => t.process)), f.process);
+    fill($('#fOwner'), 'Tất cả người / đội', uniq(p.tasks.flatMap(t => [...U.splitOwners(t.assignee), ...U.splitOwners(t.owner)])), f.owner);
+  },
+  passFilter(t) {
+    const f = this.filters, r = this.res.R.get(t.id);
+    if (f.q && !U.norm(t.taskName + ' ' + t.id + ' ' + t.assignee).includes(U.norm(f.q))) return false;
+    if (f.branch && t.branch !== f.branch) return false;
+    if (f.process && t.process !== f.process) return false;
+    if (f.owner && ![...U.splitOwners(t.assignee), ...U.splitOwners(t.owner)].some(o => U.norm(o) === U.norm(f.owner))) return false;
+    if (f.status && r.status !== f.status) return false;
+    if (f.shift) { const s = +f.shift; if (r.end > r.start ? U.shiftHours(r.start, r.end)[s - 1] <= 0 : U.shiftOf(r.start) !== s) return false; }
+    if (f.crit && !r.critical) return false;
+    if (f.warn && !r.warn) return false;
+    if (f.from) { const a = U.parseLocalISO(f.from); if (isFinite(a) && r.end < a) return false; }
+    if (f.to) { const b = U.parseLocalISO(f.to); if (isFinite(b) && r.start > b) return false; }
+    return true;
+  },
+  scrollToStart() { requestAnimationFrame(() => { const g = this.geo; if (!g || this.view !== 'gantt') return; $('#gscroll').scrollLeft = Math.max(0, g.x(this.res.windowStart) - 60); }); },
+  selectTask(id, open = true) {
+    this.selectedId = id;
+    if (this.view !== 'gantt') this.switchView('gantt');
+    const t = Store.plan().tasks.find(x => x.id === id); if (!t) return;
+    if (!this.passFilter(t)) this.clearFilters();
+    const ui = Store.ui(); delete ui.collapsed['B|' + t.branch]; delete ui.collapsed['P|' + t.branch + '|' + t.process];
+    Gantt.render();
+    const row = $(`.grow[data-id="${CSS.escape(id)}"]`);
+    if (row) { const sc = $('#gscroll'); sc.scrollTop = row.offsetTop - sc.clientHeight / 2 + HEAD_H; sc.scrollLeft = Math.max(0, this.geo.x(this.res.R.get(id).start) - 120); }
+    if (open) Drawer.open(id);
+  },
+  clearFilters() {
+    this.filters = { q: '', branch: '', process: '', owner: '', status: '', shift: '', crit: false, warn: false, from: '', to: '' };
+    ['#fSearch', '#fBranch', '#fProcess', '#fOwner', '#fStatus', '#fShift', '#fFrom', '#fTo'].forEach(s => $(s).value = '');
+    $('#fCrit').checked = false; $('#fWarn').checked = false;
+  },
+  /** Chuyển màn hình: home | gantt | dash */
+  switchView(v) {
+    this.view = v;
+    $('#viewHome').classList.toggle('hidden', v !== 'home');
+    $('#viewGantt').classList.toggle('hidden', v !== 'gantt');
+    $('#viewDash').classList.toggle('hidden', v !== 'dash');
+    $('#planBar').classList.toggle('hidden', v === 'home');
+    $('#filterBar').classList.toggle('hidden', v !== 'gantt' || !Store.ui().filtersOpen);
+    $('#btnHome').classList.toggle('active', v === 'home');
+    $('#tabGantt').classList.toggle('active', v === 'gantt');
+    $('#tabDash').classList.toggle('active', v === 'dash');
+    if (v === 'home') Drawer.close();
+    this.render();
+    if (v === 'gantt') this.scrollToStart();
+  },
+  openPlan(id) { Store.state.activePlanId = id; Store.save(); this.selectedId = null; Drawer.close(); this.clearFilters(); this.recompute(); this.switchView('gantt'); },
+
+  bind() {
+    const ui = () => Store.ui();
+    $('#btnHome').onclick = () => this.switchView('home');
+    $('#planSelect').onchange = e => this.openPlan(e.target.value);
+    $('#btnAddTask').onclick = () => { if (this.view !== 'gantt') this.switchView('gantt'); Drawer.openNew(); };
+    $('#btnImport').onclick = () => $('#fileImport').click();
+    $('#fileImport').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) IO.importFile(f); };
+    $('#fileJson').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) IO.restoreJson(f); };
+    $('#sbApp').onclick = () => Persist.saveApp();
+    $('#sbCopy').onclick = () => Persist.copyData();
+    $('#sbPaste').onclick = () => Persist.pasteData();
+    $('#sbRestore').onclick = () => $('#fileJson').click();
+    $('#sbHide').onclick = () => $('#storeBar').classList.add('hidden');
+    $('#btnAuto').onclick = () => Panels.autoSchedule();
+    $('#btnUndo').onclick = () => Store.doUndo();
+    $('#btnRedo').onclick = () => Store.doRedo();
+    $('#zoomSelect').onchange = e => {
+      const sc = $('#gscroll'), g = this.geo, c = g ? g.t(sc.scrollLeft + (sc.clientWidth - g.left) / 2) : null;
+      ui().zoom = +e.target.value; Store.save(); if (this.view !== 'gantt') this.switchView('gantt'); else Gantt.render();
+      if (c) sc.scrollLeft = Math.max(0, this.geo.x(c) - (sc.clientWidth - this.geo.left) / 2);
+    };
+    $('#btnFilter').onclick = () => { ui().filtersOpen = !ui().filtersOpen; Store.save(); if (this.view !== 'gantt') this.switchView('gantt'); else $('#filterBar').classList.toggle('hidden', !ui().filtersOpen); };
+    $('#tabGantt').onclick = () => this.switchView('gantt');
+    $('#tabDash').onclick = () => this.switchView('dash');
+    const dd = (btn, menu) => { $(btn).onclick = e => { e.stopPropagation(); $$('.dd-menu').forEach(m => m !== $(menu) && m.classList.add('hidden')); $(menu).classList.toggle('hidden'); }; };
+    dd('#btnExport', '#menuExport'); dd('#btnMore', '#menuMore');
+    document.addEventListener('click', () => $$('.dd-menu').forEach(m => m.classList.add('hidden')));
+    $$('#menuExport [data-exp]').forEach(b => b.onclick = () => IO.export(b.dataset.exp));
+    $$('#menuMore [data-more]').forEach(b => b.onclick = () => Panels.more(b.dataset.more));
+    $('#planName').onchange = e => { const v = e.target.value.trim() || 'Kế hoạch Shutdown'; Store.commit('Đổi tên kế hoạch', p => { p.name = v; }); };
+    $('#planStart').onchange = e => this.changePlanStart(e.target.value);
+    $('#btnDayMinus').onclick = () => this.shiftPlanDays(-1);
+    $('#btnDayPlus').onclick = () => this.shiftPlanDays(1);
+    $('#planTarget').onchange = e => { const v = U.num(e.target.value, 0); if (v <= 0) { toast('Mục tiêu phải > 0', 'err'); this.renderPlanBar(); return; } Store.commit('Đổi mục tiêu', p => { p.targetHours = v; }); };
+    let qT; $('#fSearch').oninput = e => { clearTimeout(qT); qT = setTimeout(() => { this.filters.q = e.target.value; this.renderMain(); }, 150); };
+    const fmap = { '#fBranch': 'branch', '#fProcess': 'process', '#fOwner': 'owner', '#fStatus': 'status', '#fShift': 'shift', '#fFrom': 'from', '#fTo': 'to' };
+    for (const [s, k] of Object.entries(fmap)) $(s).onchange = e => { this.filters[k] = e.target.value; this.renderMain(); };
+    $('#fCrit').onchange = e => { this.filters.crit = e.target.checked; this.renderMain(); };
+    $('#fWarn').onchange = e => { this.filters.warn = e.target.checked; this.renderMain(); };
+    $('#btnClearFilter').onclick = () => { this.clearFilters(); this.renderMain(); };
+    document.addEventListener('keydown', e => {
+      const inField = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
+      const k = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && k === 'z' && !e.shiftKey && !inField) { e.preventDefault(); Store.doUndo(); }
+      else if ((e.ctrlKey || e.metaKey) && (k === 'y' || (k === 'z' && e.shiftKey)) && !inField) { e.preventDefault(); Store.doRedo(); }
+      else if (e.key === 'Escape') { if ($('#modalRoot').innerHTML) closeModal(); else Drawer.close(); }
+      else if (!inField && k === 'n' && !e.ctrlKey && !e.metaKey && this.view === 'gantt') { e.preventDefault(); Drawer.openNew(); }
+      else if (!inField && e.key === 'Delete' && this.selectedId && this.view === 'gantt') Actions.deleteTask(this.selectedId);
+    });
+    Gantt.bind();
+  },
+
+  /** ĐỔI NGÀY: chỉ đổi plan.start. Mốc task lưu tương đối → cả lịch dịch theo, thời lượng giữ nguyên */
+  changePlanStart(iso) {
+    if (!isFinite(U.parseLocalISO(iso))) { toast('Ngày giờ không hợp lệ', 'err'); this.renderPlanBar(); return; }
+    const old = Store.plan().start; if (iso === old) return;
+    Store.commit('Đổi ngày bắt đầu', p => { p.start = iso; });
+    toast(`Đã dời kế hoạch sang ${U.fmtDT(U.parseLocalISO(iso))}. Thời lượng các task giữ nguyên.`, 'ok');
+    this.scrollToStart();
+  },
+  shiftPlanDays(n) { const d = new Date(U.parseLocalISO(Store.plan().start)); d.setDate(d.getDate() + n); this.changePlanStart(U.toLocalISO(d.getTime())); },
+};
+
+/* =====================================================================
+   8. ACTIONS – THAO TÁC TASK
+   ===================================================================== */
+const Actions = {
+  async deleteTask(id) {
+    const p = Store.plan(), t = p.tasks.find(x => x.id === id); if (!t) return;
+    const deps = p.tasks.filter(x => x.dependencyIds.includes(id));
+    if (!(await confirmBox('Xóa task', `Xóa task <b>${U.esc(t.taskName)}</b>?${deps.length ? `<br><br>${deps.length} task đang chạy sau task này sẽ được gỡ liên kết.` : ''}`, 'Xóa', true))) return;
+    Store.commit('Xóa task ' + t.taskName, p => { p.tasks = p.tasks.filter(x => x.id !== id); p.tasks.forEach(x => x.dependencyIds = x.dependencyIds.filter(d => d !== id)); });
+    if (App.drawerTaskId === id) Drawer.close();
+    if (App.selectedId === id) App.selectedId = null;
+    toast('Đã xóa task (Ctrl+Z để hoàn tác)');
+  },
+  duplicateTask(id) {
+    const p = Store.plan(), t = p.tasks.find(x => x.id === id); if (!t) return;
+    const nid = nextTaskId(p);
+    Store.commit('Sao chép task', p => { p.tasks.push(normalizeTask({ ...U.clone(t), id: nid, taskName: t.taskName + ' (bản sao)', order: t.order + 0.5, progress: 0, locked: false })); Actions.renumber(p); });
+    App.selectTask(nid, true);
+  },
+  moveTask(id, dir) {
+    const p = Store.plan(), t = p.tasks.find(x => x.id === id); if (!t) return;
+    const same = p.tasks.filter(x => x.process === t.process && x.branch === t.branch).sort((a, b) => a.order - b.order);
+    const o = same[same.indexOf(t) + dir]; if (!o) return;
+    const test = { ...p, tasks: p.tasks.map(x => x.id === t.id ? { ...x, order: o.order } : x.id === o.id ? { ...x, order: t.order } : x) };
+    if (Scheduler.topo(test.tasks, Scheduler.buildGraph(test)).inCycle.length) { toast('Không đổi được thứ tự: sẽ tạo phụ thuộc vòng tròn.', 'err'); return; }
+    Store.commit('Đổi thứ tự task', p => { const a = p.tasks.find(x => x.id === t.id), b = p.tasks.find(x => x.id === o.id); [a.order, b.order] = [b.order, a.order]; });
+  },
+  renumber(p, byStart = false) {
+    const list = p.tasks.slice();
+    if (byStart) { const r = Scheduler.schedule(p).R; list.sort((a, b) => r.get(a.id).start - r.get(b.id).start || a.order - b.order); }
+    else list.sort((a, b) => a.order - b.order);
+    list.forEach((t, i) => t.order = i + 1);
+  },
+};
+
+/* =====================================================================
+   9. GANTT
+   ===================================================================== */
+const Gantt = {
+  rows: [],
+  computeGeo() {
+    const res = App.res, z = Store.ui().zoom || 2, colW = ZOOM_COLW[z], pxH = colW / z;
+    const a = Math.min(res.windowStart, res.P), b = Math.max(res.windowEnd, res.targetEnd || res.windowEnd, res.P + MS_H);
+    const da = new Date(a); let rs;
+    if (z >= 24) rs = new Date(da.getFullYear(), da.getMonth(), da.getDate()).getTime();
+    else { const h = da.getHours(); rs = new Date(da.getFullYear(), da.getMonth(), da.getDate(), h >= 22 ? 22 : h >= 14 ? 14 : h >= 6 ? 6 : -2).getTime(); }
+    const colMs = z * MS_H, ncol = Math.ceil(Math.max(b - rs, MS_H) / colMs) + (z >= 24 ? 1 : Math.max(2, Math.ceil(8 / z)));
+    const left = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--left-w')) || 500;
+    return { z, colW, pxH, rs, re: rs + ncol * colMs, W: ncol * colW, ncol, colMs, left, x: t => (t - rs) / MS_H * pxH, t: x => rs + x / pxH * MS_H };
+  },
+  /** Dòng: Nhánh → Process → Task (lọc + thu gọn) */
+  buildRows() {
+    const p = Store.plan(), ui = Store.ui();
+    const vis = p.tasks.filter(t => App.passFilter(t)), branches = new Map();
+    for (const t of p.tasks.slice().sort((a, b) => a.order - b.order)) { if (!branches.has(t.branch)) branches.set(t.branch, new Map()); const bm = branches.get(t.branch); if (!bm.has(t.process)) bm.set(t.process, []); }
+    for (const t of vis) branches.get(t.branch).get(t.process).push(t);
+    const rows = [];
+    for (const [b, procs] of branches) {
+      const all = [...procs.values()].flat(); if (!all.length) continue;
+      const bKey = 'B|' + b; rows.push({ type: 'branch', key: bKey, branch: b, tasks: all });
+      if (ui.collapsed[bKey]) continue;
+      for (const [pr, list] of procs) {
+        if (!list.length) continue;
+        const pKey = 'P|' + b + '|' + pr; rows.push({ type: 'proc', key: pKey, branch: b, process: pr, tasks: list });
+        if (ui.collapsed[pKey]) continue;
+        for (const t of list.slice().sort((a, c) => a.order - c.order)) rows.push({ type: 'task', key: t.id, task: t });
+      }
+    }
+    this.rows = rows; return { rows, visCount: vis.length, total: p.tasks.length };
+  },
+  render() {
+    const p = Store.plan(), res = App.res, g = App.geo = this.computeGeo(), ui = Store.ui();
+    const { rows, visCount, total } = this.buildRows();
+    $('#filterCount').textContent = `Hiển thị ${visCount}/${total} task`;
+    $('#legend').innerHTML = Object.values(STATUS).map(s => `<span><span class="dot" style="background:${s.color}"></span>${s.label}</span>`).join('') +
+      '<span>Viền đỏ = đường găng</span><span>Viền cam = có cảnh báo</span><span>Kéo thanh để dời giờ · kéo mép phải để đổi thời lượng · bấm vào task để sửa</span>';
+    const H = Math.max(rows.length * ROW_H, 200), parts = [];
+    // Header: ngày / ca / giờ
+    const hd = [], hs = [], ht = [];
+    for (let d0 = new Date(new Date(g.rs).setHours(0, 0, 0, 0)).getTime(); d0 < g.re;) {
+      const d1 = new Date(d0); d1.setDate(d1.getDate() + 1); const a = Math.max(d0, g.rs), b = Math.min(d1.getTime(), g.re);
+      if (b > a) hd.push(`<div class="hcell hdate" style="left:${g.x(a)}px;width:${g.x(b) - g.x(a)}px">${U.fmtDate(d0)}</div>`);
+      d0 = d1.getTime();
+    }
+    for (let t = g.rs; t < g.re;) { const nb = Math.min(U.nextShiftBoundary(t), g.re), s = U.shiftOf(t), w = g.x(nb) - g.x(t); hs.push(`<div class="hcell hshift s${s}" style="left:${g.x(t)}px;width:${w}px" title="Ca ${s}: ${['06:00–14:00', '14:00–22:00', '22:00–06:00'][s - 1]}">${w > 34 ? 'Ca ' + s : s}</div>`); t = nb; }
+    for (let i = 0; i < g.ncol; i++) { const t = g.rs + i * g.colMs; ht.push(`<div class="hcell htime" style="left:${i * g.colW}px;width:${g.colW}px">${g.z >= 24 ? U.fmtDate(t).slice(3, 8) : U.fmtHM(t)}</div>`); }
+    parts.push(`<div class="ghead" style="width:${g.left + g.W}px;height:${HEAD_H}px">
+      <div class="ghead-left" style="height:${HEAD_H}px"><span style="flex:1">Task</span><span class="c-who">Người thực hiện</span><span class="c-dur">Giờ</span><span class="c-start">Bắt đầu</span></div>
+      <div class="ghead-right" style="width:${g.W}px;height:${HEAD_H}px"><div class="hrow" style="top:0;height:22px">${hd.join('')}</div><div class="hrow" style="top:22px;height:22px">${hs.join('')}</div><div class="hrow" style="top:44px;height:22px">${ht.join('')}</div></div></div>`);
+    // Nền
+    const bg = [];
+    for (let t = g.rs; t < g.re;) { const nb = Math.min(U.nextShiftBoundary(t), g.re); bg.push(`<div class="band s${U.shiftOf(t)}" style="left:${g.x(t)}px;width:${g.x(nb) - g.x(t)}px"></div>`); t = nb; }
+    for (let i = 0; i <= g.ncol; i++) { const d = new Date(g.rs + i * g.colMs); bg.push(`<div class="vline${d.getHours() === 0 && d.getMinutes() === 0 ? ' day' : ''}" style="left:${i * g.colW}px"></div>`); }
+    bg.push(`<div class="winline" style="left:${g.x(res.P)}px" title="Bắt đầu Shutdown ${U.fmtDT(res.P)}"></div>`);
+    if (p.targetHours > 0) bg.push(`<div class="winline target" style="left:${g.x(res.targetEnd)}px" title="Mục tiêu kết thúc ${U.fmtDT(res.targetEnd)}"></div>`);
+    const now = Date.now(); if (now >= g.rs && now <= g.re) bg.push(`<div class="nowline" style="left:${g.x(now)}px" title="Hiện tại ${U.fmtDT(now)}"></div>`);
+    // Dòng
+    const rowHtml = [], yOf = new Map();
+    rows.forEach((r, i) => {
+      if (r.type === 'task') { yOf.set(r.task.id, i * ROW_H + ROW_H / 2); rowHtml.push(this.taskRow(r.task, g, p)); return; }
+      const col = r.type === 'proc' ? processColor(p, r.process) : '#334155';
+      let s = Infinity, e = -Infinity; for (const t of r.tasks) { const x = res.R.get(t.id); s = Math.min(s, x.start); e = Math.max(e, x.end); }
+      const collapsed = !!ui.collapsed[r.key];
+      const name = r.type === 'branch' ? r.branch : r.process;
+      rowHtml.push(`<div class="grow g-${r.type}">
+        <div class="gleft" data-toggle="${U.esc(r.key)}" style="padding-left:${r.type === 'proc' ? 22 : 10}px;${r.type === 'proc' ? `box-shadow:inset 4px 0 0 ${col}` : ''}">
+          <span class="tw">${collapsed ? '▶' : '▼'}</span><span class="c-name">${U.esc(name)} <span class="c-sub">· ${r.tasks.length} task</span></span>
+          <span class="c-dur">${U.fmtDur((e - s) / MS_H, true)}</span><span class="c-start">${U.fmtDM(s)}</span></div>
+        <div class="gright"><div class="bar sum" style="left:${g.x(s)}px;width:${Math.max(2, g.x(e) - g.x(s))}px;background:${col}"></div></div></div>`);
+    });
+    // Mũi tên phụ thuộc
+    const paths = [];
+    for (const t of p.tasks) {
+      if (!yOf.has(t.id)) continue;
+      for (const d of t.dependencyIds) {
+        if (!yOf.has(d)) continue;
+        const a = res.R.get(d), b = res.R.get(t.id), x1 = g.x(a.end), y1 = yOf.get(d), x2 = g.x(b.start), y2 = yOf.get(t.id);
+        const crit = res.critEdges.has(d + '>' + t.id), hl = App.selectedId && (App.selectedId === d || App.selectedId === t.id);
+        const path = x2 - x1 >= 14 ? `M${x1},${y1} H${x1 + 7} V${y2} H${x2 - 1}` : `M${x1},${y1} h7 V${y2 > y1 ? y2 - ROW_H / 2 : y2 + ROW_H / 2} H${x2 - 9} V${y2} H${x2 - 1}`;
+        paths.push(`<path d="${path}" class="${crit ? 'crit' : ''} ${hl ? 'hl' : ''}" marker-end="url(#${crit ? 'arC' : hl ? 'arH' : 'arN'})"/>`);
+      }
+    }
+    const empty = !rows.length ? `<div class="empty-state" style="position:absolute;left:${g.left}px;top:40px;width:600px">${p.tasks.length ? 'Không có task nào khớp bộ lọc.' : 'Kế hoạch chưa có task. Bấm <b>+ Thêm task</b> hoặc <b>Import Excel</b>.'}</div>` : '';
+    const mk = (id, c) => `<marker id="${id}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${c}"/></marker>`;
+    parts.push(`<div class="gbody" style="width:${g.left + g.W}px;height:${H}px">
+      <div class="gbg" style="left:${g.left}px;width:${g.W}px;height:${H}px">${bg.join('')}</div>${rowHtml.join('')}
+      <svg id="depsvg" style="left:${g.left}px" width="${g.W}" height="${H}"><defs>${mk('arN', '#94a3b8')}${mk('arC', '#991b1b')}${mk('arH', '#2563eb')}</defs>${paths.join('')}</svg>${empty}</div>`);
+    const c = $('#gcanvas'); c.style.width = (g.left + g.W) + 'px'; c.innerHTML = parts.join('');
+  },
+  /** 1 dòng task: trạng thái · STT · tên · người thực hiện · giờ · bắt đầu */
+  taskRow(t, g, p) {
+    const r = App.res.R.get(t.id), st = STATUS[r.status], fill = processColor(p, t.process);
+    const x = g.x(r.start), w = Math.max(3, g.x(r.end) - x);
+    const who = t.assignee || '';
+    const bar = t.durationHours > 0 ? `<div class="bar ${r.critical ? 'crit' : ''} ${r.warn && !r.critical ? 'warn' : ''} ${t.locked ? 'locked' : ''}" data-id="${U.esc(t.id)}" style="left:${x}px;width:${w}px;background:${fill}">
+        <div class="prog" style="width:${t.progress}%"></div><span class="lbl">${w > 70 ? U.esc(t.taskName) : ''}</span>${t.locked ? '' : '<div class="handle"></div>'}</div>` : '';
+    const msX = t.durationHours > 0 ? g.x(r.end) : x;
+    const ms = t.milestone ? `<div class="ms" data-id="${U.esc(t.id)}" style="left:${msX - 6}px"></div>` : '';
+    const outTxt = [w > 70 ? '' : t.taskName, who || t.owner].filter(Boolean).join(' · ');
+    return `<div class="grow ${App.selectedId === t.id ? 'sel' : ''}" data-id="${U.esc(t.id)}">
+      <div class="gleft" data-open="${U.esc(t.id)}" style="padding-left:36px" title="${U.esc(t.taskName)}">
+        <span class="stdot" style="background:${st.color}" title="${st.label}"></span><span class="c-stt">${t.order}</span>
+        <span class="c-name" style="${r.warn ? 'color:#b45309' : ''}">${U.esc(t.taskName)}</span>
+        <span class="c-who ${who ? '' : 'empty'}">${who ? U.esc(who) : 'Chưa phân công'}</span>
+        <span class="c-dur">${U.fmtDur(t.durationHours, true)}</span><span class="c-start">${U.fmtDM(r.start)}</span></div>
+      <div class="gright">${bar}${ms}<div class="outlbl" style="left:${(t.milestone ? msX + 10 : x + w) + 6}px">${U.esc(outTxt)}</div></div></div>`;
+  },
+  bind() {
+    const c = $('#gcanvas');
+    c.addEventListener('click', e => {
+      if (Drag.justDragged) { Drag.justDragged = false; return; }
+      const tg = e.target.closest('[data-toggle]');
+      if (tg) { const k = tg.dataset.toggle, ui = Store.ui(); if (ui.collapsed[k]) delete ui.collapsed[k]; else ui.collapsed[k] = true; Store.save(); Gantt.render(); return; }
+      const op = e.target.closest('[data-open]') || e.target.closest('.ms[data-id]');
+      if (op) { App.selectedId = op.dataset.open || op.dataset.id; Gantt.render(); Drawer.open(App.selectedId); }
+    });
+    c.addEventListener('pointerdown', e => Drag.start(e));
+    c.addEventListener('mousemove', e => { if (Drag.active) return; const b = e.target.closest('.bar[data-id], .ms[data-id]'); if (b) Tip.show(b.dataset.id, e); else Tip.hide(); });
+    c.addEventListener('mouseleave', () => Tip.hide());
+  },
+};
+
+/* ---------- Kéo thả ---------- */
+const Drag = {
+  active: null, justDragged: false,
+  start(e) {
+    const bar = e.target.closest('.bar[data-id]'); if (!bar || e.button !== 0) return;
+    const id = bar.dataset.id, t = Store.plan().tasks.find(x => x.id === id), r = App.res.R.get(id);
+    if (t.locked) { toast('Task đang khóa – mở khóa trong phần Thiết lập nâng cao.', 'warn'); return; }
+    this.active = { id, t, r, mode: e.target.classList.contains('handle') ? 'resize' : 'move', x0: e.clientX, left0: parseFloat(bar.style.left), bar, moved: false, dh: 0 };
+    try { bar.setPointerCapture(e.pointerId); } catch (err) { }
+    bar.onpointermove = ev => this.move(ev); bar.onpointerup = () => this.end(); bar.onpointercancel = () => this.cancel();
+    Tip.hide(); e.preventDefault();
+  },
+  move(e) {
+    const d = this.active; if (!d) return;
+    const dx = e.clientX - d.x0; if (Math.abs(dx) > 3) d.moved = true; if (!d.moved) return;
+    const g = App.geo, snap = SNAP[g.z];
+    d.dh = Math.round(dx / g.pxH / snap) * snap; d.bar.classList.add('dragging');
+    if (d.mode === 'move') {
+      d.bar.style.left = (d.left0 + d.dh * g.pxH) + 'px';
+      const s = d.r.start + d.dh * MS_H; Tip.text(`<b>${U.esc(d.t.taskName)}</b><br>${U.fmtDT(s)} → ${U.fmtDT(s + d.t.durationHours * MS_H)}<br>Thời lượng giữ nguyên: ${U.fmtDur(d.t.durationHours)}`, e);
+    } else {
+      d.newDur = Math.max(snap, d.t.durationHours + d.dh);
+      d.bar.style.width = Math.max(3, d.newDur * g.pxH) + 'px';
+      Tip.text(`<b>${U.esc(d.t.taskName)}</b><br>Thời lượng mới: ${U.fmtDur(d.newDur)}<br>Kết thúc: ${U.fmtDT(d.r.start + d.newDur * MS_H)}`, e);
+    }
+  },
+  end() {
+    const d = this.active; this.active = null; Tip.hide(); if (!d) return;
+    d.bar.onpointermove = d.bar.onpointerup = d.bar.onpointercancel = null;
+    this.justDragged = true; setTimeout(() => this.justDragged = false, 0);
+    if (!d.moved) { App.selectedId = d.id; Gantt.render(); Drawer.open(d.id); return; }
+    if (d.dh === 0 && d.mode === 'move') { Gantt.render(); return; }
+    const P = App.res.P;
+    if (d.mode === 'move') {
+      const want = d.r.start + d.dh * MS_H;
+      Store.commit('Kéo task ' + d.t.taskName, p => {
+        const t = p.tasks.find(x => x.id === d.id);
+        if (t.executionMode === 'fixed') t.constraintOffsetHours = (want - P) / MS_H;
+        else if (want <= d.r.required) { t.constraintType = 'ASAP'; t.constraintOffsetHours = null; }
+        else { t.constraintType = 'SNET'; t.constraintOffsetHours = (want - P) / MS_H; }
+      });
+      const nr = App.res.R.get(d.id);
+      if (nr.start > want + MS_MIN) toast(`Không thể bắt đầu trước ${U.fmtDT(nr.start)} vì phải chờ task trước.`, 'warn');
+      else toast(`Đã dời "${d.t.taskName}" → ${U.fmtDT(nr.start)}. Các task sau được cập nhật.`, 'ok');
+    } else {
+      if (!(d.newDur > 0)) { Gantt.render(); return; }
+      Store.commit('Đổi thời lượng ' + d.t.taskName, p => { p.tasks.find(x => x.id === d.id).durationHours = d.newDur; });
+      toast(`Thời lượng "${d.t.taskName}" = ${U.fmtDur(d.newDur)}`, 'ok');
+    }
+  },
+  cancel() { this.active = null; Tip.hide(); Gantt.render(); },
+};
+
+/* ---------- Tooltip ---------- */
+const Tip = {
+  show(id, e) {
+    const p = Store.plan(), t = p.tasks.find(x => x.id === id); if (!t) return;
+    const r = App.res.R.get(id), byId = new Map(p.tasks.map(x => [x.id, x]));
+    const crossMidnight = new Date(r.start).toDateString() !== new Date(r.end).toDateString();
+    const rows = [
+      ['Process', `${U.esc(t.process)} · ${U.esc(t.branch)}`],
+      ['Thời gian', `${U.fmtDM(r.start)} → ${U.fmtDM(r.end)}${crossMidnight ? ' (qua đêm)' : ''}`],
+      ['Thời lượng', U.fmtDur(t.durationHours)],
+      ['Người thực hiện', U.esc(t.assignee || 'Chưa phân công')],
+      ['Đội phụ trách', U.esc(t.owner || '–')],
+    ];
+    if (t.dependencyIds.length) rows.push(['Chạy sau', t.dependencyIds.map(d => U.esc(byId.get(d)?.taskName || d)).join(', ')]);
+    rows.push(['Trạng thái', STATUS[r.status].label + (t.progress ? ` · ${t.progress}%` : '') + (r.critical ? ' · <b style="color:#fca5a5">đường găng</b>' : '')]);
+    if (t.notes) rows.push(['Ghi chú', U.esc(t.notes)]);
+    const warn = r.issues.filter(i => i.level !== 'info').map(i => U.esc(i.msg)).join('<br>');
+    this.text(`<b style="font-size:13px">${U.esc(t.taskName)}</b><table>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>${warn ? `<div style="margin-top:6px;color:#fbbf24">${warn}</div>` : ''}`, e);
+  },
+  text(html, e) {
+    const el = $('#tip'); el.innerHTML = html; el.classList.remove('hidden');
+    const w = el.offsetWidth, h = el.offsetHeight;
+    let x = e.clientX + 14, y = e.clientY + 14;
+    if (x + w > innerWidth - 8) x = e.clientX - w - 14; if (y + h > innerHeight - 8) y = Math.max(8, innerHeight - h - 8);
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+  },
+  hide() { $('#tip').classList.add('hidden'); },
+};
+
+/* =====================================================================
+   10. PANEL SỬA TASK – phần chính gọn, phần ít dùng nằm trong "Thiết lập nâng cao"
+   ===================================================================== */
+const Drawer = {
+  open(id) { const t = Store.plan().tasks.find(x => x.id === id); if (!t) return; App.drawerTaskId = id; App.drawerIsNew = false; this.render(U.clone(t), false); },
+  openNew() {
+    const p = Store.plan(), sel = p.tasks.find(x => x.id === App.selectedId) || p.tasks[p.tasks.length - 1];
+    const t = makeTask({ id: nextTaskId(p), order: p.tasks.reduce((m, t) => Math.max(m, t.order), 0) + 1, branch: sel?.branch || 'Nhánh Hạt', process: sel?.process || 'EXT', owner: sel?.owner || '' });
+    App.drawerTaskId = t.id; App.drawerIsNew = true; this.render(t, true);
+    setTimeout(() => $('#d_name')?.focus(), 30);
+  },
+  close() { App.drawerTaskId = null; App.drawerIsNew = false; $('#drawer').classList.add('hidden'); $('#drawer').innerHTML = ''; },
+
+  render(t, isNew) {
+    const p = Store.plan(), P = U.parseLocalISO(p.start), r = isNew ? null : App.res.R.get(t.id);
+    const opts = arr => [...new Set(arr.filter(Boolean))].map(v => `<option value="${U.esc(v)}">`).join('');
+    const people = p.tasks.flatMap(x => U.splitOwners(x.assignee)), teams = p.tasks.flatMap(x => [x.owner, ...U.splitOwners(x.owner)]);
+    const useMin = t.durationHours > 0 && t.durationHours < 1, lagMin = t.lagHours && Math.abs(t.lagHours) < 1;
+    const offIso = t.constraintOffsetHours !== null ? U.toLocalISO(P + t.constraintOffsetHours * MS_H) : (r ? U.toLocalISO(r.start) : p.start);
+    const el = $('#drawer'); el.classList.remove('hidden');
+    el.innerHTML = `
+      <div class="drawer-h"><h3>${isNew ? 'Thêm task mới' : 'Sửa task'}</h3><button class="x" id="d_x" title="Đóng (Esc)">×</button></div>
+      <div class="drawer-b">
+        <div class="fg">
+          <label class="fl full"><span>Tên task</span><input id="d_name" value="${U.esc(t.taskName)}" placeholder="VD: Check list + CIP Clarifier"></label>
+          <label class="fl full"><span>Người thực hiện</span><input id="d_assignee" list="dl_people" value="${U.esc(t.assignee)}" placeholder="Nhập tên, nhiều người nối bằng dấu +"><datalist id="dl_people">${opts(people)}</datalist></label>
+          <label class="fl"><span>Process</span><input id="d_process" list="dl_proc" value="${U.esc(t.process)}"><datalist id="dl_proc">${opts([...PROCESS_DEFAULT, ...p.tasks.map(x => x.process)])}</datalist></label>
+          <label class="fl"><span>Đội phụ trách</span><input id="d_owner" list="dl_owner" value="${U.esc(t.owner)}" placeholder="VD: OP EXT"><datalist id="dl_owner">${opts(teams)}</datalist></label>
+          <label class="fl"><span>Thời lượng</span><div class="inline"><input id="d_dur" type="number" min="0" step="any" value="${useMin ? +(t.durationHours * 60).toFixed(4) : +t.durationHours.toFixed(6)}"><select id="d_durU"><option value="h" ${useMin ? '' : 'selected'}>giờ</option><option value="m" ${useMin ? 'selected' : ''}>phút</option></select></div></label>
+          <label class="fl"><span>Tiến độ (%)</span><input id="d_prog" type="number" min="0" max="100" step="10" value="${t.progress}"></label>
+          <div class="fl full"><span>Chạy sau task <span class="muted" style="font-weight:400">(chỉ bắt đầu khi các task được chọn xong)</span></span>
+            <input id="d_depq" placeholder="Lọc…" style="margin-bottom:4px"><div class="deplist" id="d_deps"></div></div>
+          <label class="fl full"><span>Ghi chú</span><textarea id="d_notes" rows="2">${U.esc(t.notes)}</textarea></label>
+          <div class="full calc" id="d_calc"></div>
+        </div>
+        <details class="adv"><summary>Thiết lập nâng cao</summary>
+          <div class="fg">
+            <label class="fl"><span>Nhánh</span><input id="d_branch" list="dl_branch" value="${U.esc(t.branch)}"><datalist id="dl_branch">${opts([...BRANCHES_DEFAULT, ...p.tasks.map(x => x.branch)])}</datalist></label>
+            <label class="fl"><span>STT (thứ tự)</span><input id="d_order" type="number" step="any" value="${t.order}"></label>
+            <label class="fl"><span>Cách thực hiện</span><select id="d_mode">${Object.entries(EXEC_MODES).map(([k, v]) => `<option value="${k}" ${k === t.executionMode ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+            <label class="fl"><span>Chờ thêm sau task trước</span><div class="inline"><input id="d_lag" type="number" step="any" value="${lagMin ? +(t.lagHours * 60).toFixed(4) : +t.lagHours}"><select id="d_lagU"><option value="h" ${lagMin ? '' : 'selected'}>giờ</option><option value="m" ${lagMin ? 'selected' : ''}>phút</option></select></div></label>
+            <div class="fl full" id="d_fixedBox"><span>Thời điểm cố định</span><input id="d_fixed" type="datetime-local" value="${offIso}"></div>
+            <div class="fl full" id="d_snetBox"><span>Ràng buộc bắt đầu</span><div class="inline"><select id="d_cons" style="flex:0 0 180px"><option value="ASAP" ${t.constraintType !== 'SNET' ? 'selected' : ''}>Sớm nhất có thể</option><option value="SNET" ${t.constraintType === 'SNET' ? 'selected' : ''}>Không sớm hơn</option></select><input id="d_snet" type="datetime-local" value="${offIso}"></div></div>
+            <label class="fl"><span>Định mức (giờ)</span><input id="d_std" type="number" min="0" step="any" value="${+t.standardHours.toFixed(6)}"></label>
+            <label class="fl"><span>Số lượng thiết bị</span><input id="d_qty" type="number" min="0" step="1" value="${t.quantity}" title="Thiết bị chạy đồng thời – không nhân thời gian"></label>
+            <label class="fl"><span>Số người</span><input id="d_people" type="number" min="0" step="1" value="${t.peopleRequired}"></label>
+            <div class="fl"><span>&nbsp;</span><label class="chk"><input type="checkbox" id="d_ms" ${t.milestone ? 'checked' : ''}> Milestone</label></div>
+            <label class="chk full"><input type="checkbox" id="d_lock" ${t.locked ? 'checked' : ''}> Khóa – không cho tự động di chuyển</label>
+            <label class="fl full"><span>Chi tiết cách làm</span><textarea id="d_method" rows="2">${U.esc(t.method)}</textarea></label>
+            ${isNew ? '' : '<div class="full inline" style="flex:0"><button class="btn" type="button" id="d_up">Lên trên</button><button class="btn" type="button" id="d_down">Xuống dưới</button></div>'}
+          </div>
+        </details>
+        <div class="err-msg" id="d_err"></div>
+      </div>
+      <div class="drawer-f">
+        <button class="btn primary" id="d_save">Lưu</button>
+        ${isNew ? '' : '<button class="btn" id="d_dup">Sao chép</button><button class="btn danger" id="d_del">Xóa</button>'}
+        <span style="flex:1"></span><button class="btn" id="d_cancel">Đóng</button>
+      </div>`;
+    this.renderDeps(t, isNew); this.refreshCalc();
+    const sync = () => {
+      const mode = $('#d_mode').value, locked = $('#d_lock').checked;
+      $('#d_fixedBox').classList.toggle('hidden', mode !== 'fixed'); $('#d_snetBox').classList.toggle('hidden', mode === 'fixed');
+      $('#d_snet').disabled = $('#d_cons').value !== 'SNET' || locked; $('#d_cons').disabled = locked;
+    };
+    sync(); ['#d_mode', '#d_cons', '#d_lock'].forEach(s => $(s).addEventListener('change', sync));
+    $('#d_x').onclick = $('#d_cancel').onclick = () => this.close();
+    $('#d_save').onclick = () => this.save();
+    if (!isNew) { $('#d_dup').onclick = () => Actions.duplicateTask(t.id); $('#d_del').onclick = () => Actions.deleteTask(t.id); $('#d_up').onclick = () => Actions.moveTask(t.id, -1); $('#d_down').onclick = () => Actions.moveTask(t.id, 1); }
+    $('#d_depq').oninput = e => { const q = U.norm(e.target.value); $$('#d_deps label').forEach(l => l.classList.toggle('hidden', q && !U.norm(l.textContent).includes(q))); };
+    el.onkeydown = e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); this.save(); } };
+  },
+  renderDeps(t, isNew) {
+    const p = Store.plan(), blocked = isNew ? new Set() : Scheduler.descendants(p, t.id);
+    const list = p.tasks.filter(x => x.id !== t.id).sort((a, b) => a.order - b.order);
+    $('#d_deps').innerHTML = list.length ? list.map(x => {
+      const dis = blocked.has(x.id), on = t.dependencyIds.includes(x.id);
+      return `<label class="${dis && !on ? 'dis' : ''}" title="${dis ? 'Không chọn được: sẽ tạo vòng lặp phụ thuộc' : ''}"><input type="checkbox" value="${U.esc(x.id)}" ${on ? 'checked' : ''} ${dis && !on ? 'disabled' : ''}><span class="pr">${U.esc(x.process)}</span><span>${U.esc(x.taskName)}</span></label>`;
+    }).join('') : '<div class="muted small" style="padding:6px">Chưa có task khác.</div>';
+  },
+  refreshCalc() {
+    const box = $('#d_calc'); if (!box) return;
+    if (App.drawerIsNew) { box.innerHTML = '<span class="muted">Giờ bắt đầu/kết thúc sẽ được tính tự động sau khi lưu.</span>'; return; }
+    const r = App.res.R.get(App.drawerTaskId); if (!r) return;
+    const t = Store.plan().tasks.find(x => x.id === App.drawerTaskId);
+    const drv = { plan: 'đầu kế hoạch', dep: 'chờ task trước', chain: 'chờ task trước cùng process', snet: 'mốc đã kéo', fixed: t.locked ? 'đã khóa' : 'cố định' }[r.driver];
+    box.innerHTML = `<b>${U.fmtDT(r.start)} → ${U.fmtDT(r.end)}</b> <span class="muted">(${drv})</span><br>
+      ${r.critical ? '<span style="color:var(--st-crit);font-weight:600">Nằm trên đường găng – trễ task này sẽ trễ cả Shutdown</span>' : `<span class="muted">Có thể trễ tối đa ${U.fmtDur(r.slackH)} mà không ảnh hưởng tổng thời gian</span>`}
+      ${r.issues.filter(i => i.level !== 'info').map(i => `<br><span style="color:#b45309">${U.esc(i.msg)}</span>`).join('')}`;
+  },
+  save() {
+    const p = Store.plan(), P = U.parseLocalISO(p.start), isNew = App.drawerIsNew, id = App.drawerTaskId;
+    const old = isNew ? null : p.tasks.find(x => x.id === id);
+    const err = m => { $('#d_err').textContent = m; return false; };
+    const name = $('#d_name').value.trim(); if (!name) return err('Vui lòng nhập tên task.');
+    const durRaw = U.num($('#d_dur').value, NaN), dur = $('#d_durU').value === 'm' ? durRaw / 60 : durRaw, ms = $('#d_ms').checked;
+    if (!isFinite(dur) || dur < 0 || (dur === 0 && !ms)) return err('Thời lượng phải lớn hơn 0.');
+    const lagRaw = U.num($('#d_lag').value, 0), lag = $('#d_lagU').value === 'm' ? lagRaw / 60 : lagRaw;
+    const mode = $('#d_mode').value, locked = $('#d_lock').checked;
+    let cType = 'ASAP', cOff = null;
+    if (mode === 'fixed') { const f = U.parseLocalISO($('#d_fixed').value); if (!isFinite(f)) return err('Chế độ cố định: hãy nhập thời điểm bắt đầu.'); cType = 'FIXED'; cOff = (f - P) / MS_H; }
+    else if ($('#d_cons').value === 'SNET') { const s = U.parseLocalISO($('#d_snet').value); if (!isFinite(s)) return err('Hãy nhập mốc "không sớm hơn".'); cType = 'SNET'; cOff = (s - P) / MS_H; }
+    const draft = normalizeTask({
+      ...(old || {}), id, taskName: name, assignee: $('#d_assignee').value, branch: $('#d_branch').value.trim() || 'Chung', process: $('#d_process').value.trim() || 'Chung',
+      durationHours: dur, standardHours: U.num($('#d_std').value, dur), quantity: U.num($('#d_qty').value, 1), peopleRequired: U.num($('#d_people').value, 1),
+      owner: $('#d_owner').value, executionMode: mode, order: U.num($('#d_order').value, old ? old.order : 1), dependencyIds: $$('#d_deps input:checked').map(i => i.value), lagHours: lag,
+      constraintType: cType, constraintOffsetHours: cOff, milestone: ms, locked, progress: U.num($('#d_prog').value, 0), method: $('#d_method').value, notes: $('#d_notes').value,
+    });
+    if (locked && mode !== 'fixed') {
+      if (!(old && old.locked)) { const r = old ? App.res.R.get(id) : null; draft.constraintType = 'SNET'; draft.constraintOffsetHours = r ? (r.start - P) / MS_H : (cOff ?? 0); }
+      else { draft.constraintOffsetHours = old.constraintOffsetHours; draft.constraintType = 'SNET'; }
+    }
+    const test = { ...p, tasks: isNew ? [...p.tasks, draft] : p.tasks.map(x => x.id === id ? draft : x) };
+    const g = Scheduler.buildGraph(test), tp = Scheduler.topo(test.tasks, g);
+    if (tp.inCycle.includes(id)) return err('Không lưu được – phụ thuộc vòng tròn: ' + Scheduler.findCycle(g, tp.inCycle).map(c => test.tasks.find(x => x.id === c)?.taskName || c).join(' → '));
+    Store.commit((isNew ? 'Thêm task ' : 'Sửa task ') + name, p => { if (isNew) p.tasks.push(draft); else p.tasks[p.tasks.findIndex(x => x.id === id)] = draft; });
+    App.selectedId = id; App.drawerIsNew = false;
+    toast((isNew ? 'Đã thêm ' : 'Đã lưu ') + name, 'ok');
+    this.close();
+  },
+};
+
+/* =====================================================================
+   11. TRANG CHỦ + TẠO KẾ HOẠCH THEO MẪU (2 bước)
+   ===================================================================== */
+const Home = {
+  render() {
+    const s = Store.state;
+    const cards = s.plans.map(p => {
+      const r = Scheduler.schedule(p), k = r.kpi;
+      return `<div class="plan-card ${p.id === s.activePlanId ? 'active' : ''}" data-open-plan="${U.esc(p.id)}">
+        <h4>${U.esc(p.name)}</h4>
+        <dl><dt>Bắt đầu</dt><dd>${U.fmtDT(r.P)}</dd><dt>Kết thúc</dt><dd>${k.taskCount ? U.fmtDT(r.windowEnd) : '–'}</dd>
+          <dt>Tổng thời gian</dt><dd>${U.fmtDur(k.windowHours)}</dd><dt>Số task</dt><dd>${k.taskCount} task · ${k.assignedCount} đã có người</dd>
+          <dt>Tiến độ</dt><dd>${U.fmtNum(k.progress, 0)}%<div class="progress-bar"><div style="width:${k.progress}%"></div></div></dd></dl>
+        <div class="acts"><button class="btn primary" data-open-plan="${U.esc(p.id)}">Mở</button><button class="btn" data-copy-plan="${U.esc(p.id)}">Sao chép</button><button class="btn danger" data-del-plan="${U.esc(p.id)}" ${s.plans.length < 2 ? 'disabled' : ''}>Xóa</button></div></div>`;
+    }).join('');
+    const el = $('#viewHome');
+    el.innerHTML = `<div class="home-h"><div><h2>Kế hoạch Shutdown</h2><p>Chọn kế hoạch để xem Gantt, hoặc tạo kế hoạch mới từ bộ task mẫu.</p></div><span class="spacer"></span>
+        <button class="btn primary lg" id="hNew">+ Tạo kế hoạch mới</button></div>
+      <div class="plan-grid"><button class="plan-card new-card" id="hNew2">+ Tạo kế hoạch mới<span>Chọn ngày giờ bắt đầu → hệ thống xếp sẵn các task mẫu</span></button>${cards}</div>`;
+    $('#hNew').onclick = $('#hNew2').onclick = () => this.wizard();
+    $$('[data-open-plan]', el).forEach(b => b.onclick = e => { e.stopPropagation(); App.openPlan(b.dataset.openPlan); });
+    $$('[data-copy-plan]', el).forEach(b => b.onclick = e => { e.stopPropagation(); this.wizard(b.dataset.copyPlan); });
+    $$('[data-del-plan]', el).forEach(b => b.onclick = async e => {
+      e.stopPropagation();
+      const pl = s.plans.find(p => p.id === b.dataset.delPlan);
+      if (!(await confirmBox('Xóa kế hoạch', `Xóa kế hoạch <b>${U.esc(pl.name)}</b> (${pl.tasks.length} task)? Có thể hoàn tác bằng Ctrl+Z.`, 'Xóa', true))) return;
+      Store.commit('Xóa kế hoạch', () => { s.plans = s.plans.filter(p => p.id !== pl.id); if (s.activePlanId === pl.id) s.activePlanId = s.plans[0].id; });
+    });
+  },
+
+  /** Bước 1: tên + ngày giờ bắt đầu + nguồn task. Bước 2: danh sách task có giờ tính sẵn, thêm/bớt/sửa */
+  wizard(copyFromId) {
+    const s = Store.state, tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    const date = U.toLocalISO(tomorrow.getTime()).slice(0, 10);
+    this.w = {
+      name: copyFromId ? s.plans.find(p => p.id === copyFromId).name + ' (bản sao)' : 'Shutdown ' + date.split('-').reverse().join('/'),
+      date, time: '06:00', target: copyFromId ? s.plans.find(p => p.id === copyFromId).targetHours : 32, src: copyFromId || 'template', tasks: null,
+    };
+    this.step1();
+  },
+  step1() {
+    const s = Store.state, w = this.w;
+    const m = openModal(`<div class="modal-h"><h3>Tạo kế hoạch Shutdown mới</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b"><div class="steps"><span class="on">1. Thời gian bắt đầu</span><span>2. Danh sách task</span></div>
+        <div class="fg">
+          <label class="fl full"><span>Tên kế hoạch</span><input id="w_name" value="${U.esc(w.name)}"></label>
+          <label class="fl"><span>Ngày bắt đầu</span><input id="w_date" type="date" value="${w.date}"></label>
+          <label class="fl"><span>Giờ bắt đầu</span><input id="w_time" type="time" value="${w.time}"></label>
+          <label class="fl"><span>Mục tiêu tổng thời gian (giờ)</span><input id="w_target" type="number" min="1" step="0.5" value="${w.target}"></label>
+          <label class="fl"><span>Lấy task từ</span><select id="w_src">
+            <option value="template" ${w.src === 'template' ? 'selected' : ''}>Bộ task mẫu (14 task)</option>
+            ${s.plans.map(p => `<option value="${U.esc(p.id)}" ${w.src === p.id ? 'selected' : ''}>Kế hoạch: ${U.esc(p.name)} (${p.tasks.length} task)</option>`).join('')}
+            <option value="empty" ${w.src === 'empty' ? 'selected' : ''}>Trống – tự thêm task</option></select></label>
+        </div><div class="err-msg" id="w_err"></div></div>
+      <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="w_next">Tiếp: xem danh sách task</button></div>`, 'sm');
+    $('#w_next', m).onclick = () => {
+      const srcChanged = w.src !== $('#w_src').value;
+      const typed = $('#w_name').value.trim(), autoName = d => 'Shutdown ' + d.split('-').reverse().join('/');
+      w.name = !typed || typed === autoName(w.date) ? autoName($('#w_date').value || w.date) : typed;
+      Object.assign(w, { date: $('#w_date').value, time: $('#w_time').value, target: U.num($('#w_target').value, 0), src: $('#w_src').value });
+      if (!isFinite(U.parseLocalISO(w.date + 'T' + w.time))) { $('#w_err').textContent = 'Hãy chọn ngày và giờ bắt đầu.'; return; }
+      if (!(w.target > 0)) { $('#w_err').textContent = 'Mục tiêu phải lớn hơn 0.'; return; }
+      if (!w.tasks || srcChanged) {
+        if (w.src === 'template') w.tasks = templateTasks();
+        else if (w.src === 'empty') w.tasks = [];
+        else w.tasks = U.clone(s.plans.find(p => p.id === w.src).tasks).map(t => { t.progress = 0; if (t.constraintType === 'SNET' && !t.locked) { t.constraintType = 'ASAP'; t.constraintOffsetHours = null; } return normalizeTask(t); });
+      }
+      this.step2();
+    };
+  },
+  step2() {
+    const w = this.w, start = w.date + 'T' + w.time;
+    const procs = [...new Set([...PROCESS_DEFAULT, ...w.tasks.map(t => t.process)])];
+    const m = openModal(`<div class="modal-h"><h3>${U.esc(w.name)}</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b"><div class="steps"><span>1. Thời gian bắt đầu</span><span class="on">2. Danh sách task</span></div>
+        <div class="sumline" id="w_sum"></div>
+        <p class="small muted" style="margin:0 0 8px">Giờ bắt đầu/kết thúc tự tính theo thời lượng và thứ tự chuẩn. Có thể sửa tên, thời lượng, người thực hiện; thêm hoặc bỏ task.</p>
+        <datalist id="w_procs">${procs.map(p => `<option value="${U.esc(p)}">`).join('')}</datalist>
+        <div class="prev-wrap"><table class="tbl"><thead><tr><th style="width:34px">#</th><th style="width:120px">Process</th><th>Task</th><th style="width:90px">Giờ</th><th style="width:190px">Người thực hiện</th><th style="width:105px">Bắt đầu</th><th style="width:105px">Kết thúc</th><th style="width:40px"></th></tr></thead>
+        <tbody id="w_rows"></tbody></table></div>
+        <button class="btn" id="w_add" style="margin-top:10px">+ Thêm task</button>
+        <div class="err-msg" id="w_err"></div></div>
+      <div class="modal-f"><button class="btn" id="w_back">Quay lại</button><span style="flex:1"></span><button class="btn" data-close>Hủy</button><button class="btn primary" id="w_ok">Tạo kế hoạch</button></div>`);
+    const rowsEl = $('#w_rows', m);
+    const drawRows = () => {
+      rowsEl.innerHTML = w.tasks.map((t, i) => `<tr data-i="${i}">
+        <td class="muted">${i + 1}</td>
+        <td><input data-f="process" list="w_procs" value="${U.esc(t.process)}"></td>
+        <td><input data-f="taskName" value="${U.esc(t.taskName)}" placeholder="Tên task"></td>
+        <td><input data-f="durationHours" type="number" min="0" step="0.25" value="${+t.durationHours.toFixed(4)}"></td>
+        <td><input data-f="assignee" value="${U.esc(t.assignee)}" placeholder="Tên người"></td>
+        <td class="nowrap" data-s></td><td class="nowrap" data-e></td>
+        <td><button class="btn icon" data-del title="Bỏ task này">✕</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted" style="text-align:center;padding:20px">Chưa có task – bấm “+ Thêm task”.</td></tr>';
+      calc();
+    };
+    /** Tính lại giờ bằng chính engine lập lịch (process chạy song song, không cộng dồn) */
+    const calc = () => {
+      const r = Scheduler.schedule(makePlan({ start, targetHours: w.target, tasks: w.tasks }));
+      $$('tr[data-i]', rowsEl).forEach(tr => { const t = w.tasks[+tr.dataset.i], x = r.R.get(t.id); $('[data-s]', tr).textContent = x ? U.fmtDM(x.start) : ''; $('[data-e]', tr).textContent = x ? U.fmtDM(x.end) : ''; });
+      const over = w.tasks.length && r.kpi.windowHours > w.target;
+      $('#w_sum', m).innerHTML = `<div><span>Bắt đầu</span><b>${U.fmtDT(U.parseLocalISO(start))}</b></div><div><span>Kết thúc dự kiến</span><b>${w.tasks.length ? U.fmtDT(r.windowEnd) : '–'}</b></div>
+        <div><span>Tổng thời gian</span><b style="color:${over ? 'var(--st-late)' : 'inherit'}">${U.fmtDur(r.kpi.windowHours)}</b></div><div><span>Mục tiêu</span><b>${U.fmtNum(w.target)} giờ</b></div><div><span>Số task</span><b>${w.tasks.length}</b></div>`;
+    };
+    rowsEl.addEventListener('input', e => {
+      const f = e.target.dataset.f; if (!f) return;
+      const t = w.tasks[+e.target.closest('tr').dataset.i];
+      t[f] = f === 'durationHours' ? U.num(e.target.value, 0) : e.target.value;
+      if (f === 'durationHours' || f === 'process') calc();
+    });
+    rowsEl.addEventListener('click', e => {
+      if (!e.target.closest('[data-del]')) return;
+      const t = w.tasks.splice(+e.target.closest('tr').dataset.i, 1)[0];
+      w.tasks.forEach(x => x.dependencyIds = x.dependencyIds.filter(d => d !== t.id));
+      drawRows();
+    });
+    $('#w_add', m).onclick = () => {
+      const last = w.tasks[w.tasks.length - 1];
+      w.tasks.push(normalizeTask({ id: nextTaskId({ tasks: w.tasks }), order: w.tasks.reduce((a, t) => Math.max(a, t.order), 0) + 1, branch: last?.branch || 'Nhánh Hạt', process: last?.process || 'EXT', owner: last?.owner || '', durationHours: 1, standardHours: 1 }));
+      drawRows(); $$('input[data-f="taskName"]', rowsEl).pop()?.focus();
+    };
+    $('#w_back', m).onclick = () => this.step1();
+    $('#w_ok', m).onclick = () => {
+      const bad = w.tasks.findIndex(t => !String(t.taskName).trim() || !(t.durationHours > 0));
+      if (bad >= 0) { $('#w_err', m).textContent = `Dòng ${bad + 1}: cần có tên task và thời lượng > 0.`; return; }
+      const np = makePlan({ name: w.name, start, targetHours: w.target, tasks: w.tasks.map(normalizeTask), resourceCapacity: { 'Nhà thầu': 3 } });
+      Actions.renumber(np);
+      Store.commit('Tạo kế hoạch ' + w.name, () => { Store.state.plans.push(np); Store.state.activePlanId = np.id; });
+      closeModal(); App.openPlan(np.id); toast(`Đã tạo "${w.name}" với ${np.tasks.length} task`, 'ok');
+    };
+    drawRows();
+  },
+};
+
+/* =====================================================================
+   12. PANELS – AUTO SCHEDULE, CẢNH BÁO, NGUỒN LỰC, MENU
+   ===================================================================== */
+const Panels = {
+  autoSchedule() {
+    const m = openModal(`<div class="modal-h"><h3>Tự động sắp lịch</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b"><p style="margin-top:0">Xếp lại toàn bộ task: các process chạy song song, task có phụ thuộc chờ task trước xong, tính đường găng.</p>
+        <label class="chk"><input type="checkbox" id="as_reset" checked> Bỏ các mốc đã kéo tay, xếp sớm nhất có thể (task cố định / khóa giữ nguyên)</label><br>
+        <label class="chk"><input type="checkbox" id="as_level"> Tự dời task khi một người/đội bị trùng giờ</label></div>
+      <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="as_ok">Chạy</button></div>`, 'sm');
+    $('#as_ok', m).onclick = () => {
+      const reset = $('#as_reset').checked, level = $('#as_level').checked, pre = Scheduler.schedule(Store.plan());
+      if (pre.issues.some(i => i.level === 'error')) { closeModal(); this.warnings('Cần sửa lỗi dữ liệu trước khi sắp lịch'); return; }
+      const before = pre.kpi.windowHours; let moved = [];
+      Store.commit('Tự động sắp lịch', p => {
+        if (reset) p.tasks.forEach(t => { if (t.constraintType === 'SNET' && !t.locked && t.executionMode !== 'fixed') { t.constraintType = 'ASAP'; t.constraintOffsetHours = null; } });
+        if (level) { const lv = Scheduler.levelResources(p); moved = lv.moved; p.tasks = lv.plan.tasks; }
+      });
+      closeModal();
+      const k = App.res.kpi;
+      toast(`Đã sắp lịch: ${U.fmtDur(before, true)} → ${U.fmtDur(k.windowHours, true)}${level ? ` · dời ${moved.length} task` : ''} · còn ${k.conflictCount} xung đột`, k.conflictCount ? 'warn' : 'ok');
+      App.scrollToStart();
+    };
+  },
+  warnings(title) {
+    const res = App.res, byId = new Map(Store.plan().tasks.map(t => [t.id, t])), ord = { error: 0, warn: 1, info: 2 };
+    const list = res.issues.slice().sort((a, b) => ord[a.level] - ord[b.level]);
+    const html = list.length ? list.map((is, i) => `<div class="warn-item ${is.level === 'error' ? 'error' : is.level === 'info' ? 'info' : ''}">
+        <div class="wt">${U.esc(is.msg)}${is.suggestionText ? `<div class="small" style="margin-top:3px;color:var(--accent)">${U.esc(is.suggestionText)}</div>` : ''}
+          <div class="small muted" style="margin-top:3px">${(is.taskIds || []).map(id => `<b data-goto="${U.esc(id)}">${U.esc(byId.get(id)?.taskName || id)}</b>`).join(' · ')}</div></div>
+        ${is.suggestion ? `<button class="btn" data-apply="${i}">Áp dụng</button>` : ''}</div>`).join('')
+      : '<div class="empty-state">Không có cảnh báo – dữ liệu hợp lệ, không ai bị trùng giờ.</div>';
+    const m = openModal(`<div class="modal-h"><h3>${U.esc(title || 'Cảnh báo & kiểm tra dữ liệu')} (${list.length})</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b">${html}</div>
+      <div class="modal-f">${res.conflicts.some(c => c.suggestion) ? '<button class="btn" id="w_level">Tự dời tất cả task bị trùng</button>' : ''}<button class="btn" data-close>Đóng</button></div>`);
+    $$('[data-goto]', m).forEach(b => b.onclick = () => { closeModal(); App.selectTask(b.dataset.goto, true); });
+    $$('[data-apply]', m).forEach(b => b.onclick = () => {
+      const is = list[+b.dataset.apply];
+      Store.commit('Áp dụng đề xuất dời task', p => { const t = p.tasks.find(x => x.id === is.suggestion.taskId); t.constraintType = 'SNET'; t.constraintOffsetHours = (is.suggestion.toMs - res.P) / MS_H; });
+      toast('Đã dời task theo đề xuất', 'ok'); this.warnings(title);
+    });
+    const lb = $('#w_level', m); if (lb) lb.onclick = () => { closeModal(); this.level(); };
+  },
+  level() {
+    let info;
+    Store.commit('Cân bằng nguồn lực', p => { info = Scheduler.levelResources(p); if (!info.moved.length) return false; p.tasks = info.plan.tasks; });
+    if (!info.moved.length) { toast('Không có xung đột nào để tự xử lý.', 'warn'); return; }
+    toast(`Đã dời ${info.moved.length} task. Còn ${info.remaining} xung đột.`, info.remaining ? 'warn' : 'ok');
+  },
+  capacity() {
+    const p = Store.plan(), names = [...new Map(p.tasks.flatMap(t => Scheduler.resourcesOf(t)).map(o => [U.norm(o), o])).values()].sort((a, b) => a.localeCompare(b, 'vi'));
+    const cap = p.resourceCapacity || {}, get = n => { for (const k in cap) if (U.norm(k) === U.norm(n)) return cap[k]; return 1; };
+    const m = openModal(`<div class="modal-h"><h3>Năng lực người / đội</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b"><p class="muted small" style="margin-top:0">Số task được làm cùng lúc (mặc định 1). Kiểm tra trùng giờ dùng <b>Người thực hiện</b>; task chưa có người thì dùng <b>Đội phụ trách</b>.</p>
+      ${names.length ? `<table class="tbl"><thead><tr><th>Người / đội</th><th>Task cùng lúc</th><th>Số task</th></tr></thead><tbody>
+      ${names.map(n => `<tr><td>${U.esc(n)}</td><td><input type="number" min="1" step="1" data-cap="${U.esc(n)}" value="${get(n)}" style="width:80px"></td><td>${p.tasks.filter(t => Scheduler.resourcesOf(t).some(o => U.norm(o) === U.norm(n))).length}</td></tr>`).join('')}</tbody></table>` : '<p>Chưa có người/đội nào.</p>'}</div>
+      <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="cap_ok">Lưu</button></div>`, 'sm');
+    $('#cap_ok', m).onclick = () => { const nc = {}; $$('[data-cap]', m).forEach(i => { const v = Math.max(1, Math.round(U.num(i.value, 1))); if (v !== 1) nc[i.dataset.cap] = v; }); Store.commit('Cập nhật năng lực', p => { p.resourceCapacity = nc; }); closeModal(); };
+  },
+  async more(cmd) {
+    const s = Store.state;
+    if (cmd === 'warnings') this.warnings();
+    else if (cmd === 'level') this.level();
+    else if (cmd === 'capacity') this.capacity();
+    else if (cmd === 'renumber') { Store.commit('Đánh lại STT', p => Actions.renumber(p, true)); toast('Đã đánh lại STT theo giờ bắt đầu', 'ok'); }
+    else if (cmd === 'dark') { s.ui.dark = document.body.classList.toggle('dark'); Store.save(); App.renderMain(); }
+    else if (cmd === 'restore-json') $('#fileJson').click();
+    else if (cmd === 'save-app') Persist.saveApp();
+    else if (cmd === 'copy-data') Persist.copyData();
+    else if (cmd === 'paste-data') Persist.pasteData();
+    else if (cmd === 'sample') {
+      if (!(await confirmBox('Khôi phục kế hoạch mẫu', 'Thêm lại kế hoạch mẫu 14 task? Các kế hoạch khác giữ nguyên.'))) return;
+      Store.commit('Khôi phục kế hoạch mẫu', () => { const sp = samplePlan(); s.plans = s.plans.filter(p => p.id !== sp.id); s.plans.unshift(sp); s.activePlanId = sp.id; });
+      App.openPlan('PLAN-SAMPLE');
+    }
+    else if (cmd === 'stress') { const sp = IO.stressPlan(300); Store.commit('Tạo kế hoạch kiểm thử', () => { s.plans.push(sp); s.activePlanId = sp.id; }); App.openPlan(sp.id); }
+    else if (cmd === 'clear') {
+      if (!(await confirmBox('Xóa toàn bộ dữ liệu', 'Xóa <b>tất cả kế hoạch</b>? Nên Export JSON backup trước.', 'Xóa hết', true))) return;
+      Store.commit('Xóa toàn bộ dữ liệu', () => { const np = makePlan({ name: 'Kế hoạch Shutdown mới', start: defaultSampleStart() }); s.plans = [np]; s.activePlanId = np.id; });
+      App.switchView('home'); toast('Đã xóa dữ liệu.', 'ok');
+    }
+  },
+};
+
+/* =====================================================================
+   13. DASHBOARD
+   ===================================================================== */
+const Dash = {
+  hbar(items, unit) {
+    if (!items.length) return '<div class="muted">Chưa có dữ liệu</div>';
+    const max = Math.max(...items.map(i => i.value), 1), rowH = 26, W = 560, L = 130, Rr = 130;
+    return `<svg viewBox="0 0 ${W} ${items.length * rowH + 6}" width="100%">${items.map((it, i) => {
+      const w = (W - L - Rr) * it.value / max, y = i * rowH + 4;
+      return `<text x="${L - 8}" y="${y + 15}" text-anchor="end" font-size="12">${U.esc(it.label)}</text><rect x="${L}" y="${y + 3}" width="${Math.max(1, w)}" height="${rowH - 10}" rx="3" fill="${it.color}"/><text x="${L + w + 6}" y="${y + 15}" font-size="11.5">${U.fmtNum(it.value)} ${unit}</text>`;
+    }).join('')}</svg>`;
+  },
+  render() {
+    const p = Store.plan(), res = App.res, k = res.kpi, el = $('#viewDash');
+    const over = p.targetHours > 0 && k.windowHours > p.targetHours + 1e-6;
+    const card = (l, v, s = '') => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ''}</div>`;
+    const kp = [
+      card('Tổng số task', k.taskCount, `${k.assignedCount} task đã có người thực hiện`),
+      card('Số process', k.processCount),
+      card('Bắt đầu', k.taskCount ? U.fmtDT(k.start) : '–'),
+      card('Kết thúc dự kiến', k.taskCount ? U.fmtDT(k.end) : '–'),
+      card('Tổng thời gian Shutdown', `<span style="color:${over ? 'var(--st-late)' : 'inherit'}">${U.fmtDur(k.windowHours, true)}</span>`, `Mục tiêu ${U.fmtNum(p.targetHours)}h · nếu làm nối tiếp: ${U.fmtDur(k.sumDuration, true)}`),
+      card('Tổng giờ công', U.fmtNum(k.manHours) + ' h', 'thời lượng × số người'),
+      card('Task song song nhiều nhất', k.maxParallel, k.maxParallelAt ? 'lúc ' + U.fmtDM(k.maxParallelAt) : ''),
+      card('Xung đột người/đội', k.conflictCount),
+      card('Task đường găng', k.criticalCount),
+      card('Tiến độ', U.fmtNum(k.progress, 0) + '%', `<div class="progress-bar"><div style="width:${k.progress}%"></div></div>`),
+    ].join('');
+    const procMap = new Map(); for (const t of p.tasks) procMap.set(t.process, (procMap.get(t.process) || 0) + t.durationHours);
+    const procItems = [...procMap].sort((a, b) => b[1] - a[1]).map(([pr, v]) => ({ label: pr, value: v, color: processColor(p, pr) }));
+    const brMap = new Map(); for (const t of p.tasks) brMap.set(t.branch, (brMap.get(t.branch) || 0) + t.durationHours * t.peopleRequired);
+    const brItems = [...brMap].map(([b, v], i) => ({ label: b, value: v, color: ['#0f2a4a', '#0e7490', '#7c3aed', '#b45309'][i % 4] }));
+    const span = Math.max(k.windowHours, 1), bh = span <= 36 ? 1 : span <= 96 ? 2 : span <= 240 ? 4 : 8, buckets = [];
+    if (k.taskCount) for (let t = res.windowStart; t < res.windowEnd; t += bh * MS_H) { const e = t + bh * MS_H; let n = 0; for (const x of res.R.values()) if (x.start < e && x.end > t) n++; buckets.push({ t, n }); }
+    const maxB = Math.max(1, ...buckets.map(b => b.n)), CW = 760, CH = 170, bw = buckets.length ? (CW - 40) / buckets.length : 0, every = Math.max(1, Math.ceil(buckets.length / 16));
+    const SC = ['#f59e0b', '#2563eb', '#475569'];
+    const colChart = buckets.length ? `<svg viewBox="0 0 ${CW} ${CH + 34}" width="100%"><line class="ax" x1="34" y1="${CH}" x2="${CW}" y2="${CH}"/>
+      ${[0, .5, 1].map(f => `<text x="28" y="${CH - f * (CH - 12) + 4}" font-size="10" text-anchor="end">${Math.round(maxB * f)}</text>`).join('')}
+      ${buckets.map((b, i) => { const h = (CH - 12) * b.n / maxB, x = 36 + i * bw; return `<rect x="${x}" y="${CH - h}" width="${Math.max(1, bw - 2)}" height="${h}" fill="${SC[U.shiftOf(b.t) - 1]}" rx="2"><title>${U.fmtDM(b.t)}: ${b.n} task</title></rect>${i % every === 0 ? `<text x="${x}" y="${CH + 13}" font-size="9.5">${U.fmtHM(b.t)}</text>${new Date(b.t).getHours() < bh || i === 0 ? `<text x="${x}" y="${CH + 26}" font-size="9.5" font-weight="700">${U.fmtDate(b.t).slice(3, 8)}</text>` : ''}` : ''}`; }).join('')}</svg>
+      <div class="small muted">Mỗi cột ${bh} giờ · màu theo ca: <span style="color:${SC[0]}">■</span> Ca 1 <span style="color:${SC[1]}">■</span> Ca 2 <span style="color:${SC[2]}">■</span> Ca 3</div>` : '<div class="muted">Chưa có dữ liệu</div>';
+    const sh = [0, 0, 0]; for (const t of p.tasks) { const r = res.R.get(t.id); U.shiftHours(r.start, r.end).forEach((h, i) => sh[i] += h); }
+    const shItems = sh.map((h, i) => ({ label: ['Ca 1 (06–14)', 'Ca 2 (14–22)', 'Ca 3 (22–06)'][i], value: h, color: SC[i] }));
+    const crit = p.tasks.filter(t => res.R.get(t.id).critical).sort((a, b) => res.R.get(a.id).start - res.R.get(b.id).start);
+    el.innerHTML = `<h3 style="margin:0 0 12px">${U.esc(p.name)}</h3><div class="kpis">${kp}</div>
+      <div class="charts">
+        <div class="card"><h4>Tổng giờ theo Process</h4>${this.hbar(procItems, 'h')}</div>
+        <div class="card"><h4>Tổng giờ công theo Nhánh</h4>${this.hbar(brItems, 'giờ công')}</div>
+        <div class="card" style="grid-column:1/-1"><h4>Số task đang chạy theo khung giờ</h4>${colChart}</div>
+        <div class="card"><h4>Giờ làm việc theo ca</h4>${this.hbar(shItems, 'h')}</div>
+        <div class="card"><h4>Đường găng (${crit.length} task)</h4><div style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Process</th><th>Task</th><th>Người thực hiện</th><th>Thời gian</th></tr></thead><tbody>
+          ${crit.map(t => { const r = res.R.get(t.id); return `<tr><td>${U.esc(t.process)}</td><td><a href="#" data-goto="${U.esc(t.id)}">${U.esc(t.taskName)}</a></td><td>${U.esc(t.assignee || '–')}</td><td class="nowrap">${U.fmtDM(r.start)} → ${U.fmtHM(r.end)}</td></tr>`; }).join('')}</tbody></table></div></div>
+      </div>`;
+    $$('[data-goto]', el).forEach(a => a.onclick = e => { e.preventDefault(); App.selectTask(a.dataset.goto, true); });
+  },
+};
+
+/* =====================================================================
+   14. PERSIST – CÁC CÁCH LƯU KHI TRÌNH DUYỆT CHẶN BỘ NHỚ
+   1) Tải app kèm dữ liệu: tạo file HTML mới có nhúng sẵn dữ liệu → lần sau mở file đó là có lại kế hoạch.
+   2) Sao chép / Dán dữ liệu dạng chữ: dùng được cả khi khung xem trước chặn tải file.
+   ===================================================================== */
+const Persist = {
+  dataJson() { Store.flush(); return JSON.stringify({ app: 'shutdown-planner', version: 1, savedAt: Date.now(), activePlanId: Store.state.activePlanId, plans: Store.state.plans, ui: Store.state.ui }); },
+  buildAppHtml() {
+    const json = this.dataJson().replace(/</g, '\\u003c');   // an toàn khi nhúng trong thẻ <script>
+    return __APP_SRC__
+      .replace(/<script[^>]*data-dyn="1"[^>]*><\/script>/g, '')
+      .replace(/(<script id="spData" type="application\/json">)[\s\S]*?(<\/script>)/, (m, a, b) => a + json + b);
+  },
+  saveApp() {
+    const name = 'Shutdown_Planner_' + safeName(Store.plan().name) + '_' + stamp() + '.html';
+    download(name, new Blob([this.buildAppHtml()], { type: 'text/html;charset=utf-8' }));
+    Store.dirty = false;
+    toast('Đã tạo file "' + name + '". Lần sau mở file này là có lại dữ liệu. Nếu không thấy file tải về, dùng "Sao chép dữ liệu".', 'ok');
+  },
+  copyData() {
+    const m = openModal(`<div class="modal-h"><h3>Sao chép dữ liệu</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b"><p style="margin-top:0">Bấm <b>Sao chép</b>, rồi dán (Ctrl+V) vào Notepad, OneNote, Teams chat hoặc email cho chính mình để cất giữ.
+        Lần sau mở app → bấm <b>Dán dữ liệu</b> → dán lại đoạn này.</p>
+        <textarea id="cp_txt" readonly style="width:100%;height:260px;font-family:Consolas,monospace;font-size:11px">${U.esc(this.dataJson())}</textarea></div>
+      <div class="modal-f"><span class="muted small" id="cp_msg" style="flex:1"></span><button class="btn" data-close>Đóng</button><button class="btn primary" id="cp_btn">Sao chép</button></div>`);
+    const ta = $('#cp_txt', m); setTimeout(() => { ta.focus(); ta.select(); }, 30);
+    $('#cp_btn', m).onclick = async () => {
+      ta.focus(); ta.select(); let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { }
+      if (!ok) { try { await navigator.clipboard.writeText(ta.value); ok = true; } catch (e) { } }
+      $('#cp_msg', m).textContent = ok ? 'Đã sao chép – dán vào Notepad/OneNote để cất giữ.' : 'Trình duyệt chặn sao chép tự động – đoạn chữ đã được bôi đen, hãy bấm Ctrl+C.';
+      if (ok) Store.dirty = false;
+    };
+  },
+  pasteData() {
+    const m = openModal(`<div class="modal-h"><h3>Dán dữ liệu</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b"><p style="margin-top:0">Dán (Ctrl+V) đoạn dữ liệu đã sao chép trước đó vào ô dưới, rồi bấm <b>Khôi phục</b>.</p>
+        <textarea id="ps_txt" style="width:100%;height:240px;font-family:Consolas,monospace;font-size:11px" placeholder='{"app":"shutdown-planner", ...}'></textarea>
+        <div class="err-msg" id="ps_err"></div></div>
+      <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="ps_ok">Khôi phục</button></div>`);
+    setTimeout(() => $('#ps_txt', m).focus(), 30);
+    $('#ps_ok', m).onclick = () => {
+      const d = Persist.parseAny($('#ps_txt', m).value);
+      if (!d) { $('#ps_err', m).textContent = 'Không đọc được dữ liệu – hãy dán đúng đoạn chữ đã sao chép (bắt đầu bằng {"app":"shutdown-planner"...).'; return; }
+      Persist.apply(d); closeModal();
+    };
+  },
+  /** Đọc dữ liệu từ: JSON backup, đoạn chữ đã sao chép, hoặc file HTML app kèm dữ liệu */
+  parseAny(txt) {
+    txt = String(txt || '').trim(); if (!txt) return null;
+    const m = /<script id="spData" type="application\/json">([\s\S]*?)<\/script>/.exec(txt);
+    if (m) txt = m[1].trim();
+    try { const d = JSON.parse(txt); return d && Array.isArray(d.plans) && d.plans.length ? d : null; } catch (e) { return null; }
+  },
+  apply(d) {
+    const clean = Store.sanitize({ plans: d.plans, activePlanId: d.activePlanId, ui: Store.state.ui });
+    Store.commit('Khôi phục dữ liệu', () => { Store.state.plans = clean.plans; Store.state.activePlanId = clean.activePlanId; });
+    Store.dirty = false; App.switchView('home');
+    toast(`Đã khôi phục ${clean.plans.length} kế hoạch.`, 'ok');
+  },
+};
+
+/* =====================================================================
+   14. IO – IMPORT (XEM TRƯỚC), EXPORT EXCEL/CSV/JSON, IN PDF
+   ===================================================================== */
+const COLS = {   // tên cột chấp nhận (đã bỏ dấu, chữ thường)
+  stt: ['stt', 'no', 'no.', '#', 'thu tu'],
+  id: ['id', 'ma task', 'task id'],
+  branch: ['nhanh', 'nhanh san xuat', 'branch'],
+  process: ['process', 'cong doan', 'line', 'khu vuc'],
+  task: ['task', 'ten task', 'cong viec', 'noi dung', 'task name', 'ten cong viec'],
+  start: ['bat dau', 'thoi diem bat dau', 'ngay bat dau', 'start', 'start time'],
+  end: ['ket thuc', 'thoi diem ket thuc', 'ngay ket thuc', 'end', 'end time'],
+  duration: ['khung ke hoach (gio)', 'khung ke hoach', 'thoi luong ke hoach (gio)', 'thoi luong (gio)', 'thoi luong', 'duration', 'gio'],
+  durationMin: ['thoi luong (phut)', 'total time(min)', 'total time (min)', 'phut'],
+  standard: ['dinh muc (gio)', 'dinh muc', 'dinh muc thuc hien (gio)', 'standard'],
+  quantity: ['so luong', 'sl', 'qty', 'quantity'],
+  people: ['so nguoi', 'people', 'nhan su'],
+  assignee: ['nguoi thuc hien', 'ten nguoi thuc hien', 'ho ten', 'nhan vien', 'assignee'],
+  owner: ['owner', 'doi phu trach', 'nguoi/doi phu trach', 'nguoi phu trach', 'phu trach', 'doi'],
+  method: ['cach thuc hien', 'phuong thuc', 'mode'],
+  deps: ['task phu thuoc', 'phu thuoc', 'chay sau', 'tien nhiem', 'dependency', 'predecessor'],
+  lag: ['do tre (gio)', 'do tre', 'lag'],
+  notes: ['ghi chu', 'note', 'notes'],
+  progress: ['tien do (%)', 'tien do', 'progress'],
+};
+const EXPORT_HEAD = ['STT', 'ID', 'Nhánh', 'Process', 'Task', 'Bắt đầu', 'Kết thúc', 'Khung kế hoạch (giờ)', 'Định mức (giờ)', 'Số lượng', 'Số người', 'Người thực hiện', 'Owner', 'Cách thực hiện', 'Task phụ thuộc', 'Độ trễ (giờ)', 'Ghi chú', 'Tiến độ (%)', 'Đường găng', 'Cảnh báo'];
+
+const IO = {
+  needXLSX() { if (window.XLSX) return true; toast('Chưa tải được SheetJS (cần Internet). Hãy dùng CSV/JSON.', 'err'); return false; },
+  async importFile(file) {
+    try {
+      let sheets;
+      if (/\.csv$/i.test(file.name)) sheets = [{ name: file.name, aoa: this.parseCSV((await file.text()).replace(/^\uFEFF/, '')) }];
+      else {
+        if (!this.needXLSX()) return;
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
+        sheets = wb.SheetNames.map(n => ({ name: n, aoa: XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' }) }));
+      }
+      sheets.forEach(s => s.head = this.findHeader(s.aoa));
+      const best = sheets.filter(s => s.head).sort((a, b) => b.head.score - a.head.score)[0];
+      if (!best) { toast('Không tìm thấy dòng tiêu đề có cột "Task" trong file.', 'err'); return; }
+      this.preview(file.name, sheets, best.name);
+    } catch (e) { console.error(e); toast('Lỗi đọc file: ' + e.message, 'err'); }
+  },
+  parseCSV(txt) {
+    const first = txt.split(/\r?\n/)[0] || '', delim = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ';' : (first.includes('\t') ? '\t' : ',');
+    const rows = []; let row = [], cur = '', q = false;
+    for (let i = 0; i < txt.length; i++) {
+      const c = txt[i];
+      if (q) { if (c === '"') { if (txt[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === '"') q = true;
+      else if (c === delim) { row.push(cur); cur = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && txt[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+      else cur += c;
+    }
+    if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+    return rows;
+  },
+  findHeader(aoa) {
+    let best = null;
+    for (let r = 0; r < Math.min(40, aoa.length); r++) {
+      const map = {}; let score = 0; const cells = aoa[r] || [];
+      cells.forEach((cell, c) => { const h = U.norm(cell); if (!h) return; for (const [k, names] of Object.entries(COLS)) { if (map[k] !== undefined) continue; if (names.includes(h)) { map[k] = c; score += 2; return; } } });
+      cells.forEach((cell, c) => { const h = U.norm(cell); if (!h || Object.values(map).includes(c)) return; for (const [k, names] of Object.entries(COLS)) { if (map[k] !== undefined) continue; if (names.some(n => n.length > 3 && h.startsWith(n))) { map[k] = c; score += 1; return; } } });
+      if (map.task !== undefined && score >= 6 && (!best || score > best.score)) best = { row: r, map, score };
+    }
+    return best;
+  },
+  /** Quy tắc: có "Khung kế hoạch" → ưu tiên duration & tính lại Kết thúc; không có → Kết thúc − Bắt đầu */
+  analyze(sheet) {
+    const { aoa, head } = sheet, m = head.map, out = [], get = (row, k) => m[k] === undefined ? '' : row[m[k]];
+    let lastB = '', lastP = '';
+    for (let r = head.row + 1; r < aoa.length; r++) {
+      const row = aoa[r] || [], name = String(get(row, 'task') ?? '').replace(/\s+/g, ' ').trim();
+      const bIn = String(get(row, 'branch') || '').trim(), pIn = String(get(row, 'process') || '').trim();
+      if (bIn) lastB = bIn; if (pIn) lastP = pIn;
+      if (!name) continue;
+      const it = { line: r + 1, stt: get(row, 'stt'), idIn: String(get(row, 'id') || '').trim(), branch: bIn || lastB || 'Chung', process: pIn || lastP || 'Chung', name, errors: [], notes: [] };
+      const sRaw = get(row, 'start'), eRaw = get(row, 'end');
+      it.start = U.parseVNDate(sRaw); it.end = U.parseVNDate(eRaw);
+      if (sRaw !== '' && it.start === null) it.errors.push(`Không đọc được "Bắt đầu" (${sRaw}) – dùng dd/mm/yyyy HH:mm`);
+      const dur = U.num(get(row, 'duration'), NaN), durMin = U.num(get(row, 'durationMin'), NaN), std = U.num(get(row, 'standard'), NaN);
+      if (dur > 0) { it.dur = dur; if (it.start !== null && it.end !== null && Math.abs((it.end - it.start) / MS_H - dur) > 1 / 60) it.notes.push(`Bắt đầu–Kết thúc = ${U.fmtDur((it.end - it.start) / MS_H)} ≠ ${U.fmtDur(dur)} → dùng thời lượng`); }
+      else if (durMin > 0) it.dur = durMin / 60;
+      else if (it.start !== null && it.end !== null) { if (it.end <= it.start) it.errors.push('Kết thúc phải lớn hơn Bắt đầu'); else it.dur = (it.end - it.start) / MS_H; }
+      else if (std > 0) { it.dur = std; it.notes.push('Không có thời lượng – dùng Định mức'); }
+      if (!(it.dur > 0) && !it.errors.length) it.errors.push('Thiếu thời lượng');
+      it.std = std > 0 ? std : it.dur;
+      it.qty = U.num(get(row, 'quantity'), 1) || 1; it.people = U.num(get(row, 'people'), 1) || 1;
+      it.assignee = String(get(row, 'assignee') || '').trim(); it.owner = String(get(row, 'owner') || '').trim();
+      it.methodRaw = String(get(row, 'method') || '').trim();
+      const mm = U.norm(it.methodRaw);
+      it.mode = /co dinh|fixed/.test(mm) ? 'fixed' : /song song|parallel|dong thoi/.test(mm) ? 'parallel' : /sau task|phu thuoc|after/.test(mm) ? 'after_dependency' : 'sequential';
+      it.depsRaw = String(get(row, 'deps') ?? '').trim(); it.lag = U.num(get(row, 'lag'), 0);
+      it.notesTxt = String(get(row, 'notes') || '').trim(); it.progress = U.num(String(get(row, 'progress')).replace('%', ''), 0);
+      out.push(it);
+    }
+    return out;
+  },
+  preview(fileName, sheets, sheetName) {
+    const sheet = sheets.find(s => s.name === sheetName), items = sheet.head ? this.analyze(sheet) : [];
+    const ok = items.filter(i => !i.errors.length), bad = items.length - ok.length;
+    const earliest = ok.reduce((m, i) => i.start !== null ? Math.min(m, i.start) : m, Infinity);
+    const m = openModal(`<div class="modal-h"><h3>Xem trước dữ liệu – ${U.esc(fileName)}</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b">
+        <div class="opt-grid">
+          <label class="fl"><span>Sheet</span><select id="im_sheet">${sheets.map(s => `<option ${s.name === sheetName ? 'selected' : ''} ${s.head ? '' : 'disabled'}>${U.esc(s.name)}</option>`).join('')}</select></label>
+          <label class="fl"><span>Cách nhập</span><select id="im_mode"><option value="new">Tạo kế hoạch mới từ file</option><option value="replace">Thay toàn bộ task của kế hoạch đang mở</option><option value="append">Thêm vào kế hoạch đang mở</option></select></label>
+          <label class="chk"><input type="checkbox" id="im_keep" checked> Giữ giờ “Bắt đầu” trong file</label>
+          <label class="chk"><input type="checkbox" id="im_setstart" ${isFinite(earliest) ? 'checked' : 'disabled'}> Bắt đầu kế hoạch = ${isFinite(earliest) ? U.fmtDT(earliest) : 'giờ sớm nhất trong file'}</label>
+        </div>
+        <p style="margin:0 0 8px"><b>${items.length}</b> task · <span style="color:var(--st-done)">${ok.length} hợp lệ</span>${bad ? ` · <span style="color:var(--st-late)">${bad} lỗi (bỏ qua)</span>` : ''}</p>
+        <div class="prev-wrap"><table class="tbl"><thead><tr><th>Dòng</th><th>Process</th><th>Task</th><th>Bắt đầu</th><th>Kết thúc</th><th>Thời lượng</th><th>Người thực hiện</th><th>Đội</th><th>Phụ thuộc</th><th>Ghi chú</th></tr></thead><tbody>
+        ${items.slice(0, 600).map(i => `<tr class="${i.errors.length ? 'bad' : i.notes.length ? 'warnrow' : ''}"><td>${i.line}</td><td>${U.esc(i.process)}</td><td>${U.esc(i.name)}</td>
+          <td class="nowrap">${i.start !== null ? U.fmtDM(i.start) : '–'}</td><td class="nowrap">${i.start !== null && i.dur > 0 ? U.fmtDM(i.start + i.dur * MS_H) : '–'}</td><td class="nowrap">${i.dur > 0 ? U.fmtDur(i.dur) : '–'}</td>
+          <td>${U.esc(i.assignee)}</td><td>${U.esc(i.owner)}</td><td>${U.esc(i.depsRaw)}</td><td class="small">${[...i.errors, ...i.notes].map(U.esc).join('<br>')}</td></tr>`).join('')}
+        </tbody></table></div></div>
+      <div class="modal-f"><button class="btn" id="im_tpl">Tải file Excel mẫu</button><span style="flex:1"></span><button class="btn" data-close>Hủy</button><button class="btn primary" id="im_ok" ${ok.length ? '' : 'disabled'}>Import ${ok.length} task</button></div>`);
+    $('#im_sheet', m).onchange = e => this.preview(fileName, sheets, e.target.value);
+    $('#im_tpl', m).onclick = () => this.template();
+    $('#im_ok', m).onclick = () => this.doImport(ok, { mode: $('#im_mode').value, keep: $('#im_keep').checked, setStart: $('#im_setstart').checked && isFinite(earliest), earliest, fileName });
+  },
+  doImport(items, o) {
+    const s = Store.state;
+    Store.commit('Import ' + o.fileName, cur => {
+      let plan = cur;
+      if (o.mode === 'new') { plan = makePlan({ name: o.fileName.replace(/\.\w+$/, ''), start: cur.start, targetHours: cur.targetHours }); s.plans.push(plan); s.activePlanId = plan.id; }
+      if (o.mode !== 'append' && o.setStart) plan.start = U.toLocalISO(o.earliest);
+      const P = U.parseLocalISO(plan.start), base = o.mode === 'append' ? plan.tasks.slice() : [];
+      let maxOrder = base.reduce((m, t) => Math.max(m, t.order), 0);
+      const tmp = { tasks: base }, bySTT = new Map(), byIdIn = new Map(), created = [], used = new Set(base.map(t => t.id));
+      for (const it of items) {
+        const id = it.idIn && !used.has(it.idIn) && o.mode !== 'append' ? it.idIn : nextTaskId(tmp); used.add(id);
+        const t = normalizeTask({ id, order: ++maxOrder, branch: it.branch, process: it.process, taskName: it.name, durationHours: it.dur, standardHours: it.std, quantity: it.qty, peopleRequired: it.people,
+          assignee: it.assignee, owner: it.owner, executionMode: it.mode, lagHours: it.lag, notes: it.notesTxt, method: it.methodRaw, progress: it.progress });
+        if (o.keep && it.start !== null) { if (t.executionMode === 'fixed') t.constraintOffsetHours = (it.start - P) / MS_H; else { t.constraintType = 'SNET'; t.constraintOffsetHours = (it.start - P) / MS_H; } }
+        tmp.tasks.push(t); created.push({ t, it });
+        if (String(it.stt).trim() !== '') bySTT.set(String(it.stt).trim().replace(/\.0+$/, ''), id);
+        if (it.idIn) byIdIn.set(it.idIn, id);
+      }
+      let unresolved = 0;
+      for (const { t, it } of created) {
+        if (!it.depsRaw) continue;
+        t.dependencyIds = String(it.depsRaw).split(/[,;\s]+/).filter(Boolean).map(k => byIdIn.get(k) || bySTT.get(k.replace(/\.0+$/, '')) || base.find(b => b.id === k)?.id).filter(x => { if (!x) unresolved++; return x && x !== t.id; });
+      }
+      plan.tasks = tmp.tasks;
+      for (let guard = 0; guard < 200; guard++) {
+        const g = Scheduler.buildGraph(plan), tp = Scheduler.topo(plan.tasks, g); if (!tp.inCycle.length) break;
+        const cyc = Scheduler.findCycle(g, tp.inCycle), v = plan.tasks.find(x => x.id === cyc[cyc.length - 1]), n = v.dependencyIds.length;
+        v.dependencyIds = v.dependencyIds.filter(d => !cyc.includes(d)); if (v.dependencyIds.length === n) v.executionMode = 'parallel';
+      }
+      if (unresolved) toast(`${unresolved} mã phụ thuộc không tìm thấy – đã bỏ qua.`, 'warn');
+      if (o.mode !== 'append' && plan.tasks.length) { const r = Scheduler.schedule(plan); if (plan.targetHours < r.kpi.windowHours) plan.targetHours = Math.ceil(r.kpi.windowHours); }
+    });
+    closeModal(); App.openPlan(Store.state.activePlanId);
+    toast(`Đã import ${items.length} task.`, 'ok');
+  },
+  tableRows(plan, res, asText) {
+    const list = plan.tasks.slice().sort((a, b) => a.order - b.order), sttOf = new Map(list.map(t => [t.id, t.order]));
+    return list.map(t => {
+      const r = res.R.get(t.id), dt = ms => asText ? U.fmtDT(ms) : U.msToExcelSerial(ms);
+      return [t.order, t.id, t.branch, t.process, t.taskName, dt(r.start), dt(r.end), +t.durationHours.toFixed(6), +t.standardHours.toFixed(6), t.quantity, t.peopleRequired, t.assignee, t.owner,
+        EXEC_MODES[t.executionMode], t.dependencyIds.map(d => sttOf.get(d)).filter(x => x !== undefined).join(', '), t.lagHours || 0, t.notes, t.progress, r.critical ? 'Có' : '', r.issues.filter(i => i.level !== 'info').map(i => i.msg).join(' | ')];
+    });
+  },
+  fmtCols(ws, cols, z, fromRow) {
+    const rg = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = fromRow; R <= rg.e.r; R++) for (const C of cols) { const a = XLSX.utils.encode_cell({ r: R, c: C }); if (ws[a] && typeof ws[a].v === 'number') { ws[a].t = 'n'; ws[a].z = z; } }
+  },
+  export(kind) {
+    const p = Store.plan(), res = App.res, base = safeName(p.name) + '_' + stamp();
+    if (kind === 'json') {
+      Store.flush();
+      download(base + '_backup.json', new Blob([JSON.stringify({ app: 'shutdown-planner', version: 1, exportedAt: new Date().toISOString(), activePlanId: Store.state.activePlanId, plans: Store.state.plans }, null, 1)], { type: 'application/json' }));
+      toast('Đã xuất JSON backup', 'ok'); return;
+    }
+    if (kind === 'csv') {
+      const csv = [EXPORT_HEAD, ...this.tableRows(p, res, true)].map(r => r.map(v => { const s = String(v ?? ''); return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\r\n');
+      download(base + '.csv', new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })); toast('Đã xuất CSV', 'ok'); return;
+    }
+    if (kind === 'print') {
+      if (App.view !== 'gantt') App.switchView('gantt');
+      const old = document.title; document.title = p.name;
+      setTimeout(() => { try { window.print(); } catch (e) { toast('Trình duyệt chặn in – hãy mở file bằng Edge/Chrome.', 'err'); } document.title = old; }, 150);
+      return;
+    }
+    if (!this.needXLSX()) return;
+    try {
+      const wb = XLSX.utils.book_new();
+      if (kind === 'xlsx-list') {
+        const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEAD, ...this.tableRows(p, res, false)]);
+        this.fmtCols(ws, [5, 6], 'dd/mm/yyyy hh:mm', 1);
+        ws['!cols'] = [6, 10, 12, 12, 44, 17, 17, 10, 10, 8, 8, 22, 18, 22, 12, 9, 30, 9, 9, 50].map(w => ({ wch: w }));
+        XLSX.utils.book_append_sheet(wb, ws, 'Danh sách task');
+        XLSX.writeFile(wb, base + '_DanhSachTask.xlsx'); toast('Đã xuất Excel danh sách task', 'ok');
+      } else if (kind === 'xlsx-timeline') {
+        const head = ['STT', 'Nhánh', 'Process', 'Task', 'Bắt đầu', 'Kết thúc', 'Khung kế hoạch (giờ)', 'Người thực hiện', 'Owner', 'Task phụ thuộc', 'Ghi chú'];
+        const tasks = p.tasks.slice().sort((a, b) => res.R.get(a.id).start - res.R.get(b.id).start || a.order - b.order), sttOf = new Map(p.tasks.map(t => [t.id, t.order]));
+        const title = [[`TIMELINE SHUTDOWN – ${p.name}`], [`${U.fmtDT(res.windowStart)} → ${U.fmtDT(res.windowEnd)} · ${U.fmtDur(res.kpi.windowHours)} · ${p.tasks.length} task`], []];
+        const ws1 = XLSX.utils.aoa_to_sheet([...title, head, ...tasks.map(t => { const r = res.R.get(t.id); return [t.order, t.branch, t.process, t.taskName, U.msToExcelSerial(r.start), U.msToExcelSerial(r.end), +t.durationHours.toFixed(6), t.assignee, t.owner, t.dependencyIds.map(d => sttOf.get(d)).join(', '), t.notes]; })]);
+        this.fmtCols(ws1, [4, 5], 'dd/mm/yyyy hh:mm', title.length + 1);
+        ws1['!cols'] = [6, 12, 12, 46, 17, 17, 10, 22, 18, 12, 30].map(w => ({ wch: w }));
+        XLSX.utils.book_append_sheet(wb, ws1, 'Timeline Chi Tiết');
+        const z = Store.ui().zoom, bh = z >= 24 ? 4 : Math.max(1, z), a0 = new Date(res.windowStart); a0.setMinutes(0, 0, 0);
+        const s0 = a0.getTime() - (a0.getHours() % bh) * MS_H, buckets = []; for (let t = s0; t < res.windowEnd; t += bh * MS_H) buckets.push(t);
+        const grid = tasks.map(t => { const r = res.R.get(t.id); return [t.process, t.taskName, t.assignee, U.fmtDT(r.start), U.fmtDT(r.end), ...buckets.map(b => r.start < b + bh * MS_H && r.end > b ? '■' : '')]; });
+        const ws2 = XLSX.utils.aoa_to_sheet([[`GANTT – mỗi ô = ${bh} giờ`], ['', '', '', '', 'Ngày', ...buckets.map(t => U.fmtDate(t))], ['', '', '', '', 'Ca', ...buckets.map(t => 'Ca ' + U.shiftOf(t))], ['Process', 'Task', 'Người thực hiện', 'Bắt đầu', 'Kết thúc', ...buckets.map(t => U.fmtHM(t))], ...grid]);
+        ws2['!cols'] = [{ wch: 12 }, { wch: 40 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, ...buckets.map(() => ({ wch: 5.5 }))];
+        XLSX.utils.book_append_sheet(wb, ws2, 'Gantt');
+        XLSX.writeFile(wb, base + '_Timeline.xlsx'); toast('Đã xuất Excel timeline', 'ok');
+      }
+    } catch (e) { toast('Không xuất được Excel: ' + e.message, 'err'); }
+  },
+  template() {
+    const sp = samplePlan(), r = Scheduler.schedule(sp);
+    const head = ['STT', 'Nhánh', 'Process', 'Task', 'Bắt đầu', 'Kết thúc', 'Khung kế hoạch (giờ)', 'Định mức (giờ)', 'Số lượng', 'Số người', 'Người thực hiện', 'Owner', 'Cách thực hiện', 'Task phụ thuộc', 'Ghi chú'];
+    const rows = sp.tasks.map(t => { const x = r.R.get(t.id); return [t.order, t.branch, t.process, t.taskName, U.fmtDT(x.start), U.fmtDT(x.end), t.durationHours, t.standardHours, t.quantity, t.peopleRequired, '', t.owner, EXEC_MODES[t.executionMode], t.dependencyIds.map(d => +d.slice(5)).join(', '), t.notes]; });
+    if (window.XLSX) { const wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet([head, ...rows]); ws['!cols'] = [6, 12, 12, 40, 17, 17, 10, 10, 8, 8, 20, 18, 22, 12, 40].map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, 'Import'); XLSX.writeFile(wb, 'Mau_Import_Shutdown.xlsx'); }
+    else download('Mau_Import_Shutdown.csv', new Blob(['\uFEFF' + [head, ...rows].map(r => r.map(v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : v).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  },
+  /** Mở file backup: chấp nhận .json, file HTML "app kèm dữ liệu", hoặc .txt chứa đoạn đã sao chép */
+  async restoreJson(file) {
+    try {
+      const d = Persist.parseAny(await file.text());
+      if (!d) throw new Error('File không chứa dữ liệu kế hoạch.');
+      if (!(await confirmBox('Khôi phục dữ liệu', `File có <b>${d.plans.length}</b> kế hoạch. Thay toàn bộ dữ liệu hiện tại?`, 'Khôi phục'))) return;
+      Persist.apply(d);
+    } catch (e) { toast('Không khôi phục được: ' + e.message, 'err'); }
+  },
+  stressPlan(n) {
+    const procs = [['Nhánh Hạt', 'EXT'], ['Nhánh Hạt', 'IDR'], ['Nhánh Hạt', 'FDR'], ['Nhánh Hạt', 'REIN'], ['Nhánh Hạt', 'DGC Filling'], ['Nhánh Hạt', 'GCH'], ['Nhánh Dịch', 'ADS'], ['Nhánh Dịch', 'REG'], ['Nhánh Dịch', 'EVAP 1'], ['Nhánh Dịch', 'EVAP 2'], ['Nhánh Dịch', 'RO'], ['Nhánh Dịch', 'NSD']];
+    const acts = ['Check line', 'CIP', 'LOTO', 'Tháo', 'Vệ sinh', 'Kiểm tra', 'Lắp', 'Leak test', 'Release line'];
+    const objs = ['manifold', 'feed tank', 'inter line', 'hopper', 'STRV', 'heater', 'deck', 'filter', 'sàn 0m', 'sàn 6m', 'sàn 12m', 'cyclone', 'bagfilter', 'nozzle', 'băng tải'];
+    const durs = [0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4];
+    const plan = makePlan({ name: `Kiểm thử ${n} task`, start: defaultSampleStart(), targetHours: 72 });
+    const per = Math.ceil(n / procs.length); let k = 0;
+    procs.forEach(([b, pr], pi) => {
+      for (let i = 0; i < per && k < n; i++) {
+        k++; const par = i % 6 === 5;
+        plan.tasks.push(normalizeTask({ id: 'TASK-' + String(k).padStart(3, '0'), order: k, branch: b, process: pr, taskName: `${acts[(i + pi) % acts.length]} ${objs[(i * 7 + pi) % objs.length]} ${pr} #${i + 1}`,
+          durationHours: durs[(i * 3 + pi) % durs.length], owner: par ? 'Nhà thầu ' + pr : 'OP ' + pr, peopleRequired: 1 + (i % 3),
+          executionMode: par ? 'after_dependency' : 'sequential', dependencyIds: par ? ['TASK-' + String(k - 1).padStart(3, '0')] : [], quantity: par ? 4 : 1 }));
+      }
+    });
+    return plan;
+  },
+};
+
+document.addEventListener('DOMContentLoaded', () => App.init());
+
+</script>
+</body>
+</html>
