@@ -2039,11 +2039,16 @@ document.addEventListener('DOMContentLoaded', () => App.init());
 <script>
 /* ===== KẾT NỐI SUPABASE ===== */
 const SUPABASE_URL = "https://vetbxnrkfgxrgsnribwe.supabase.co";
-const SUPABASE_KEY = "DAN_PUBLISHABLE_KEY_VAO_DAY"; // sb_publishable_... (KHÔNG dùng secret key)
+const SUPABASE_KEY = "sb_publishable_RJdYFvL3wniwLQ9iOp11zg_AcBFeQ-n";
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const CLIENT_ID = U.uid();
+const CLIENT_ID = (typeof U !== 'undefined' && U.uid) ? U.uid() : ('c' + Date.now() + Math.random().toString(36).slice(2));
 let lastCloudAt = 0, cloudTimer;
+
+function cloudToast(msg, type) {
+  if (typeof toast === 'function') toast(msg, type);
+  else console.log(msg);
+}
 
 /* Nạp dữ liệu chung từ cloud */
 async function cloudLoad() {
@@ -2053,11 +2058,15 @@ async function cloudLoad() {
     .eq('id', 1)
     .maybeSingle();
 
-  if (error) { toast('Không kết nối được cloud: ' + error.message, 'err'); return; }
+  if (error) {
+    console.error('Supabase error:', error);
+    cloudToast('Không kết nối được cloud: ' + error.message, 'err');
+    return;
+  }
 
   const d = data && data.data;
   if (d && Array.isArray(d.plans) && d.plans.length) applyCloud(d);
-  else cloudSave(); // lần đầu: đẩy dữ liệu máy mình lên
+  else cloudSave(); // lần đầu: đẩy dữ liệu máy mình lên cloud
   console.log('Supabase connected');
 }
 
@@ -2084,15 +2093,18 @@ function cloudSave() {
     const { error } = await sb
       .from('planner_state')
       .upsert({ id: 1, data: payload, updated_at: new Date().toISOString() });
-    if (error) toast('Lưu cloud lỗi: ' + error.message, 'err');
+    if (error) {
+      console.error('Save error:', error);
+      cloudToast('Lưu cloud lỗi: ' + error.message, 'err');
+    }
   }, 800);
 }
 
-/* Mỗi lần app tự lưu → lưu luôn lên cloud */
+/* Mỗi lần app tự lưu -> lưu luôn lên cloud */
 const _flush = Store.flush.bind(Store);
 Store.flush = function () { _flush(); cloudSave(); };
 
-/* Người khác sửa → máy mình tự cập nhật */
+/* Người khác sửa -> máy mình tự cập nhật */
 sb.channel('planner')
   .on('postgres_changes',
       { event: '*', schema: 'public', table: 'planner_state' },
@@ -2101,7 +2113,7 @@ sb.channel('planner')
         if (!d || d.by === CLIENT_ID || (d.savedAt || 0) <= lastCloudAt) return;
         if (typeof Drag !== 'undefined' && Drag.active) return;
         applyCloud(d);
-        toast('Kế hoạch vừa được người khác cập nhật', 'ok');
+        cloudToast('Kế hoạch vừa được người khác cập nhật', 'ok');
       })
   .subscribe();
 
