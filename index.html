@@ -2039,62 +2039,66 @@ document.addEventListener('DOMContentLoaded', () => App.init());
 
 <script>
 /* =====================================================================
-   LDC AUTO-ASSIGN – Gợi ý người thực hiện theo Lịch Đi Ca (LDC.xlsx)
-   - Khi bấm "Tạo kế hoạch mới" → hỏi có cần gợi ý người không
-       Có    → upload LDC.xlsx → tạo kế hoạch như cũ → hiện bảng gợi ý để duyệt
-       Không → chạy chương trình như hiện tại
-   - Menu ☰ có thêm mục "Gợi ý người thực hiện từ LDC" cho kế hoạch đang mở
-   - Dữ liệu LDC chỉ đọc trong trình duyệt (bộ nhớ tạm), KHÔNG lưu/đẩy lên đâu
+   LDC AUTO-ASSIGN v2 – Gợi ý người thực hiện theo Lịch Đi Ca (LDC.xlsx)
+   - Tạo kế hoạch mới → hỏi có cần gợi ý người không → upload LDC → duyệt gợi ý
+   - Menu ☰: "Gợi ý người thực hiện từ LDC" và "Kiểm tra dữ liệu LDC đọc được"
+   - v2: dò ngày bằng 3 cách (dòng ngày, tiêu đề D###, số serial Excel),
+         tự chọn sheet có lịch đúng ngày kế hoạch, ghép team theo từ khóa
    ===================================================================== */
 const LDC = {
-  data: null,            // { fileName, sheet, sheets, people, from, to }
-  wb: null,
-  pending: false,        // đang chờ kế hoạch mới được tạo
-  baseIds: null,
+  data: null, pending: false, baseIds: null,
 
-  /* Khung giờ của từng mã ca (giờ trong ngày, N kéo qua sáng hôm sau = 30) */
+  /* Khung giờ mã ca (N kéo qua sáng hôm sau = 30h) – sửa nếu giờ thực tế khác */
   SHIFT: { M: [6, 14], A: [14, 22], N: [22, 30], D: [8, 17] },
 
-  /* Process → team trong LDC (sửa được trong bảng gợi ý, lưu lại cho lần sau) */
+  /* Process = từ khóa có trong cột Team (cột E). "*" = team nào cũng được */
   DEFAULT_MAP: {
-    'EXT': 'EXT, BEAN-EXT, BEAN',
-    'IDR': 'BEAN, BEAN-EXT', 'FDR': 'BEAN, BEAN-EXT', 'REIN': 'BEAN, BEAN-EXT',
-    'GCH': 'BEAN, BEAN-EXT', 'ACH': 'BEAN, BEAN-EXT',
-    'ADS': 'ADS-EVAP 1, ADS-EVAP 2', 'REG': 'ADS-EVAP 1, ADS-EVAP 2', 'EVAP 1': 'ADS-EVAP 1, ADS-EVAP 2',
-    'EVAP 2': 'RO-NSD-EVAP 2, ADS-EVAP 2', 'RO': 'RO-NSD-EVAP 2', 'NSD': 'RO-NSD-EVAP 2',
-    'DGC Filling': 'DGC, FILLING', 'CAF Filling': 'CAF, FILLING',
+    'GCH': 'BEAN', 'IDR': 'BEAN', 'FDR': 'BEAN', 'ACH': 'BEAN',
+    'EXT': 'EXT', 'REIN': 'EXT',
+    'DGC Filling': 'FILLING, DGC', 'CAF Filling': 'FILLING, CAF',
+    'ADS': 'ADS', 'REG': 'ADS', 'EVAP 1': 'EVAP1, ADS',
+    'EVAP 2': 'EVAP2', 'RO': 'RO', 'NSD': 'NSD',
     'CIP': '*',
   },
-  EXCLUDE_POS: /manager|admin|supervisor|technologist|leadman/i,
+  MAP_KEY: 'ldc.teamMap.v2',
+  EXCLUDE_POS: /manager|admin|supervisor|technologist/i,
 
   /* ---------- tiện ích ---------- */
-  nk(s) { return String(s ?? '').toUpperCase().replace(/[\s\-_]/g, ''); },
+  nk(s) { return String(s ?? '').toUpperCase().replace(/\s+/g, ''); },
   dayStart(ms) { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); },
   dayKey(ms) { return U.toLocalISO(ms).slice(0, 10); },
+  vn(k) { return k ? k.split('-').reverse().join('/') : ''; },
   teamMap() {
-    try { const s = JSON.parse(SafeStore.get('ldc.teamMap') || 'null'); if (s) return s; } catch (e) { }
+    try { const s = JSON.parse(SafeStore.get(this.MAP_KEY) || 'null'); if (s) return s; } catch (e) { }
     return { ...this.DEFAULT_MAP };
   },
-  teamsFor(process) {
+  keywordsFor(process) {
     const m = this.teamMap(), key = Object.keys(m).find(k => this.nk(k) === this.nk(process));
-    const v = key ? m[key] : '*';
-    return v.trim() === '*' ? '*' : v.split(',').map(x => this.nk(x)).filter(Boolean);
+    if (!key) return '*';
+    const v = String(m[key]).trim();
+    return v === '*' ? '*' : v.split(',').map(x => this.nk(x)).filter(Boolean);
   },
+  /* "BEAN-EXT" → [BEAN, EXT] · "RO-NSD-EVAP 2" → [RO, NSD, EVAP2] */
+  teamTokens(team) { return String(team ?? '').toUpperCase().split(/[-\/,+&]/).map(x => x.replace(/\s+/g, '')).filter(Boolean); },
+  teamMatches(team, kws) {
+    if (kws === '*') return true;
+    const tk = this.teamTokens(team);
+    return kws.some(k => tk.some(t => t === k || (k.length >= 3 && t.includes(k))));
+  },
+  processesOf(team) { return Object.keys(this.teamMap()).filter(p => { const k = this.keywordsFor(p); return k !== '*' && this.teamMatches(team, k); }); },
 
-  /* "M+4" → 06–18 · "4+N" → 18–06 · "1/2M" → 06–10 · O/AL/PH/SL/TL/WB/CLH… → nghỉ */
+  /* "M+4" → 06–18 · "4+N" → 18–06 · "M+3.5" → 06–17:30 · "1/2M" → 06–10 · O/AL/PH/SL… → nghỉ */
   parseCode(raw) {
     const s = String(raw ?? '').toUpperCase().replace(/\s+/g, '');
     const letters = s.replace(/[^A-Z]/g, '');
     if (!this.SHIFT[letters]) return null;
     let [a, b] = this.SHIFT[letters];
-    const pre = /(\d+(?:\.\d+)?)\+[MAND]/.exec(s), post = /[MAND]\+(\d+(?:\.\d+)?)/.exec(s);
-    if (pre) a -= +pre[1];
-    if (post) b += +post[1];
+    const pre = /(\d+(?:[.,]\d+)?)\+[MAND]/.exec(s), post = /[MAND]\+(\d+(?:[.,]\d+)?)/.exec(s);
+    if (pre) a -= +pre[1].replace(',', '.');
+    if (post) b += +post[1].replace(',', '.');
     if (s.includes('1/2')) b = a + (b - a) / 2;
-    return { s: a, e: b, base: letters };
+    return { s: a, e: b };
   },
-
-  /* Ca làm việc của 1 người bao trùm thời điểm t (xét cả ca đêm hôm trước) */
   windowAt(p, t) {
     for (const off of [0, -1]) {
       const day = this.dayStart(t) + off * MS_DAY, raw = p.codes.get(this.dayKey(day));
@@ -2105,81 +2109,123 @@ const LDC = {
     return null;
   },
 
-  /* ---------- đọc file LDC ---------- */
-  isDateCell(v) {
-    if (typeof v === 'number') return v > 40000 && v < 60000;
-    return /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(v ?? '').trim());
+  /* ---------- nhận dạng ngày ---------- */
+  dateParts(v) {                                   // → {a,b,y} | {serial} | {date} | null
+    if (v instanceof Date) return isNaN(v) ? null : { date: v };
+    if (typeof v === 'number') return v > 40000 && v < 60000 ? { serial: v } : null;
+    const t = String(v ?? '').trim();
+    let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+    if (m) return { date: new Date(+m[1], +m[2] - 1, +m[3]) };
+    m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/.exec(t) || /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})\s/.exec(t);
+    if (m) return { a: +m[1], b: +m[2], y: +m[3] };
+    if (/^\d{5}(\.\d+)?$/.test(t)) { const n = +t; if (n > 40000 && n < 60000) return { serial: n }; }
+    return null;
   },
-  cellToDay(v) {
-    if (typeof v === 'number') return this.dayStart(U.excelSerialToMs(v));
-    const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(v).trim());   // LDC dùng MM/DD/YYYY
-    return m ? new Date(+m[3], +m[1] - 1, +m[2]).getTime() : null;
+  partsToDay(p, dmFirst) {
+    if (!p) return null;
+    if (p.date) return new Date(p.date.getFullYear(), p.date.getMonth(), p.date.getDate()).getTime();
+    if (p.serial) return this.dayStart(U.excelSerialToMs(p.serial));
+    const [mo, d] = dmFirst ? [p.b, p.a] : [p.a, p.b];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    return new Date(p.y, mo - 1, d).getTime();
   },
-  parseSheet(aoa) {
-    const h = aoa.findIndex(r => (r || []).some(c => String(c).trim() === 'Employ_Name'));
-    if (h < 0) return null;
-    const H = aoa[h].map(c => String(c ?? '').trim()), col = n => H.indexOf(n);
-    const cName = col('Employ_Name'), cTeam = col('Team'), cPos = col('Position'), cId = col('MSNV');
 
-    // Dòng ngày: dòng phía trên tiêu đề có nhiều ô ngày nhất
+  /* ---------- đọc 1 sheet ---------- */
+  parseSheet(aoa) {
+    const norm = x => String(x ?? '').toLowerCase().replace(/[\s_]/g, '');
+    const h = aoa.findIndex(r => (r || []).some(c => norm(c) === 'employname' || norm(c) === 'hoten'));
+    if (h < 0) return { err: 'Không có cột Employ_Name' };
+    const H = aoa[h].map(norm), col = (...ns) => H.findIndex(x => ns.includes(x));
+    const cName = col('employname', 'hoten'), cTeam = col('team', 'doi', 'to'), cPos = col('position', 'chucdanh'), cId = col('msnv', 'manv');
+
+    /* Cách 1: dòng ngày phía trên tiêu đề (dòng có nhiều ô ngày nhất) */
     let dRow = -1, best = 0;
-    for (let i = 0; i < h; i++) { const n = (aoa[i] || []).filter(v => this.isDateCell(v)).length; if (n > best) { best = n; dRow = i; } }
-    const dayCols = new Map();
-    if (dRow >= 0 && best > 20) {
-      (aoa[dRow] || []).forEach((v, c) => { if (this.isDateCell(v)) { const d = this.cellToDay(v); if (d) dayCols.set(c, this.dayKey(d)); } });
-    } else {   // dự phòng: D1 = 01/01 của năm hiện tại
-      const y = new Date().getFullYear();
-      H.forEach((n, c) => { const m = /^D(\d{1,3})$/.exec(n); if (m) dayCols.set(c, this.dayKey(new Date(y, 0, +m[1]).getTime())); });
+    for (let i = 0; i < h; i++) { const n = (aoa[i] || []).filter(v => this.dateParts(v)).length; if (n > best) { best = n; dRow = i; } }
+    const dayCols = new Map(); let dmFirst = false, src = '';
+    if (dRow >= 0 && best >= 3) {
+      const parts = (aoa[dRow] || []).map(v => this.dateParts(v));
+      dmFirst = parts.some(p => p && p.a > 12);                         // có ngày >12 ở vị trí đầu → DD/MM
+      // Kiểm tra chéo: các ngày liền nhau phải cách nhau 1 ngày
+      const test = df => { let ok = 0, prev = null; parts.forEach(p => { const d = this.partsToDay(p, df); if (d && prev && Math.round((d - prev) / MS_DAY) === 1) ok++; if (d) prev = d; }); return ok; };
+      if (!parts.some(p => p && (p.a > 12 || p.b > 12))) dmFirst = test(true) > test(false);
+      else if (test(!dmFirst) > test(dmFirst)) dmFirst = !dmFirst;
+      parts.forEach((p, c) => { const d = this.partsToDay(p, dmFirst); if (d) dayCols.set(c, this.dayKey(d)); });
+      src = `dòng ngày (dòng ${dRow + 1}, ${dmFirst ? 'DD/MM' : 'MM/DD'})`;
     }
-    if (!dayCols.size) return null;
+    /* Cách 2: tiêu đề D1…D366 → ngày thứ n của năm (bổ sung cột còn thiếu, kiểm tra lệch) */
+    let year = dayCols.size ? new Date([...dayCols.values()].sort()[Math.floor(dayCols.size / 2)]).getFullYear() : new Date().getFullYear();
+    let mismatch = 0, dHead = 0;
+    aoa[h].forEach((n, c) => {
+      const m = /^D(\d{1,3})$/i.exec(String(n ?? '').trim()); if (!m) return;
+      dHead++;
+      const k = this.dayKey(new Date(year, 0, +m[1]).getTime());
+      if (!dayCols.has(c)) dayCols.set(c, k); else if (dayCols.get(c) !== k) mismatch++;
+    });
+    if (!src && dHead) src = `tiêu đề D### (năm ${year})`;
+    if (!dayCols.size) return { err: 'Không tìm thấy dòng ngày hoặc tiêu đề D1…D366' };
 
     const byKey = new Map();
     for (let i = h + 1; i < aoa.length; i++) {
       const r = aoa[i] || [], name = String(r[cName] ?? '').trim();
-      if (!name) continue;
-      const key = String(r[cId] ?? '').trim() + '|' + U.norm(name);
-      if (!byKey.has(key)) byKey.set(key, { name, team: String(r[cTeam] ?? '').trim(), position: String(r[cPos] ?? '').trim(), codes: new Map() });
+      if (!name || norm(name) === 'employname') continue;
+      const key = String(cId >= 0 ? r[cId] ?? '' : '').trim() + '|' + U.norm(name);
+      if (!byKey.has(key)) byKey.set(key, { name, row: i + 1, team: String(cTeam >= 0 ? r[cTeam] ?? '' : '').trim(), position: String(cPos >= 0 ? r[cPos] ?? '' : '').trim(), codes: new Map() });
       const p = byKey.get(key);
-      for (const [c, k] of dayCols) { const v = r[c]; if (v !== '' && v !== null && v !== undefined) p.codes.set(k, v); }  // dòng trùng: dòng sau ghi đè
+      for (const [c, k] of dayCols) { const v = r[c]; if (v !== '' && v !== null && v !== undefined && String(v).trim() !== '') p.codes.set(k, String(v).trim()); }
     }
-    const keys = [...dayCols.values()].sort();
-    return { people: [...byKey.values()], from: keys[0], to: keys[keys.length - 1] };
+    const keys = [...new Set(dayCols.values())].sort();
+    return { people: [...byKey.values()], from: keys[0], to: keys[keys.length - 1], headerRow: h + 1, src, mismatch, cTeam };
   },
+
   async readFile(file) {
     if (!window.XLSX) { toast('Chưa tải được SheetJS (cần Internet) – không đọc được Excel.', 'err'); return false; }
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
-    const sheets = [];
+    const sheets = [], skipped = [];
     for (const n of wb.SheetNames) {
-      const parsed = this.parseSheet(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' }));
-      if (parsed && parsed.people.length) sheets.push({ name: n, ...parsed });
+      const ws = wb.Sheets[n];
+      // Dùng giá trị thô + chữ hiển thị: ô ngày dạng text hoặc dạng số đều đọc được
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true });
+      const txt = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
+      const aoa = raw.map((r, i) => r.map((v, c) => (typeof v === 'number' && v > 40000 && v < 60000) ? v : (txt[i] && txt[i][c] !== undefined ? txt[i][c] : v)));
+      const parsed = this.parseSheet(aoa);
+      if (parsed.people && parsed.people.length) sheets.push({ name: n, ...parsed }); else skipped.push(`${n}: ${parsed.err || 'không có người'}`);
     }
-    if (!sheets.length) { toast('Không tìm thấy sheet có cột "Employ_Name" và dòng ngày.', 'err'); return false; }
-    this.data = { fileName: file.name, sheets, sheet: sheets[0].name, ...sheets[0] };
+    if (!sheets.length) { toast('Không đọc được sheet nào. ' + skipped.join(' · '), 'err'); return false; }
+    this.data = { fileName: file.name, sheets, skipped };
+    this.useSheet(sheets[0].name);
     return true;
   },
-  useSheet(name) { const s = this.data.sheets.find(x => x.name === name); if (s) Object.assign(this.data, { sheet: s.name, people: s.people, from: s.from, to: s.to }); },
+  useSheet(name) { const s = this.data.sheets.find(x => x.name === name); if (s) Object.assign(this.data, { sheet: s.name, people: s.people, from: s.from, to: s.to, src: s.src, mismatch: s.mismatch, headerRow: s.headerRow }); },
+  workingOn(sheet, dk) { return sheet.people.filter(p => this.parseCode(p.codes.get(dk))).length; },
+  /* Chọn sheet có nhiều người đi làm nhất vào ngày kế hoạch */
+  autoPick(dk) {
+    const ranked = this.data.sheets.map(s => ({ s, n: this.workingOn(s, dk) })).sort((a, b) => b.n - a.n);
+    const cur = this.data.sheets.find(s => s.name === this.data.sheet);
+    if (ranked[0].n > this.workingOn(cur, dk)) { this.useSheet(ranked[0].s.name); return ranked[0].s.name; }
+    return null;
+  },
 
   /* ---------- hộp thoại upload ---------- */
   askUpload(title) {
     return new Promise(res => {
       const info = () => this.data ? `Đã tải <b>${U.esc(this.data.fileName)}</b> · sheet
-        <select id="ldc_sheet">${this.data.sheets.map(s => `<option ${s.name === this.data.sheet ? 'selected' : ''}>${U.esc(s.name)}</option>`).join('')}</select>
-        · <b>${this.data.people.length}</b> người · ${this.data.from.split('-').reverse().join('/')} → ${this.data.to.split('-').reverse().join('/')}` : '<span class="muted">Chưa có file.</span>';
+        <select id="ldc_sheet">${this.data.sheets.map(s => `<option ${s.name === this.data.sheet ? 'selected' : ''}>${U.esc(s.name)}</option>`).join('')}</select><br>
+        <b>${this.data.people.length}</b> người · lịch ${this.vn(this.data.from)} → ${this.vn(this.data.to)} · đọc ngày theo ${U.esc(this.data.src)}`
+        : '<span class="muted">Chưa có file.</span>';
       const m = openModal(`<div class="modal-h"><h3>${U.esc(title)}</h3><button class="x" id="ldc_x">×</button></div>
         <div class="modal-b">
-          <p style="margin-top:0">Chọn file <b>LDC.xlsx</b> (tải từ SharePoint về máy). Hệ thống đọc lịch ca của từng người
-          và gợi ý người đang trong ca, đúng team, không trùng giờ cho mỗi task.</p>
+          <p style="margin-top:0">Chọn file <b>LDC.xlsx</b> (tải từ SharePoint về máy). Hệ thống tự chọn sheet có lịch đúng ngày Shutdown.</p>
           <input type="file" id="ldc_file" accept=".xlsx,.xlsm,.xls">
           <div class="calc" id="ldc_info" style="margin-top:10px">${info()}</div>
           <p class="muted small">File chỉ được đọc trên máy bạn, không lưu và không gửi đi đâu.</p>
         </div>
         <div class="modal-f"><button class="btn" id="ldc_skip">Bỏ qua</button><button class="btn primary" id="ldc_ok" ${this.data ? '' : 'disabled'}>Tiếp tục</button></div>`, 'sm');
-      const bindSheet = () => { const s = $('#ldc_sheet', m); if (s) s.onchange = e => { this.useSheet(e.target.value); $('#ldc_info', m).innerHTML = info(); bindSheet(); }; };
+      const bindSheet = () => { const s = $('#ldc_sheet', m); if (s) s.onchange = e => { this.useSheet(e.target.value); this.manualSheet = true; $('#ldc_info', m).innerHTML = info(); bindSheet(); }; };
       bindSheet();
       $('#ldc_file', m).onchange = async e => {
         const f = e.target.files[0]; if (!f) return;
         $('#ldc_info', m).textContent = 'Đang đọc file…';
-        try { if (await this.readFile(f)) { $('#ldc_info', m).innerHTML = info(); bindSheet(); $('#ldc_ok', m).disabled = false; } else $('#ldc_info', m).innerHTML = info(); }
+        try { this.manualSheet = false; if (await this.readFile(f)) { $('#ldc_ok', m).disabled = false; } $('#ldc_info', m).innerHTML = info(); bindSheet(); }
         catch (err) { $('#ldc_info', m).textContent = 'Lỗi đọc file: ' + err.message; }
       };
       const done = v => { closeModal(); res(v); };
@@ -2195,27 +2241,27 @@ const LDC = {
     const addBusy = (n, s, e) => { if (!busy.has(n)) busy.set(n, []); busy.get(n).push([s, e]); };
     const isBusy = (n, s, e) => (busy.get(n) || []).some(([a, b]) => a < e && s < b);
     const tasks = plan.tasks.slice().sort((a, b) => res.R.get(a.id).start - res.R.get(b.id).start || a.order - b.order);
-
-    // Task đã có người (giữ nguyên) → tính là bận
     if (!opt.overwrite) for (const t of tasks) if (t.assignee) { const r = res.R.get(t.id); U.splitOwners(t.assignee).forEach(n => addBusy(U.norm(n), r.start, r.end)); }
 
     return tasks.map(t => {
       const r = res.R.get(t.id), s = r.start, e = Math.max(r.end, s + MS_MIN);
-      const row = { t, s, e, shift: U.shiftOf(s), keep: !!t.assignee && !opt.overwrite, names: [], note: '' };
+      const row = { t, s, e, shift: U.shiftOf(s), keep: !!t.assignee && !opt.overwrite, names: [], codes: [], note: '' };
       if (row.keep) { row.names = U.splitOwners(t.assignee); row.note = 'Giữ người đã nhập'; return row; }
-      const need = Math.max(1, Math.round(t.peopleRequired || 1)), teams = this.teamsFor(t.process);
-      const cands = [];
+      const need = Math.max(1, Math.round(t.peopleRequired || 1)), kws = this.keywordsFor(t.process);
+      let inShift = 0; const cands = [];
       for (const p of people) {
         if (this.EXCLUDE_POS.test(p.position)) continue;
         const w = this.windowAt(p, s); if (!w) continue;
-        const pt = this.nk(p.team);
-        let ts = teams === '*' ? (pt === 'HC' ? 0 : 1) : (teams.includes(pt) ? 2 : 0);
-        if (!ts && opt.allowHC && pt === 'HC') ts = 0.5;
+        inShift++;
+        const isHC = this.teamTokens(p.team).includes('HC');
+        let ts = this.teamMatches(p.team, kws) ? (kws === '*' ? 1 : 2) : 0;
+        if (kws === '*' && isHC) ts = 0;
+        if (!ts && opt.allowHC && isHC) ts = 0.5;
+        if (!ts && opt.anyTeam) ts = 0.3;
         if (!ts) continue;
         const end = Math.min(e, w.e), key = U.norm(p.name);
         if (isBusy(key, s, end)) continue;
-        const cover = (end - s) / MS_H;
-        cands.push({ p, w, end, key, score: ts * 100 + cover * 10 - (load.get(key) || 0) });
+        cands.push({ p, w, end, key, score: ts * 100 + (end - s) / MS_H * 10 - (load.get(key) || 0) });
       }
       cands.sort((a, b) => b.score - a.score);
       const pick = cands.slice(0, need);
@@ -2223,69 +2269,104 @@ const LDC = {
       row.names = pick.map(c => c.p.name);
       row.codes = pick.map(c => c.w.code);
       const notes = [];
-      if (pick.length < need) notes.push(`Thiếu ${need - pick.length}/${need} người`);
+      if (pick.length < need) notes.push(`Thiếu ${need - pick.length}/${need}`);
       const shortest = pick.length ? Math.min(...pick.map(c => c.end)) : e;
-      if (pick.length && shortest < e) notes.push(`Hết ca lúc ${U.fmtDM(shortest)} → cần người ca sau`);
-      notes.push(`${cands.length} ứng viên`);
+      if (pick.length && shortest < e) notes.push(`Hết ca ${U.fmtDM(shortest)} → cần người ca sau`);
+      notes.push(`${inShift} người trong ca · ${cands.length} đúng team (${kws === '*' ? 'mọi team' : kws.join('/')})`);
       row.note = notes.join(' · ');
       return row;
     });
   },
 
+  diagnose(plan) {
+    const dk = this.dayKey(U.parseLocalISO(plan.start)), d = this.data;
+    const hasDay = d.people.filter(p => p.codes.has(dk)).length, working = d.people.filter(p => this.parseCode(p.codes.get(dk))).length;
+    const codes = [...new Set(d.people.map(p => p.codes.get(dk)).filter(Boolean))].slice(0, 12).join(', ');
+    let msg, bad = true;
+    if (dk < d.from || dk > d.to) msg = `⚠ Ngày ${this.vn(dk)} nằm ngoài lịch của sheet "${d.sheet}" (${this.vn(d.from)} → ${this.vn(d.to)}).`;
+    else if (!hasDay) msg = `⚠ Sheet "${d.sheet}" có ngày ${this.vn(dk)} nhưng không ai có mã ca ở cột đó – cột ngày có thể bị lệch.`;
+    else if (!working) msg = `⚠ Ngày ${this.vn(dk)}: ${hasDay} người có mã nhưng không mã nào là ca làm việc. Mã đọc được: ${codes}`;
+    else { bad = false; msg = `Ngày ${this.vn(dk)}: ${working}/${d.people.length} người đi làm · mã: ${codes}`; }
+    msg += ` · Đọc ngày theo ${d.src}, tiêu đề ở dòng ${d.headerRow}${d.mismatch ? ` · ⚠ ${d.mismatch} cột D### lệch với dòng ngày` : ''}`;
+    return { msg, bad: bad || d.mismatch > 0 };
+  },
+
+  /* ---------- xem dữ liệu đọc được (để kiểm tra dòng/cột) ---------- */
+  inspect(planId) {
+    const plan = Store.state.plans.find(p => p.id === planId); if (!plan || !this.data) return;
+    const P = this.dayStart(U.parseLocalISO(plan.start)), days = [-1, 0, 1, 2].map(i => this.dayKey(P + i * MS_DAY));
+    const dg = this.diagnose(plan);
+    openModal(`<div class="modal-h"><h3>Dữ liệu LDC đọc được – sheet "${U.esc(this.data.sheet)}"</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b"><div class="calc" style="margin-bottom:10px;${dg.bad ? 'color:#9a3412' : ''}">${U.esc(dg.msg)}</div>
+      <p class="muted small" style="margin-top:0">So sánh với file Excel: nếu tên/team/mã ca dưới đây khớp với file thì hệ thống đọc đúng.</p>
+      <div class="prev-wrap"><table class="tbl"><thead><tr><th>Dòng Excel</th><th>Tên</th><th>Team (cột E)</th><th>Làm được process</th>${days.map(k => `<th>${this.vn(k).slice(0, 5)}</th>`).join('')}</tr></thead><tbody>
+      ${this.data.people.map(p => `<tr><td>${p.row}</td><td>${U.esc(p.name)}</td><td>${U.esc(p.team)}</td><td class="small">${U.esc(this.processesOf(p.team).join(', ') || '–')}</td>
+        ${days.map(k => { const c = p.codes.get(k) || ''; return `<td style="${this.parseCode(c) ? 'font-weight:600' : 'color:var(--muted)'}">${U.esc(c)}</td>`; }).join('')}</tr>`).join('')}
+      </tbody></table></div></div>
+      <div class="modal-f"><button class="btn" data-close>Đóng</button></div>`);
+  },
+
   /* ---------- bảng duyệt gợi ý ---------- */
   review(planId) {
     const plan = Store.state.plans.find(p => p.id === planId); if (!plan || !this.data) return;
-    const opt = { overwrite: false, allowHC: false };
+    const dk = this.dayKey(U.parseLocalISO(plan.start));
+    if (!this.manualSheet) { const sw = this.autoPick(dk); if (sw) toast(`Đã tự chọn sheet "${sw}" vì có lịch ngày ${this.vn(dk)}.`, 'ok'); }
+    const opt = { overwrite: false, allowHC: false, anyTeam: false };
     const mapText = () => Object.entries(this.teamMap()).map(([k, v]) => `${k} = ${v}`).join('\n');
     const draw = () => {
-      const rows = this.suggest(plan, opt);
+      const rows = this.suggest(plan, opt), dg = this.diagnose(plan);
       const ok = rows.filter(r => !r.keep && r.names.length).length, lack = rows.filter(r => !r.keep && /Thiếu/.test(r.note)).length;
       const m = openModal(`<div class="modal-h"><h3>Gợi ý người thực hiện – ${U.esc(plan.name)}</h3><button class="x" data-close>×</button></div>
         <div class="modal-b">
           <div class="sumline">
-            <div><span>Nguồn</span><b>${U.esc(this.data.fileName)} · ${U.esc(this.data.sheet)}</b></div>
+            <div><span>Nguồn</span><b>${U.esc(this.data.fileName)} · <select id="lr_sheet">${this.data.sheets.map(s => `<option ${s.name === this.data.sheet ? 'selected' : ''}>${U.esc(s.name)}</option>`).join('')}</select></b></div>
             <div><span>Task được gợi ý</span><b>${ok}/${rows.length}</b></div>
             <div><span>Task thiếu người</span><b style="color:${lack ? 'var(--st-late)' : 'inherit'}">${lack}</b></div>
           </div>
+          <div class="calc" style="margin-bottom:10px;${dg.bad ? 'color:#9a3412' : ''}">${U.esc(dg.msg)} <button class="btn sm" id="lr_inspect">Xem dữ liệu đọc được</button></div>
           <div class="opt-grid">
             <label class="chk"><input type="checkbox" id="lr_over" ${opt.overwrite ? 'checked' : ''}> Gợi ý lại cả task đã có người</label>
-            <label class="chk"><input type="checkbox" id="lr_hc" ${opt.allowHC ? 'checked' : ''}> Cho phép người team HC khi thiếu người</label>
-            <button class="btn sm" id="lr_load">Đổi file / sheet LDC</button>
+            <label class="chk"><input type="checkbox" id="lr_hc" ${opt.allowHC ? 'checked' : ''}> Cho phép team HC khi thiếu người</label>
+            <label class="chk"><input type="checkbox" id="lr_any" ${opt.anyTeam ? 'checked' : ''}> Cho phép người khác team khi thiếu</label>
+            <button class="btn sm" id="lr_load">Đổi file LDC</button>
           </div>
-          <details style="margin-bottom:10px"><summary class="small" style="cursor:pointer;color:var(--accent)">Process ↔ Team trong LDC (sửa nếu gợi ý sai team)</summary>
-            <textarea id="lr_map" rows="8" style="width:100%;font-family:monospace;font-size:12px">${U.esc(mapText())}</textarea>
-            <button class="btn sm" id="lr_mapsave">Lưu & tính lại</button> <span class="muted small">"*" = team nào cũng được</span></details>
+          <details style="margin-bottom:10px"><summary class="small" style="cursor:pointer;color:var(--accent)">Process = từ khóa trong cột Team (sửa nếu gợi ý sai team)</summary>
+            <textarea id="lr_map" rows="10" style="width:100%;font-family:monospace;font-size:12px">${U.esc(mapText())}</textarea>
+            <button class="btn sm" id="lr_mapsave">Lưu & tính lại</button> <button class="btn sm" id="lr_mapreset">Về mặc định</button>
+            <span class="muted small">VD "GCH = BEAN": người có chữ BEAN trong Team (BEAN, BEAN-EXT) làm được GCH. "*" = team nào cũng được.</span></details>
           <div class="prev-wrap"><table class="tbl"><thead><tr><th><input type="checkbox" id="lr_all" checked></th><th>STT</th><th>Task</th><th>Process</th><th>Thời gian</th><th>Ca</th><th>Người thực hiện (sửa được)</th><th>Ghi chú</th></tr></thead><tbody>
           ${rows.map((r, i) => `<tr class="${r.keep ? '' : /Thiếu/.test(r.note) ? 'bad' : /Hết ca/.test(r.note) ? 'warnrow' : ''}">
-            <td><input type="checkbox" data-i="${i}" ${r.keep || !r.names.length ? '' : 'checked'} ${r.keep ? 'disabled' : ''}></td>
+            <td><input type="checkbox" data-i="${i}" ${r.keep ? 'disabled' : 'checked'}></td>
             <td>${r.t.order}</td><td>${U.esc(r.t.taskName)}</td><td>${U.esc(r.t.process)}</td>
             <td class="nowrap">${U.fmtDM(r.s)} → ${U.fmtDM(r.e)}</td>
-            <td class="nowrap">Ca ${r.shift}${r.codes && r.codes.length ? ' · ' + U.esc(r.codes.join(', ')) : ''}</td>
+            <td class="nowrap">Ca ${r.shift}${r.codes.length ? ' · ' + U.esc(r.codes.join(', ')) : ''}</td>
             <td><input data-n="${i}" value="${U.esc(r.names.join(' + '))}" ${r.keep ? 'disabled' : ''}></td>
             <td class="small">${U.esc(r.note)}</td></tr>`).join('')}
           </tbody></table></div>
-          <p class="muted small">Quy tắc: người đang trong ca (M 06–14, A 14–22, N 22–06, D 08–17, có tính giờ tăng ca như M+4, 4+N),
-          đúng team của process, không bị giao 2 task trùng giờ, ưu tiên người phủ được nhiều thời gian của task và đang ít việc.
-          Bỏ qua người nghỉ (O, AL, PH, SL, TL, WB, CLH…) và vị trí quản lý/admin.</p>
         </div>
         <div class="modal-f"><button class="btn" data-close>Để sau</button><button class="btn primary" id="lr_apply">Áp dụng cho các task đã chọn</button></div>`);
+      $('#lr_sheet', m).onchange = e => { this.useSheet(e.target.value); this.manualSheet = true; draw(); };
+      $('#lr_inspect', m).onclick = () => { this.inspect(plan.id); };
       $('#lr_over', m).onchange = e => { opt.overwrite = e.target.checked; draw(); };
       $('#lr_hc', m).onchange = e => { opt.allowHC = e.target.checked; draw(); };
-      $('#lr_load', m).onclick = async () => { if (await this.askUpload('Đổi file LDC')) draw(); else draw(); };
+      $('#lr_any', m).onchange = e => { opt.anyTeam = e.target.checked; draw(); };
+      $('#lr_load', m).onclick = async () => { await this.askUpload('Đổi file LDC'); if (!this.manualSheet) this.autoPick(dk); draw(); };
       $('#lr_mapsave', m).onclick = () => {
         const obj = {};
         $('#lr_map', m).value.split('\n').forEach(l => { const i = l.indexOf('='); if (i > 0) obj[l.slice(0, i).trim()] = l.slice(i + 1).trim(); });
-        SafeStore.set('ldc.teamMap', JSON.stringify(obj)); draw();
+        SafeStore.set(this.MAP_KEY, JSON.stringify(obj)); draw();
       };
+      $('#lr_mapreset', m).onclick = () => { SafeStore.set(this.MAP_KEY, 'null'); draw(); };
       $('#lr_all', m).onchange = e => $$('input[data-i]:not(:disabled)', m).forEach(c => c.checked = e.target.checked);
       $('#lr_apply', m).onclick = () => {
         const sel = $$('input[data-i]:checked', m).map(c => +c.dataset.i);
         const upd = sel.map(i => ({ id: rows[i].t.id, v: $(`input[data-n="${i}"]`, m).value.trim() })).filter(x => x.v);
-        if (!upd.length) { toast('Chưa chọn task nào.', 'warn'); return; }
+        if (!sel.length) { toast('Chưa tick task nào.', 'warn'); return; }
+        if (!upd.length) { toast('Các task đã tick chưa có tên người. Xem dòng chẩn đoán màu cam, hoặc tự nhập tên.', 'err'); return; }
         if (Store.state.activePlanId !== plan.id) { Store.state.activePlanId = plan.id; App.recompute(); }
         Store.commit('Gợi ý người thực hiện từ LDC', p => { for (const u of upd) { const t = p.tasks.find(x => x.id === u.id); if (t) t.assignee = u.v; } });
         closeModal();
-        toast(`Đã gán người cho ${upd.length} task (Ctrl+Z để hoàn tác).`, 'ok');
+        toast(`Đã gán người cho ${upd.length} task${upd.length < sel.length ? ` (${sel.length - upd.length} task trống bị bỏ qua)` : ''}. Ctrl+Z để hoàn tác.`, 'ok');
       };
     };
     draw();
@@ -2296,7 +2377,7 @@ const LDC = {
     return new Promise(res => {
       const m = openModal(`<div class="modal-h"><h3>Tạo kế hoạch Shutdown mới</h3><button class="x" id="ac_x">×</button></div>
         <div class="modal-b"><p style="margin-top:0"><b>Bạn có cần hệ thống tự gợi ý người thực hiện không?</b></p>
-          <p class="muted">Nếu có, hãy upload file lịch đi ca <b>LDC.xlsx</b>. Sau khi tạo kế hoạch, hệ thống sẽ đề xuất người
+          <p class="muted">Nếu có, hãy upload file lịch đi ca <b>LDC.xlsx</b>. Sau khi tạo kế hoạch, hệ thống đề xuất người
           đang trong ca, đúng team cho từng task để bạn duyệt trước khi áp dụng.</p></div>
         <div class="modal-f"><button class="btn" id="ac_no">Không, tạo bình thường</button>
           ${this.data ? `<button class="btn" id="ac_reuse">Dùng LDC đã tải (${U.esc(this.data.fileName)})</button>` : ''}
@@ -2310,18 +2391,15 @@ const LDC = {
   },
 
   install() {
-    // 1) Chặn nút "Tạo kế hoạch mới" / "Sao chép" để hỏi trước
     const origWizard = Home.wizard;
     Home.wizard = async function (...args) {
       const a = await LDC.askOnCreate();
       if (a === 'cancel') return;
-      if (a === 'yes' && !(await LDC.askUpload('Upload lịch đi ca (LDC)'))) return origWizard.apply(this, args);
-      if (a === 'yes' || a === 'reuse') { LDC.pending = true; LDC.baseIds = new Set(Store.state.plans.map(p => p.id)); }
-      else LDC.pending = false;
+      let use = a === 'reuse';
+      if (a === 'yes') use = await LDC.askUpload('Upload lịch đi ca (LDC)');
+      LDC.pending = use; LDC.baseIds = use ? new Set(Store.state.plans.map(p => p.id)) : null;
       return origWizard.apply(this, args);
     };
-
-    // 2) Khi kế hoạch mới vừa được tạo → mở bảng gợi ý
     const origCommit = Store.commit;
     Store.commit = function (...args) {
       const r = origCommit.apply(this, args);
@@ -2331,18 +2409,19 @@ const LDC = {
       }
       return r;
     };
-
-    // 3) Thêm mục vào menu ☰
     const menu = document.getElementById('menuMore');
     if (menu) {
-      const b = document.createElement('button');
-      b.textContent = 'Gợi ý người thực hiện từ LDC';
-      b.onclick = async () => {
-        if (App.view === 'home') { toast('Hãy mở 1 kế hoạch trước.', 'warn'); return; }
-        if (!LDC.data && !(await LDC.askUpload('Upload lịch đi ca (LDC)'))) return;
-        LDC.review(Store.state.activePlanId);
+      const add = (text, fn) => { const b = document.createElement('button'); b.textContent = text; b.onclick = fn; menu.insertBefore(b, menu.querySelector('hr')); };
+      const need = async () => {
+        if (App.view === 'home') { toast('Hãy mở 1 kế hoạch trước.', 'warn'); return false; }
+        return LDC.data || await LDC.askUpload('Upload lịch đi ca (LDC)');
       };
-      menu.insertBefore(b, menu.querySelector('hr'));
+      add('Gợi ý người thực hiện từ LDC', async () => { if (await need()) LDC.review(Store.state.activePlanId); });
+      add('Kiểm tra dữ liệu LDC đọc được', async () => {
+        if (!(await need())) return;
+        if (!LDC.manualSheet) LDC.autoPick(LDC.dayKey(U.parseLocalISO(Store.plan().start)));
+        LDC.inspect(Store.state.activePlanId);
+      });
     }
   },
 };
