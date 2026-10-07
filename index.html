@@ -2039,7 +2039,7 @@ document.addEventListener('DOMContentLoaded', () => App.init());
 
 <script>
 /* =====================================================================
-   LDC AUTO-ASSIGN v2 – Gợi ý người thực hiện theo Lịch Đi Ca (LDC.xlsx)
+   LDC AUTO-ASSIGN v3 – Gợi ý người thực hiện theo Lịch Đi Ca (LDC.xlsx)
    - Tạo kế hoạch mới → hỏi có cần gợi ý người không → upload LDC → duyệt gợi ý
    - Menu ☰: "Gợi ý người thực hiện từ LDC" và "Kiểm tra dữ liệu LDC đọc được"
    - v2: dò ngày bằng 3 cách (dòng ngày, tiêu đề D###, số serial Excel),
@@ -2198,11 +2198,23 @@ const LDC = {
   useSheet(name) { const s = this.data.sheets.find(x => x.name === name); if (s) Object.assign(this.data, { sheet: s.name, people: s.people, from: s.from, to: s.to, src: s.src, mismatch: s.mismatch, headerRow: s.headerRow }); },
   workingOn(sheet, dk) { return sheet.people.filter(p => this.parseCode(p.codes.get(dk))).length; },
   /* Chọn sheet có nhiều người đi làm nhất vào ngày kế hoạch */
-  autoPick(dk) {
-    const ranked = this.data.sheets.map(s => ({ s, n: this.workingOn(s, dk) })).sort((a, b) => b.n - a.n);
+  covers(sh, dk) { return sh.from <= dk && dk <= sh.to; },
+  autoPick(dk, force) {
     const cur = this.data.sheets.find(s => s.name === this.data.sheet);
-    if (ranked[0].n > this.workingOn(cur, dk)) { this.useSheet(ranked[0].s.name); return ranked[0].s.name; }
+    if (!force && this.manualSheet && this.covers(cur, dk)) return null;
+    const ranked = this.data.sheets.map(s => ({ s, c: this.covers(s, dk) ? 1 : 0, n: this.workingOn(s, dk) }))
+      .sort((a, b) => b.c - a.c || b.n - a.n);
+    const top = ranked[0];
+    if (top.s.name !== cur.name && (top.c > (this.covers(cur, dk) ? 1 : 0) || top.n > this.workingOn(cur, dk))) {
+      this.useSheet(top.s.name); this.manualSheet = false; return top.s.name;
+    }
     return null;
+  },
+  sheetSummary(dk) {
+    const rows = this.data.sheets.map(s => `<tr><td>${s.name === this.data.sheet ? '▶ ' : ''}${U.esc(s.name)}</td><td class="nowrap">${this.vn(s.from)} → ${this.vn(s.to)}</td><td>${s.people.length}</td>
+      <td>${dk ? (this.covers(s, dk) ? `✅ ${this.workingOn(s, dk)} người đi làm` : '❌ không có ngày này') : ''}</td><td class="small">${U.esc(s.src)}</td></tr>`).join('');
+    const sk = (this.data.skipped || []).map(x => `<tr><td colspan="5" class="small muted">Bỏ qua: ${U.esc(x)}</td></tr>`).join('');
+    return `<table class="tbl" style="margin-top:6px"><thead><tr><th>Sheet</th><th>Lịch đọc được</th><th>Số người</th><th>${dk ? 'Ngày ' + this.vn(dk) : ''}</th><th>Cách đọc ngày</th></tr></thead><tbody>${rows}${sk}</tbody></table>`;
   },
 
   /* ---------- hộp thoại upload ---------- */
@@ -2210,7 +2222,7 @@ const LDC = {
     return new Promise(res => {
       const info = () => this.data ? `Đã tải <b>${U.esc(this.data.fileName)}</b> · sheet
         <select id="ldc_sheet">${this.data.sheets.map(s => `<option ${s.name === this.data.sheet ? 'selected' : ''}>${U.esc(s.name)}</option>`).join('')}</select><br>
-        <b>${this.data.people.length}</b> người · lịch ${this.vn(this.data.from)} → ${this.vn(this.data.to)} · đọc ngày theo ${U.esc(this.data.src)}`
+        <b>${this.data.people.length}</b> người · lịch ${this.vn(this.data.from)} → ${this.vn(this.data.to)}${this.sheetSummary(this.planDay || '')}`
         : '<span class="muted">Chưa có file.</span>';
       const m = openModal(`<div class="modal-h"><h3>${U.esc(title)}</h3><button class="x" id="ldc_x">×</button></div>
         <div class="modal-b">
@@ -2296,8 +2308,10 @@ const LDC = {
     const plan = Store.state.plans.find(p => p.id === planId); if (!plan || !this.data) return;
     const P = this.dayStart(U.parseLocalISO(plan.start)), days = [-1, 0, 1, 2].map(i => this.dayKey(P + i * MS_DAY));
     const dg = this.diagnose(plan);
+    const sumHtml = this.sheetSummary(this.dayKey(P));
     openModal(`<div class="modal-h"><h3>Dữ liệu LDC đọc được – sheet "${U.esc(this.data.sheet)}"</h3><button class="x" data-close>×</button></div>
       <div class="modal-b"><div class="calc" style="margin-bottom:10px;${dg.bad ? 'color:#9a3412' : ''}">${U.esc(dg.msg)}</div>
+      <details ${dg.bad ? 'open' : ''} style="margin-bottom:10px"><summary class="small" style="cursor:pointer;color:var(--accent)">Các sheet trong file <b>${U.esc(this.data.fileName)}</b></summary>${sumHtml}</details>
       <p class="muted small" style="margin-top:0">So sánh với file Excel: nếu tên/team/mã ca dưới đây khớp với file thì hệ thống đọc đúng.</p>
       <div class="prev-wrap"><table class="tbl"><thead><tr><th>Dòng Excel</th><th>Tên</th><th>Team (cột E)</th><th>Làm được process</th>${days.map(k => `<th>${this.vn(k).slice(0, 5)}</th>`).join('')}</tr></thead><tbody>
       ${this.data.people.map(p => `<tr><td>${p.row}</td><td>${U.esc(p.name)}</td><td>${U.esc(p.team)}</td><td class="small">${U.esc(this.processesOf(p.team).join(', ') || '–')}</td>
@@ -2310,7 +2324,9 @@ const LDC = {
   review(planId) {
     const plan = Store.state.plans.find(p => p.id === planId); if (!plan || !this.data) return;
     const dk = this.dayKey(U.parseLocalISO(plan.start));
-    if (!this.manualSheet) { const sw = this.autoPick(dk); if (sw) toast(`Đã tự chọn sheet "${sw}" vì có lịch ngày ${this.vn(dk)}.`, 'ok'); }
+    this.planDay = dk;
+    { const sw = this.autoPick(dk); if (sw) toast(`Đã tự chọn sheet "${sw}" vì có lịch ngày ${this.vn(dk)}.`, 'ok'); }
+    if (!this.data.sheets.some(s => this.covers(s, dk))) toast(`File "${this.data.fileName}" không có sheet nào chứa ngày ${this.vn(dk)} – kiểm tra đúng file LDC.xlsx chưa.`, 'err');
     const opt = { overwrite: false, allowHC: false, anyTeam: false };
     const mapText = () => Object.entries(this.teamMap()).map(([k, v]) => `${k} = ${v}`).join('\n');
     const draw = () => {
@@ -2350,7 +2366,7 @@ const LDC = {
       $('#lr_over', m).onchange = e => { opt.overwrite = e.target.checked; draw(); };
       $('#lr_hc', m).onchange = e => { opt.allowHC = e.target.checked; draw(); };
       $('#lr_any', m).onchange = e => { opt.anyTeam = e.target.checked; draw(); };
-      $('#lr_load', m).onclick = async () => { await this.askUpload('Đổi file LDC'); if (!this.manualSheet) this.autoPick(dk); draw(); };
+      $('#lr_load', m).onclick = async () => { await this.askUpload('Đổi file LDC'); this.autoPick(dk); draw(); };
       $('#lr_mapsave', m).onclick = () => {
         const obj = {};
         $('#lr_map', m).value.split('\n').forEach(l => { const i = l.indexOf('='); if (i > 0) obj[l.slice(0, i).trim()] = l.slice(i + 1).trim(); });
@@ -2419,7 +2435,7 @@ const LDC = {
       add('Gợi ý người thực hiện từ LDC', async () => { if (await need()) LDC.review(Store.state.activePlanId); });
       add('Kiểm tra dữ liệu LDC đọc được', async () => {
         if (!(await need())) return;
-        if (!LDC.manualSheet) LDC.autoPick(LDC.dayKey(U.parseLocalISO(Store.plan().start)));
+        LDC.planDay = LDC.dayKey(U.parseLocalISO(Store.plan().start)); LDC.autoPick(LDC.planDay);
         LDC.inspect(Store.state.activePlanId);
       });
     }
