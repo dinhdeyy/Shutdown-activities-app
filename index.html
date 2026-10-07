@@ -3016,6 +3016,439 @@ IO.tableRows = function (plan, res, asText) {
 })();
 </script>
 <!-- ===================== HẾT GÓI NÂNG CẤP ===================== -->
+ 
+<!-- =====================================================================
+     SHUTDOWN PLANNER – TRANG "CA TRỰC" CHO OPERATOR (mobile)
+     Dán TOÀN BỘ khối này vào index.html:
+       NGAY TRƯỚC dòng: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+     Link gửi operator:  https://dinhdeyy.github.io/Shutdown-activities-app/#op
+     ===================================================================== -->
+<style id="op-style">
+/* ---------- Planner trên điện thoại ---------- */
+@media (max-width:700px){
+  :root{--left-w:190px}
+  .topbar{margin:6px;border-radius:16px;gap:4px;padding:6px}
+  .brand{font-size:14px}
+  #btnImport,#btnUndo,#btnRedo,#zoomSelect,#btnExport,.tb-sep{display:none!important}
+  .topbar select{max-width:150px}
+  .planbar{margin:0 6px 6px;gap:8px;padding:8px}
+  .planbar label{width:100%}
+  .planbar input[type=text]{width:100%}
+  .kpi-mini{gap:12px;margin-left:0}
+  .filterbar{margin:0 6px 6px}
+  .main{margin:0 6px 6px}
+  .c-ppe,.c-who,.c-dur,.c-start{display:none!important}
+  .drawer{position:fixed!important;inset:6px!important;width:auto!important;z-index:140}
+  .fg{grid-template-columns:1fr}
+  .segc{grid-template-columns:1fr}
+  .modal-bg{align-items:flex-end}
+  .modal,.modal.sm{width:100vw!important;max-height:94dvh;border-radius:22px 22px 0 0}
+  #viewHome{padding:14px}
+  .home-h h2{font-size:22px}
+  .plan-grid,.charts{grid-template-columns:1fr}
+  input,select,textarea{font-size:16px}
+}
+/* ---------- Trang Ca trực ---------- */
+body.op-mode>*:not(#opView):not(#toasts):not(#modalRoot):not(#tip){display:none!important}
+#opView{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:10px 10px 80px;width:100%;max-width:760px;margin:0 auto}
+.op-h{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:18px;background:var(--glass,#fff);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-bd,#ddd);box-shadow:var(--glass-sh)}
+.op-h b{font-size:17px;flex:1}
+.op-f{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.op-f .full{grid-column:1/-1}
+.op-f select,.op-f input[type=date]{width:100%;font-size:16px;padding:10px;border-radius:12px}
+.op-f .chk{justify-content:center;background:var(--glass-row,#fff);border-radius:12px;font-size:14px}
+.op-ca{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;grid-column:1/-1}
+.op-ca button{padding:10px 4px;border-radius:14px;border:1px solid var(--border);background:var(--glass-row,#fff);font-weight:650;font-size:15px}
+.op-ca button small{display:block;font-weight:400;font-size:11px;color:var(--muted)}
+.op-ca button.on{background:var(--accent);color:#fff;border-color:transparent;box-shadow:0 6px 16px rgba(10,132,255,.35)}
+.op-ca button.on small{color:#fff}
+.op-sum{display:flex;gap:8px;margin-bottom:10px}
+.op-sum span{flex:1;text-align:center;padding:8px 4px;border-radius:14px;background:var(--glass-row,#fff);font-size:11.5px;color:var(--muted)}
+.op-sum b{display:block;font-size:20px;color:var(--text)}
+.op-card{display:block;width:100%;text-align:left;margin-bottom:10px;padding:14px;border-radius:18px;background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#ddd);border-left:6px solid var(--c);box-shadow:0 4px 16px rgba(31,45,90,.08);color:var(--text)}
+.op-card:active{transform:scale(.985)}
+.op-card.done{opacity:.7}
+.op-top{display:flex;align-items:center;gap:8px;font-size:12.5px;flex-wrap:wrap}
+.op-time{font-weight:700;font-size:14px}
+.op-tag{padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:650;background:color-mix(in srgb,var(--c) 15%,transparent);color:var(--c)}
+.op-st{margin-left:auto;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:650}
+.op-st.todo{background:rgba(148,163,184,.22)}.op-st.run{background:rgba(37,99,235,.15);color:#2563eb}
+.op-st.done{background:rgba(22,163,74,.15);color:#16a34a}.op-st.late{background:rgba(220,38,38,.13);color:#dc2626}
+.op-name{font-size:16px;font-weight:650;margin:7px 0 4px;line-height:1.3}
+.op-meta{font-size:13px;color:var(--muted);line-height:1.5}
+.op-pb{height:7px;border-radius:999px;background:rgba(120,120,128,.18);margin-top:10px;overflow:hidden}
+.op-pb div{height:100%;background:linear-gradient(90deg,#30d158,#34c7ff)}
+.op-empty{text-align:center;padding:40px 10px;color:var(--muted)}
+.modal.op-sheet{width:min(720px,100vw)}
+.op-info{font-size:13.5px;line-height:1.65;margin-bottom:12px}
+.op-warn{background:rgba(255,159,10,.15);padding:9px 11px;border-radius:12px;font-size:13px;margin-bottom:10px}
+.op-req{border:1px solid var(--border);border-radius:16px;padding:12px;margin-bottom:12px;background:var(--glass-row,#fff)}
+.op-req.ok{border-color:rgba(22,163,74,.55);background:rgba(48,209,88,.08)}
+.op-req h5{margin:0 0 8px;font-size:14.5px;display:flex;gap:8px;align-items:center}
+.op-req h5 span{margin-left:auto;font-size:12.5px;font-weight:650;color:var(--muted)}
+.op-req.ok h5 span{color:#16a34a}
+.op-thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px;margin-bottom:8px}
+.op-thumbs>*{position:relative;aspect-ratio:1;border-radius:12px;overflow:hidden;background:rgba(120,120,128,.15);display:block}
+.op-thumbs img{width:100%;height:100%;object-fit:cover;display:block}
+.op-thumbs small{position:absolute;left:0;right:0;bottom:0;font-size:10px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.65));padding:10px 4px 3px}
+.op-thumbs .up::after{content:'';position:absolute;inset:0;margin:auto;width:26px;height:26px;border-radius:50%;border:3px solid #fff;border-top-color:transparent;animation:opSpin 1s linear infinite}
+.op-thumbs .fail{outline:2px solid #dc2626}
+.op-thumbs i{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-style:normal;text-align:center;line-height:22px;font-size:12px}
+@keyframes opSpin{to{transform:rotate(360deg)}}
+.op-acts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.op-btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:13px 8px;border-radius:14px;border:1px solid var(--border);background:var(--glass-2,#f4f6fa);font-weight:650;font-size:15px;cursor:pointer;color:var(--text)}
+.op-btn.cam{background:linear-gradient(135deg,#0a84ff,#5e5ce6);color:#fff;border:0;box-shadow:0 6px 16px rgba(10,132,255,.3)}
+.op-btn input{display:none}
+.op-close{width:100%;padding:15px;border-radius:16px;border:0;font-size:16px;font-weight:700;background:linear-gradient(135deg,#30d158,#0fa968);color:#fff;box-shadow:0 8px 20px rgba(22,163,74,.3)}
+.op-close:disabled{background:rgba(120,120,128,.25);color:var(--muted);box-shadow:none}
+.op-doneline{display:flex;align-items:center;gap:10px;font-size:14px}
+.op-doneline span{flex:1}
+.ev-row{display:grid;grid-template-columns:1fr 64px 34px;gap:6px;margin-bottom:6px}
+.ev-pre{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.ev-pre button{border-radius:999px;padding:4px 10px;font-size:12px;border:1px dashed var(--accent);background:transparent;color:var(--accent)}
+</style>
+<script>
+(function () {
+'use strict';
+/* =====================================================================
+   1. CẤU HÌNH
+   UPLOAD_URL = URL Web App của Google Apps Script (xem file apps_script_upload.gs).
+   Có thể để trống ở đây và nhập trong menu ☰ → "Cấu hình upload ảnh" (sẽ đồng bộ cho mọi máy).
+   ===================================================================== */
+const UPLOAD_URL = '';
+const PRESETS = ['Ảnh checklist giấy đã điền', 'Ảnh Gemba / hiện trường', 'Ảnh LOTO đã khóa', 'Ảnh sau khi vệ sinh', 'Ảnh thiết bị sau khi lắp'];
+const DEFAULT_EV = [{ id: 'done', label: 'Ảnh xác nhận hoàn thành', min: 1 }];
+const SHIFTS = [{ n: 1, s: 6, label: '06–14' }, { n: 2, s: 14, label: '14–22' }, { n: 3, s: 22, label: '22–06' }];
+const PPE = { helmet: ['⛑️', 'Mũ bảo hộ'], glasses: ['🥽', 'Kính'], gloves: ['🧤', 'Găng tay'], heat: ['🔥', 'Chịu nhiệt'], chem: ['🧪', 'Hóa chất'],
+  boots: ['🥾', 'Giày'], ear: ['🎧', 'Bảo vệ tai'], mask: ['😷', 'Khẩu trang'], harness: ['🪢', 'Dây an toàn'], loto: ['🔒', 'Khóa LOTO'], vest: ['🦺', 'Áo phản quang'] };
+
+const OP = { planId: null, date: '', ca: 1, mine: false, sheet: null, local: new Map(), prev: new Map(), pendingEv: null };
+window.OperatorView = OP;
+
+const plans = () => Store.state.plans;
+const myName = () => SafeStore.get('op.name') || '';
+const uploadUrl = () => (UPLOAD_URL.startsWith('http') ? UPLOAD_URL : '') || (plans().find(p => p.uploadUrl) || {}).uploadUrl || '';
+const evOf = t => (Array.isArray(t.evidence) && t.evidence.length ? t.evidence : DEFAULT_EV);
+const proofsOf = (t, id) => ((t.proofs || {})[id] || []);
+function evStat(t) {
+  let have = 0, need = 0, ok = true;
+  for (const e of evOf(t)) { const n = Math.max(1, e.min || 1), h = Math.min(n, proofsOf(t, e.id).length); have += h; need += n; if (h < n) ok = false; }
+  return { have, need, ok };
+}
+const ppeIcon = v => (PPE[v] || ['🛡️', v])[0], ppeLabel = v => (PPE[v] || ['🛡️', v])[1];
+
+/* =====================================================================
+   2. MODEL – thêm evidence (yêu cầu bằng chứng) + proofs (ảnh đã nộp)
+   ===================================================================== */
+const _norm = normalizeTask;
+normalizeTask = function (t) {
+  const x = _norm(t);
+  if (OP.pendingEv && x.id === OP.pendingEv.id) x.evidence = OP.pendingEv.list;
+  x.evidence = Array.isArray(x.evidence)
+    ? x.evidence.filter(e => e && String(e.label || '').trim()).map(e => ({ id: String(e.id || U.uid()), label: String(e.label).trim(), min: Math.max(1, Math.round(U.num(e.min, 1))) }))
+    : [];
+  x.proofs = x.proofs && typeof x.proofs === 'object' && !Array.isArray(x.proofs) ? x.proofs : {};
+  return x;
+};
+
+/* =====================================================================
+   3. PLANNER – khai báo yêu cầu bằng chứng trong panel sửa task
+   ===================================================================== */
+let evDraft = [];
+const _dRender = Drawer.render.bind(Drawer);
+Drawer.render = function (t, isNew) { _dRender(t, isNew); try { injectEv(t); } catch (e) { console.error(e); } };
+function injectEv(t) {
+  const body = $('#drawer .drawer-b'); if (!body) return;
+  evDraft = (t.evidence || []).map(e => ({ ...e }));
+  const box = document.createElement('div'); box.className = 'xseq';
+  const anchor = body.querySelector('.xseq');
+  if (anchor) anchor.after(box); else body.insertBefore(box, body.firstChild);
+  const draw = () => {
+    box.innerHTML = `<div class="xs-h"><span class="xs-n">3</span> Bằng chứng để đóng task <span class="muted small" style="font-weight:400">· operator phải upload đủ mới đóng được</span></div>
+      ${evDraft.length ? evDraft.map((e, i) => `<div class="ev-row"><input data-evl="${i}" value="${U.esc(e.label)}" placeholder="VD: Ảnh checklist giấy">
+        <input data-evm="${i}" type="number" min="1" value="${e.min || 1}" title="Số ảnh tối thiểu"><button type="button" class="btn icon" data-evd="${i}">✕</button></div>`).join('')
+        : '<div class="muted small">Chưa đặt yêu cầu → mặc định cần 1 "Ảnh xác nhận hoàn thành".</div>'}
+      <div class="muted small" style="margin-top:4px">Cột số = số ảnh tối thiểu.</div>
+      <div class="ev-pre">${PRESETS.map(p => `<button type="button" data-evp="${U.esc(p)}">+ ${U.esc(p)}</button>`).join('')}<button type="button" data-evp="">+ Yêu cầu khác</button></div>`;
+  };
+  box.addEventListener('input', e => {
+    const l = e.target.dataset.evl, m = e.target.dataset.evm;
+    if (l !== undefined) evDraft[+l].label = e.target.value;
+    if (m !== undefined) evDraft[+m].min = U.num(e.target.value, 1);
+  });
+  box.addEventListener('click', e => {
+    const d = e.target.closest('[data-evd]'), p = e.target.closest('[data-evp]');
+    if (d) { evDraft.splice(+d.dataset.evd, 1); draw(); }
+    if (p) { evDraft.push({ id: U.uid(), label: p.dataset.evp, min: 1 }); draw(); if (!p.dataset.evp) { const ins = box.querySelectorAll('[data-evl]'); ins[ins.length - 1]?.focus(); } }
+  });
+  draw();
+}
+const _dSave = Drawer.save.bind(Drawer);
+Drawer.save = function () {
+  OP.pendingEv = { id: App.drawerTaskId, list: evDraft.filter(e => String(e.label).trim()).map(e => ({ ...e })) };
+  try { return _dSave(); } finally { OP.pendingEv = null; }
+};
+
+/* =====================================================================
+   4. TIỆN ÍCH: ca, ảnh, upload, lưu đồng bộ
+   ===================================================================== */
+function shiftWin(date, ca) { const s = U.parseLocalISO(date + 'T00:00') + SHIFTS[ca - 1].s * MS_H; return [s, s + 8 * MS_H]; }
+function nowShift() {
+  const n = new Date(), h = n.getHours(), d = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+  if (h < 6) d.setDate(d.getDate() - 1);
+  return { date: U.toLocalISO(d.getTime()).slice(0, 10), ca: h >= 6 && h < 14 ? 1 : h >= 14 && h < 22 ? 2 : 3 };
+}
+function pickPlan() {
+  const now = Date.now();
+  for (const p of plans()) { if (!p.tasks.length) continue; const r = Scheduler.schedule(p); if (r.windowStart - 12 * MS_H <= now && now <= r.windowEnd + 12 * MS_H) return p.id; }
+  return Store.state.activePlanId;
+}
+function curTask(planId, taskId) { const p = plans().find(x => x.id === planId); return p ? { p, t: p.tasks.find(x => x.id === taskId) } : null; }
+function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Không đọc được ảnh')); i.src = src; }); }
+async function resize(src, max, q) {
+  const i = await loadImg(src), s = Math.min(1, max / Math.max(i.naturalWidth, i.naturalHeight));
+  const c = document.createElement('canvas'); c.width = Math.round(i.naturalWidth * s); c.height = Math.round(i.naturalHeight * s);
+  c.getContext('2d').drawImage(i, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', q);
+}
+async function compress(file) { const u = URL.createObjectURL(file); try { return await resize(u, 1600, 0.82); } finally { URL.revokeObjectURL(u); } }
+async function postUpload(url, payload) {
+  const r = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });   // text/plain → không bị chặn CORS
+  let j; try { j = await r.json(); } catch (e) { throw new Error('Apps Script trả về không đúng – kiểm tra Deploy "Anyone"'); }
+  if (!j.ok) throw new Error(j.error || 'Upload lỗi');
+  return j;
+}
+/* Lấy bản mới nhất trên cloud trước khi ghi → hạn chế 2 operator ghi đè nhau */
+async function freshCommit(label, planId, taskId, fn) {
+  try {
+    if (typeof sb !== 'undefined' && typeof applyCloud === 'function') {
+      const { data } = await sb.from('planner_state').select('data').eq('id', 1).maybeSingle();
+      const d = data && data.data;
+      if (d && Array.isArray(d.plans) && d.plans.length && (typeof lastCloudAt === 'undefined' || (d.savedAt || 0) > lastCloudAt)) applyCloud(d);
+    }
+  } catch (e) { console.warn(e); }
+  Store.commit(label, () => { const c = curTask(planId, taskId); if (!c || !c.t) return false; fn(c.t); });
+}
+const partial = t => Math.round(90 * evStat(t).have / evStat(t).need);
+function statusOf(t, r) {
+  if (t.progress >= 100) return ['done', 'Hoàn thành'];
+  const now = Date.now();
+  if (now >= r.end) return ['late', 'Trễ'];
+  if (now >= r.start || evStat(t).have) return ['run', 'Đang làm'];
+  return ['todo', 'Chưa bắt đầu'];
+}
+
+/* =====================================================================
+   5. DANH SÁCH TASK TRONG CA
+   ===================================================================== */
+OP.open = function () {
+  document.body.classList.add('op-mode'); $('#opView').classList.remove('hidden');
+  if (!OP.planId || !plans().find(p => p.id === OP.planId)) { OP.planId = pickPlan(); Object.assign(OP, nowShift()); }
+  if (location.hash !== '#op') history.replaceState(null, '', '#op');
+  OP.render();
+  if (!myName()) askName();
+};
+OP.close = function () {
+  document.body.classList.remove('op-mode'); $('#opView').classList.add('hidden');
+  history.replaceState(null, '', location.pathname + location.search);
+  App.render();
+};
+OP.render = function () {
+  if (!document.body.classList.contains('op-mode')) return;
+  let plan = plans().find(p => p.id === OP.planId);
+  if (!plan) { OP.planId = pickPlan(); plan = plans().find(p => p.id === OP.planId) || plans()[0]; OP.planId = plan.id; }
+  const res = Scheduler.schedule(plan), [ws, we] = shiftWin(OP.date, OP.ca), me = U.norm(myName());
+  let list = plan.tasks.filter(t => { const r = res.R.get(t.id); return r && (r.end > r.start ? r.start < we && r.end > ws : r.start >= ws && r.start < we); });
+  const total = list.length;
+  if (OP.mine && me) list = list.filter(t => U.norm(t.assignee).includes(me));
+  list.sort((a, b) => res.R.get(a.id).start - res.R.get(b.id).start || a.order - b.order);
+  const done = list.filter(t => t.progress >= 100).length, late = list.filter(t => statusOf(t, res.R.get(t.id))[0] === 'late').length;
+  $('#opView').innerHTML = `
+    <div class="op-h"><b>📋 Ca trực Shutdown</b>
+      <button class="btn sm" id="opName">👤 ${U.esc(myName() || 'Nhập tên')}</button>
+      <button class="btn sm" id="opBack">Planner</button></div>
+    <div class="op-f">
+      <select id="opPlan" class="full">${plans().map(p => `<option value="${U.esc(p.id)}" ${p.id === plan.id ? 'selected' : ''}>${U.esc(p.name)}</option>`).join('')}</select>
+      <input type="date" id="opDate" value="${OP.date}">
+      <label class="chk"><input type="checkbox" id="opMine" ${OP.mine ? 'checked' : ''}> Chỉ task của tôi</label>
+      <div class="op-ca">${SHIFTS.map(s => `<button data-ca="${s.n}" class="${s.n === OP.ca ? 'on' : ''}">Ca ${s.n}<small>${s.label}</small></button>`).join('')}</div>
+    </div>
+    <div class="op-sum"><span><b>${list.length}</b>task${OP.mine ? ` (của tôi / ${total})` : ''}</span><span><b style="color:#16a34a">${done}</b>đã đóng</span>
+      <span><b style="color:${late ? '#dc2626' : 'inherit'}">${late}</b>trễ</span><span><button class="btn sm" id="opNow">⟳ Ca hiện tại</button></span></div>
+    ${list.length ? list.map(t => {
+      const r = res.R.get(t.id), [st, stL] = statusOf(t, r), s = evStat(t), c = processColor(plan, t.process);
+      const pct = t.progress >= 100 ? 100 : Math.round(100 * s.have / s.need);
+      return `<button class="op-card ${st === 'done' ? 'done' : ''}" data-op-task="${U.esc(t.id)}" style="--c:${c}">
+        <div class="op-top"><span class="op-time">${U.fmtHM(r.start)} → ${U.fmtHM(r.end)}</span>
+          ${new Date(r.start).toDateString() !== new Date(r.end).toDateString() ? `<span class="muted">(${U.fmtDM(r.end).slice(0, 5)})</span>` : ''}
+          <span class="op-tag">${U.esc(t.process)}</span><span class="op-st ${st}">${stL}</span></div>
+        <div class="op-name">#${t.order} ${t.priority ? '⚑ ' : ''}${U.esc(t.taskName)}</div>
+        <div class="op-meta">👤 ${U.esc(t.assignee || t.owner || 'Chưa phân công')}${(t.ppe || []).length ? ' · ' + t.ppe.map(ppeIcon).join(' ') : ''}<br>📷 ${s.have}/${s.need} ảnh bằng chứng</div>
+        <div class="op-pb"><div style="width:${pct}%"></div></div></button>`;
+    }).join('') : `<div class="op-empty">Không có task nào trong Ca ${OP.ca} ngày ${OP.date.split('-').reverse().join('/')}${OP.mine ? ' được giao cho bạn' : ''}.</div>`}`;
+};
+
+/* =====================================================================
+   6. CHI TIẾT TASK + UPLOAD ẢNH + ĐÓNG TASK
+   ===================================================================== */
+OP.openTask = function (taskId) {
+  const m = openModal(`<div class="modal-h"><h3 id="opSheetT"></h3><button class="x" data-close>×</button></div>
+    <div class="modal-b" id="opSheetB"></div><div class="modal-f" id="opSheetF" style="display:block"></div>`, 'op-sheet');
+  OP.sheet = { planId: OP.planId, taskId, m };
+  m.addEventListener('change', e => {
+    const i = e.target.closest('input[type=file][data-req]'); if (!i) return;
+    const files = [...i.files]; i.value = '';
+    files.forEach(f => uploadOne(OP.sheet.planId, taskId, i.dataset.req, f));
+  });
+  m.addEventListener('click', e => {
+    if (e.target.closest('#opDone')) closeTask(taskId);
+    if (e.target.closest('#opReopen')) reopenTask(taskId);
+    const rm = e.target.closest('[data-rm]');
+    if (rm) { e.preventDefault(); removeProof(taskId, rm.dataset.req, rm.dataset.rm); }
+    const fl = e.target.closest('[data-fail]');
+    if (fl) { const k = taskId + '|' + fl.dataset.req; OP.local.set(k, (OP.local.get(k) || []).filter(x => x.k !== fl.dataset.fail)); drawSheet(); }
+  });
+  drawSheet();
+};
+function drawSheet() {
+  const s = OP.sheet; if (!s || !document.body.contains(s.m)) return;
+  const c = curTask(s.planId, s.taskId); if (!c || !c.t) return;
+  const { p, t } = c, r = Scheduler.schedule(p).R.get(t.id), st = evStat(t), done = t.progress >= 100, me = myName();
+  const wait = t.dependencyIds.map(id => p.tasks.find(x => x.id === id)).filter(x => x && x.progress < 100);
+  $('#opSheetT', s.m).textContent = `#${t.order} ${t.taskName}`;
+  $('#opSheetB', s.m).innerHTML = `
+    <div class="op-info">🕒 <b>${U.fmtDM(r.start)} → ${U.fmtDM(r.end)}</b> (${U.fmtDur(t.durationHours)})<br>
+      🏭 ${U.esc(t.process)} · ${U.esc(t.branch)}<br>
+      👤 ${U.esc(t.assignee || 'Chưa phân công')}${t.owner ? ' · ' + U.esc(t.owner) : ''}
+      ${(t.ppe || []).length ? `<br>🦺 PPE: ${t.ppe.map(v => ppeIcon(v) + ' ' + U.esc(ppeLabel(v))).join(' · ')}` : ''}
+      ${t.notes ? `<br>📝 ${U.esc(t.notes)}` : ''}${t.method ? `<br>🔧 ${U.esc(t.method)}` : ''}
+      ${t.proofFolder ? `<br>📁 <a href="${U.esc(t.proofFolder)}" target="_blank" rel="noopener">Mở thư mục ảnh trên Drive</a>` : ''}</div>
+    ${wait.length ? `<div class="op-warn">⚠ Task trước chưa đóng: ${wait.map(x => '#' + x.order + ' ' + U.esc(x.taskName)).join(', ')}</div>` : ''}
+    ${!uploadUrl() ? '<div class="op-warn">⚠ Chưa cấu hình nơi lưu ảnh – báo planner vào ☰ → "Cấu hình upload ảnh".</div>' : ''}
+    ${evOf(t).map(e => {
+      const pr = proofsOf(t, e.id), loc = (OP.local.get(t.id + '|' + e.id) || []), need = Math.max(1, e.min || 1), ok = pr.length >= need;
+      return `<div class="op-req ${ok ? 'ok' : ''}"><h5>${ok ? '✅' : '📷'} ${U.esc(e.label)}<span>${Math.min(pr.length, need)}/${need}</span></h5>
+        ${pr.length || loc.length ? `<div class="op-thumbs">
+          ${pr.map(x => `<a href="${U.esc(x.url)}" target="_blank" rel="noopener"><img loading="lazy" src="${OP.prev.get(x.fid) || 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(x.fid) + '&sz=w300'}" alt="">
+            <small>${U.esc(x.by)} · ${U.fmtHM(x.at)}</small>${!done && U.norm(x.by) === U.norm(me) ? `<i data-rm="${U.esc(x.fid)}" data-req="${U.esc(e.id)}" title="Gỡ ảnh">✕</i>` : ''}</a>`).join('')}
+          ${loc.map(l => `<div class="${l.state === 'up' ? 'up' : 'fail'}" ${l.state === 'fail' ? `data-fail="${l.k}" data-req="${U.esc(e.id)}"` : ''}>${l.prev ? `<img src="${l.prev}" alt="">` : ''}
+            <small>${l.state === 'up' ? 'Đang tải lên…' : 'Lỗi: ' + U.esc(l.err) + ' (chạm để bỏ)'}</small></div>`).join('')}</div>` : ''}
+        ${done ? '' : `<div class="op-acts">
+          <label class="op-btn cam">📷 Chụp ảnh<input type="file" accept="image/*" capture="environment" data-req="${U.esc(e.id)}"></label>
+          <label class="op-btn">🖼️ Chọn ảnh<input type="file" accept="image/*" multiple data-req="${U.esc(e.id)}"></label></div>`}</div>`;
+    }).join('')}`;
+  $('#opSheetF', s.m).innerHTML = done
+    ? `<div class="op-doneline"><span>✅ Đã đóng${t.doneBy ? ' bởi <b>' + U.esc(t.doneBy) + '</b>' : ''}${t.doneAt ? ' lúc ' + U.fmtDM(t.doneAt) : ''}</span><button class="btn" id="opReopen">Mở lại</button></div>`
+    : `<button class="op-close" id="opDone" ${st.ok ? '' : 'disabled'}>${st.ok ? '✓ Đóng task' : `Còn thiếu ${st.need - st.have} ảnh để đóng task`}</button>`;
+}
+async function uploadOne(planId, taskId, reqId, file) {
+  if (!myName()) { toast('Hãy nhập tên trước khi upload (nút 👤).', 'warn'); return; }
+  const url = uploadUrl(); if (!url) { toast('Chưa cấu hình nơi lưu ảnh.', 'err'); return; }
+  const key = taskId + '|' + reqId, item = { k: U.uid(), prev: '', state: 'up', err: '' };
+  if (!OP.local.has(key)) OP.local.set(key, []); OP.local.get(key).push(item); drawSheet();
+  try {
+    const data = await compress(file);
+    item.prev = await resize(data, 300, 0.7); drawSheet();
+    const c = curTask(planId, taskId), t = c.t, e = evOf(t).find(x => x.id === reqId) || { label: 'Anh' };
+    const at = Date.now(), dd = OP.date.split('-').reverse().slice(0, 2).join('-');
+    const j = await postUpload(url, {
+      plan: c.p.name,
+      folder: `#${pad2(t.order)} ${t.taskName} – Ca ${OP.ca} (${dd})`,
+      name: `${e.label}_${myName()}_${stamp()}_${item.k.slice(0, 4)}.jpg`,
+      mime: 'image/jpeg', data: data.split(',')[1],
+    });
+    OP.prev.set(j.id, item.prev);
+    await freshCommit('Upload ảnh: ' + t.taskName, planId, taskId, tk => {
+      tk.proofs = tk.proofs || {};
+      (tk.proofs[reqId] = tk.proofs[reqId] || []).push({ fid: j.id, url: j.url, by: myName(), at, ca: OP.ca });
+      if (j.folder) tk.proofFolder = j.folder;
+      if (tk.progress < 100) tk.progress = Math.max(tk.progress, partial(tk));
+    });
+    OP.local.set(key, OP.local.get(key).filter(x => x !== item));
+    toast('Đã lưu ảnh lên Drive', 'ok');
+  } catch (err) { item.state = 'fail'; item.err = err.message; toast('Upload lỗi: ' + err.message, 'err'); }
+  drawSheet(); OP.render();
+}
+function removeProof(taskId, reqId, fid) {
+  const s = OP.sheet;
+  freshCommit('Gỡ ảnh bằng chứng', s.planId, taskId, t => {
+    t.proofs[reqId] = proofsOf(t, reqId).filter(x => x.fid !== fid);
+    if (t.progress < 100) t.progress = partial(t);
+  }).then(() => { drawSheet(); OP.render(); });
+}
+function closeTask(taskId) {
+  const s = OP.sheet, c = curTask(s.planId, taskId); if (!c || !evStat(c.t).ok) return;
+  freshCommit('Đóng task ' + c.t.taskName, s.planId, taskId, t => {
+    if (!evStat(t).ok) return;
+    t.progress = 100; t.doneBy = myName(); t.doneAt = Date.now();
+  }).then(() => { toast('Đã đóng task ✓', 'ok'); drawSheet(); OP.render(); });
+}
+function reopenTask(taskId) {
+  const s = OP.sheet;
+  freshCommit('Mở lại task', s.planId, taskId, t => { t.progress = partial(t); delete t.doneBy; delete t.doneAt; })
+    .then(() => { drawSheet(); OP.render(); });
+}
+function askName() {
+  const names = [...new Set(plans().flatMap(p => p.tasks.flatMap(t => U.splitOwners(t.assignee))))].sort((a, b) => a.localeCompare(b, 'vi'));
+  const m = openModal(`<div class="modal-h"><h3>Bạn là ai?</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><p class="muted" style="margin-top:0">Tên sẽ gắn vào ảnh bạn chụp và khi đóng task.</p>
+      <input id="opNm" list="opNms" style="width:100%;font-size:16px;padding:12px" value="${U.esc(myName())}" placeholder="Họ tên">
+      <datalist id="opNms">${names.map(n => `<option value="${U.esc(n)}">`).join('')}</datalist></div>
+    <div class="modal-f"><button class="btn primary lg" id="opNmOk">Lưu</button></div>`, 'sm');
+  $('#opNmOk', m).onclick = () => { const v = $('#opNm', m).value.trim(); if (!v) return; SafeStore.set('op.name', v); closeModal(); OP.render(); };
+}
+
+/* =====================================================================
+   7. CẤU HÌNH UPLOAD (planner) – lưu vào kế hoạch nên mọi máy đều nhận
+   ===================================================================== */
+function configUpload() {
+  const m = openModal(`<div class="modal-h"><h3>Cấu hình upload ảnh (Google Drive)</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><p style="margin-top:0">Dán URL Web App của Google Apps Script (dạng <code>https://script.google.com/macros/s/…/exec</code>).</p>
+      <input id="upUrl" style="width:100%" value="${U.esc(uploadUrl())}"><div class="calc" id="upMsg" style="margin-top:10px">Ảnh sẽ lưu theo: <b>Tên kế hoạch / #STT Tên task – Ca X (dd-mm) / ảnh.jpg</b></div></div>
+    <div class="modal-f"><button class="btn" id="upTest">Kiểm tra kết nối</button><button class="btn" data-close>Hủy</button><button class="btn primary" id="upSave">Lưu</button></div>`, 'sm');
+  $('#upTest', m).onclick = async () => {
+    const u = $('#upUrl', m).value.trim(); $('#upMsg', m).textContent = 'Đang kiểm tra…';
+    try { const j = await (await fetch(u)).json(); $('#upMsg', m).textContent = j.ok ? '✅ Kết nối được: ' + (j.folder || j.msg || '') : '❌ ' + (j.error || 'Lỗi'); }
+    catch (e) { $('#upMsg', m).textContent = '❌ Không kết nối được – kiểm tra URL và quyền "Anyone".'; }
+  };
+  $('#upSave', m).onclick = () => {
+    const u = $('#upUrl', m).value.trim();
+    Store.commit('Cấu hình upload ảnh', () => { plans().forEach(p => p.uploadUrl = u); });
+    closeModal(); toast('Đã lưu – mọi máy sẽ dùng cấu hình này.', 'ok');
+  };
+}
+
+/* =====================================================================
+   8. CÀI ĐẶT
+   ===================================================================== */
+function install() {
+  const v = document.createElement('div'); v.id = 'opView'; v.className = 'hidden'; document.body.appendChild(v);
+  v.addEventListener('click', e => {
+    if (e.target.closest('#opBack')) return OP.close();
+    if (e.target.closest('#opName')) return askName();
+    if (e.target.closest('#opNow')) { Object.assign(OP, nowShift()); OP.planId = pickPlan(); return OP.render(); }
+    const ca = e.target.closest('[data-ca]'); if (ca) { OP.ca = +ca.dataset.ca; return OP.render(); }
+    const tk = e.target.closest('[data-op-task]'); if (tk) OP.openTask(tk.dataset.opTask);
+  });
+  v.addEventListener('change', e => {
+    if (e.target.id === 'opPlan') OP.planId = e.target.value;
+    if (e.target.id === 'opDate' && e.target.value) OP.date = e.target.value;
+    if (e.target.id === 'opMine') OP.mine = e.target.checked;
+    OP.render();
+  });
+  const sp = $('.topbar .spacer');
+  if (sp) { const b = document.createElement('button'); b.className = 'tb-btn'; b.textContent = '📱 Ca trực'; b.onclick = () => OP.open(); sp.parentNode.insertBefore(b, sp); }
+  const menu = $('#menuMore');
+  if (menu) { const b = document.createElement('button'); b.textContent = 'Cấu hình upload ảnh (Google Drive)'; b.onclick = configUpload; menu.insertBefore(b, menu.querySelector('hr')); }
+  const _render = App.render.bind(App);
+  App.render = function () { _render(); OP.render(); drawSheet(); };
+  window.addEventListener('hashchange', () => { if (location.hash === '#op') OP.open(); });
+  if (location.hash === '#op' || matchMedia('(max-width:700px)').matches) OP.open();
+}
+document.addEventListener('DOMContentLoaded', install);
+})();
+</script>
+<!-- ===================== HẾT TRANG CA TRỰC ===================== -->
 
   
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
