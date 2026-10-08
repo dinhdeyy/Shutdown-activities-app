@@ -3450,6 +3450,325 @@ document.addEventListener('DOMContentLoaded', install);
 </script>
 <!-- ===================== HẾT TRANG CA TRỰC ===================== -->
 
+<!-- =====================================================================
+     SHUTDOWN PLANNER – ĐĂNG NHẬP (CHẾ ĐỘ CHỈ XEM) + TRANG ADMIN
+     Dán TOÀN BỘ khối này vào index.html:
+       NGAY SAU khối "TRANG CA TRỰC" và NGAY TRƯỚC dòng chứa supabase-js@2
+     - Chưa đăng nhập : Planner chỉ xem (không tạo/sửa/xóa/kéo thả)
+     - Ca trực (#op)   : không cần đăng nhập (operator upload ảnh, đóng task)
+     - Admin (#admin)  : cần đăng nhập – theo dõi ảnh & tiến độ
+     ===================================================================== -->
+<style id="auth-style">
+/* ---- Chế độ chỉ xem ---- */
+body.ro #btnAddTask,body.ro #btnImport,body.ro #btnAuto,body.ro #btnUndo,body.ro #btnRedo,
+body.ro #btnDayMinus,body.ro #btnDayPlus,body.ro #hNew,body.ro #hNew2,
+body.ro [data-copy-plan],body.ro [data-del-plan],body.ro .bar .handle,
+body.ro #menuMore button:not([data-ro-ok]){display:none!important}
+body.ro .bar{cursor:pointer!important}
+.au-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:12.5px;font-weight:650;white-space:nowrap;cursor:pointer;border:1px solid rgba(255,255,255,.25)}
+.au-badge.ro{background:rgba(255,159,10,.18);color:#ffcf70}
+.au-badge.rw{background:rgba(48,209,88,.18);color:#86efac}
+.au-lock{background:rgba(255,159,10,.14);border-radius:12px;padding:9px 12px;font-size:13px;margin-bottom:10px}
+.au-form input{width:100%;font-size:16px;padding:11px 12px;border-radius:12px;margin-bottom:10px}
+.au-err{color:#dc2626;font-size:13px;min-height:18px}
+/* ---- Trang Admin ---- */
+body.admin-mode>*:not(#adView):not(#toasts):not(#modalRoot):not(#tip){display:none!important}
+#adView{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:10px 12px 60px;width:100%;max-width:1280px;margin:0 auto}
+.ad-h{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-radius:18px;background:var(--glass,#fff);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-bd,#ddd);box-shadow:var(--glass-sh)}
+.ad-h b{font-size:17px;margin-right:auto}
+.ad-h select,.ad-h input{font-size:14px;padding:7px 9px;border-radius:10px}
+.ad-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:10px 0}
+.ad-k{background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#ddd);border-radius:16px;padding:11px 13px}
+.ad-k span{font-size:11.5px;color:var(--muted);font-weight:600}
+.ad-k b{display:block;font-size:22px;margin-top:2px}
+.ad-k small{color:var(--muted);font-size:11.5px}
+.ad-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:10px}
+.ad-card{background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#ddd);border-radius:18px;padding:12px 14px;margin-bottom:10px}
+.ad-card h4{margin:0 0 10px;font-size:14px;display:flex;align-items:center;gap:8px}
+.ad-proc{display:grid;grid-template-columns:110px 1fr 70px;gap:8px;align-items:center;font-size:12.5px;margin-bottom:6px}
+.ad-bar{height:9px;border-radius:999px;background:rgba(120,120,128,.18);overflow:hidden}
+.ad-bar div{height:100%;border-radius:999px}
+.ad-task{border-top:1px solid var(--border);padding:10px 0;display:grid;grid-template-columns:1fr auto;gap:6px 10px}
+.ad-task:first-of-type{border-top:0}
+.ad-tn{font-weight:650;font-size:14px}
+.ad-tm{font-size:12.5px;color:var(--muted);line-height:1.5}
+.ad-st{align-self:start;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:650;white-space:nowrap}
+.ad-st.todo{background:rgba(148,163,184,.22)}.ad-st.run{background:rgba(37,99,235,.15);color:#2563eb}
+.ad-st.done{background:rgba(22,163,74,.15);color:#16a34a}.ad-st.late{background:rgba(220,38,38,.13);color:#dc2626}
+.ad-ev{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ad-ev .lbl{font-size:12px;padding:3px 9px;border-radius:999px;background:rgba(120,120,128,.14)}
+.ad-ev .lbl.ok{background:rgba(48,209,88,.16);color:#15803d}
+.ad-th{position:relative;width:64px;height:64px;border-radius:10px;overflow:hidden;background:rgba(120,120,128,.15);display:block}
+.ad-th img{width:100%;height:100%;object-fit:cover}
+.ad-th small{position:absolute;left:0;right:0;bottom:0;font-size:9.5px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.7));padding:8px 3px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-feed{display:grid;grid-template-columns:52px 1fr;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--border);font-size:12.5px}
+.ad-feed:first-of-type{border-top:0}
+.ad-feed .ad-th{width:52px;height:52px}
+.ad-empty{color:var(--muted);text-align:center;padding:24px 8px;font-size:13px}
+@media (max-width:900px){.ad-grid{grid-template-columns:1fr}.ad-proc{grid-template-columns:80px 1fr 60px}}
+</style>
+<script>
+(function () {
+'use strict';
+/* =====================================================================
+   1. ĐĂNG NHẬP
+   Mật khẩu KHÔNG lưu dạng chữ – chỉ lưu mã băm SHA-256 của "decaf-planner|user|pass".
+   Đổi tài khoản: tạo mã băm mới rồi thay vào AUTH_HASH.
+   ===================================================================== */
+const AUTH_HASH = 'e710f3cafdaede8961a9e626bbbcf6a0e6435ac8e63691b7629774ba7039ba07';
+const AUTH_KEY = 'sp.auth.v1';
+const START_HASH = location.hash;   // nhớ hash ban đầu (trang Ca trực có thể tự đổi hash trên điện thoại)
+
+async function sha256(s) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+const Auth = {
+  ok: false, user: '',
+  load() {
+    try { const a = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); if (a && a.h === AUTH_HASH) { this.ok = true; this.user = a.u; } } catch (e) { }
+  },
+  async login(u, p) {
+    if (await sha256('decaf-planner|' + u.trim() + '|' + p) !== AUTH_HASH) return false;
+    this.ok = true; this.user = u.trim();
+    try { localStorage.setItem(AUTH_KEY, JSON.stringify({ u: this.user, h: AUTH_HASH, at: Date.now() })); } catch (e) { }
+    apply(); return true;
+  },
+  logout() { this.ok = false; this.user = ''; try { localStorage.removeItem(AUTH_KEY); } catch (e) { } apply(); if (document.body.classList.contains('admin-mode')) Admin.close(); },
+};
+window.Auth = Auth;
+
+const opMode = () => document.body.classList.contains('op-mode');
+const canWrite = () => Auth.ok || opMode();
+
+function askLogin(reason) {
+  return new Promise(res => {
+    const m = openModal(`<div class="modal-h"><h3>🔒 Đăng nhập để chỉnh sửa</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b au-form">
+        ${reason ? `<div class="au-lock">${U.esc(reason)}</div>` : ''}
+        <input id="auU" placeholder="Tên đăng nhập" autocomplete="username" autocapitalize="off">
+        <input id="auP" type="password" placeholder="Mật khẩu" autocomplete="current-password">
+        <div class="au-err" id="auE"></div>
+        <p class="muted small" style="margin:0">Máy này sẽ nhớ đăng nhập cho tới khi bấm Đăng xuất.</p></div>
+      <div class="modal-f"><button class="btn" data-close>Chỉ xem</button><button class="btn primary" id="auOk">Đăng nhập</button></div>`, 'sm');
+    let done = false;
+    const go = async () => {
+      if (await Auth.login($('#auU', m).value, $('#auP', m).value)) { done = true; closeModal(); toast('Đã đăng nhập – có thể chỉnh sửa.', 'ok'); res(true); }
+      else { $('#auE', m).textContent = 'Sai tên đăng nhập hoặc mật khẩu.'; $('#auP', m).select(); }
+    };
+    $('#auOk', m).onclick = go;
+    m.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+    $$('[data-close]', m).forEach(b => b.addEventListener('click', () => { if (!done) res(false); }));
+    setTimeout(() => $('#auU', m)?.focus(), 50);
+  });
+}
+const lockMsg = 'Kế hoạch đang ở chế độ chỉ xem. Đăng nhập để tạo / sửa task.';
+const deny = () => { if (!$('#modalRoot').innerHTML) askLogin(lockMsg); return false; };
+
+/* =====================================================================
+   2. CHẶN CHỈNH SỬA KHI CHƯA ĐĂNG NHẬP (cài sau cùng để bọc ngoài mọi module)
+   ===================================================================== */
+function guard() {
+  const _commit = Store.commit;
+  Store.commit = function (...a) { if (!canWrite()) return deny(); return _commit.apply(this, a); };
+  const _undo = Store.doUndo, _redo = Store.doRedo;
+  Store.doUndo = function (...a) { if (!canWrite()) return deny(); return _undo.apply(this, a); };
+  Store.doRedo = function (...a) { if (!canWrite()) return deny(); return _redo.apply(this, a); };
+
+  const _wiz = Home.wizard;
+  Home.wizard = async function (...a) { if (!Auth.ok && !(await askLogin('Cần đăng nhập để tạo kế hoạch mới.'))) return; return _wiz.apply(this, a); };
+  const _new = Drawer.openNew;
+  Drawer.openNew = async function (...a) { if (!Auth.ok && !(await askLogin('Cần đăng nhập để thêm task.'))) return; return _new.apply(this, a); };
+
+  /* Kéo thả: chưa đăng nhập thì chỉ mở xem chi tiết task */
+  const _ds = Drag.start;
+  Drag.start = function (e) {
+    if (Auth.ok) return _ds.call(this, e);
+    const b = e.target.closest('.bar[data-id]'); if (!b || e.button !== 0) return;
+    e.preventDefault(); App.selectedId = b.dataset.id; Gantt.render(); Drawer.open(b.dataset.id);
+  };
+
+  /* Panel task: chỉ xem */
+  const _dr = Drawer.render;
+  Drawer.render = function (...a) {
+    _dr.apply(this, a);
+    if (Auth.ok) return;
+    const d = $('#drawer'); if (!d) return;
+    $$('input,select,textarea,.drawer-b button', d).forEach(x => { if (!x.closest('.drawer-h')) x.disabled = true; });
+    const f = $('.drawer-f', d);
+    if (f) { f.innerHTML = '<button class="btn primary" id="auEdit">🔒 Đăng nhập để sửa</button><span style="flex:1"></span><button class="btn" id="auCl">Đóng</button>';
+      $('#auCl', f).onclick = () => Drawer.close();
+      $('#auEdit', f).onclick = async () => { const id = App.drawerTaskId; if (await askLogin()) Drawer.open(id); }; }
+    const h = $('.drawer-h h3', d); if (h) h.textContent = 'Chi tiết task (chỉ xem)';
+  };
+
+  /* Không đẩy dữ liệu lên cloud khi đang chỉ xem (tránh ghi đè bản mới của người khác) */
+  if (typeof cloudSave === 'function') {
+    const _cs = cloudSave;
+    cloudSave = function (...a) { if (!canWrite()) return; return _cs.apply(this, a); };
+  }
+
+  /* Menu ☰: giữ lại mục chỉ xem/ xuất file */
+  $$('#menuMore [data-more]').forEach(b => { if (['warnings', 'dark', 'copy-data', 'save-app'].includes(b.dataset.more)) b.setAttribute('data-ro-ok', ''); });
+  $$('#menuExport button').forEach(b => b.setAttribute('data-ro-ok', ''));
+}
+
+/* =====================================================================
+   3. GIAO DIỆN: badge trạng thái + nút Admin
+   ===================================================================== */
+function apply() {
+  document.body.classList.toggle('ro', !Auth.ok);
+  ['#planName', '#planStart', '#planTarget'].forEach(s => { const x = $(s); if (x) x.disabled = !Auth.ok; });
+  const b = $('#auBadge');
+  if (b) { b.className = 'au-badge ' + (Auth.ok ? 'rw' : 'ro'); b.textContent = Auth.ok ? '✓ ' + Auth.user : '👁 Chỉ xem – Đăng nhập'; b.title = Auth.ok ? 'Bấm để đăng xuất' : 'Đăng nhập để chỉnh sửa'; }
+  const a = $('#auAdmin'); if (a) a.style.display = Auth.ok ? '' : 'none';
+  if (typeof App !== 'undefined' && App.res) { App.render(); if (App.drawerTaskId && !App.drawerIsNew) Drawer.open(App.drawerTaskId); }
+}
+function installUI() {
+  const sp = $('.topbar .spacer'); if (!sp) return;
+  const ad = document.createElement('button'); ad.className = 'tb-btn'; ad.id = 'auAdmin'; ad.textContent = '🛡 Admin'; ad.onclick = () => Admin.open();
+  const bd = document.createElement('span'); bd.id = 'auBadge';
+  bd.onclick = async () => { if (Auth.ok) { if (await confirmBox('Đăng xuất', `Đăng xuất tài khoản <b>${U.esc(Auth.user)}</b> trên máy này?`, 'Đăng xuất')) { Auth.logout(); toast('Đã đăng xuất – chế độ chỉ xem.'); } } else askLogin(); };
+  sp.after(bd); sp.parentNode.insertBefore(ad, sp);
+}
+
+/* =====================================================================
+   4. TRANG ADMIN – theo dõi ảnh bằng chứng & tiến độ
+   ===================================================================== */
+const DEF_EV = [{ id: 'done', label: 'Ảnh xác nhận hoàn thành', min: 1 }];
+const evOf = t => (Array.isArray(t.evidence) && t.evidence.length ? t.evidence : DEF_EV);
+const prOf = (t, id) => ((t.proofs || {})[id] || []);
+function evStat(t) { let h = 0, n = 0; for (const e of evOf(t)) { const k = Math.max(1, e.min || 1); n += k; h += Math.min(k, prOf(t, e.id).length); } return { h, n }; }
+function stOf(t, r) { if (t.progress >= 100) return ['done', 'Hoàn thành']; const now = Date.now(); if (now >= r.end) return ['late', 'Trễ']; if (now >= r.start || t.progress > 0) return ['run', 'Đang làm']; return ['todo', 'Chưa bắt đầu']; }
+const thumb = fid => 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(fid) + '&sz=w200';
+
+const Admin = {
+  planId: null, f: { st: '', ca: '', date: '', q: '' },
+  async open() {
+    if (!Auth.ok && !(await askLogin('Trang Admin cần đăng nhập.'))) { if (location.hash === '#admin') history.replaceState(null, '', location.pathname); return; }
+    document.body.classList.remove('op-mode'); $('#opView')?.classList.add('hidden');
+    document.body.classList.add('admin-mode'); $('#adView').classList.remove('hidden');
+    if (!this.planId) this.planId = Store.state.activePlanId;
+    if (location.hash !== '#admin') history.replaceState(null, '', '#admin');
+    this.render();
+  },
+  close() {
+    document.body.classList.remove('admin-mode'); $('#adView').classList.add('hidden');
+    history.replaceState(null, '', location.pathname + location.search); App.render();
+  },
+  render() {
+    if (!document.body.classList.contains('admin-mode')) return;
+    const plans = Store.state.plans;
+    let p = plans.find(x => x.id === this.planId) || plans[0]; this.planId = p.id;
+    const res = Scheduler.schedule(p), f = this.f, now = Date.now();
+    const all = p.tasks.slice().sort((a, b) => res.R.get(a.id).start - res.R.get(b.id).start || a.order - b.order);
+    const rows = all.filter(t => {
+      const r = res.R.get(t.id), st = stOf(t, r)[0];
+      if (f.st === 'need' ? !(st !== 'done' && evStat(t).h > 0) : f.st && st !== f.st) return false;
+      if (f.ca && U.shiftOf(r.start) !== +f.ca) return false;
+      if (f.date && U.toLocalISO(r.start).slice(0, 10) !== f.date && U.toLocalISO(r.end - 1).slice(0, 10) !== f.date) return false;
+      if (f.q && !U.norm(t.taskName + ' ' + t.process + ' ' + t.assignee).includes(U.norm(f.q))) return false;
+      return true;
+    });
+    const cnt = k => all.filter(t => stOf(t, res.R.get(t.id))[0] === k).length;
+    let eh = 0, en = 0; all.forEach(t => { const s = evStat(t); eh += s.h; en += s.n; });
+    const dur = all.reduce((s, t) => s + (t.durationHours || 0), 0), prog = dur ? all.reduce((s, t) => s + (t.durationHours || 0) * Math.min(100, t.progress || 0), 0) / dur : 0;
+    const critOpen = all.filter(t => res.R.get(t.id).critical && t.progress < 100).length;
+
+    /* tiến độ theo process */
+    const byP = new Map();
+    for (const t of all) { if (!byP.has(t.process)) byP.set(t.process, { d: 0, n: 0, h: 0, w: 0 }); const o = byP.get(t.process); o.n++; if (t.progress >= 100) o.d++; o.h += (t.durationHours || 0) * (t.progress || 0); o.w += t.durationHours || 0; }
+
+    /* ảnh mới nhất */
+    const feed = [];
+    for (const t of all) for (const e of evOf(t)) for (const x of prOf(t, e.id)) feed.push({ t, e, x });
+    feed.sort((a, b) => b.x.at - a.x.at);
+
+    $('#adView').innerHTML = `
+      <div class="ad-h"><b>🛡 Admin – theo dõi Shutdown</b>
+        <select id="adPlan">${plans.map(x => `<option value="${U.esc(x.id)}" ${x.id === p.id ? 'selected' : ''}>${U.esc(x.name)}</option>`).join('')}</select>
+        <button class="btn sm" id="adOp">📱 Ca trực</button><button class="btn sm" id="adBack">Planner</button></div>
+      <div class="ad-kpis">
+        <div class="ad-k"><span>Tiến độ tổng</span><b>${U.fmtNum(prog, 0)}%</b><div class="ad-bar"><div style="width:${prog}%;background:linear-gradient(90deg,#30d158,#34c7ff)"></div></div></div>
+        <div class="ad-k"><span>Đã đóng</span><b style="color:#16a34a">${cnt('done')}/${all.length}</b><small>task</small></div>
+        <div class="ad-k"><span>Đang làm</span><b style="color:#2563eb">${cnt('run')}</b><small>task</small></div>
+        <div class="ad-k"><span>Trễ</span><b style="color:${cnt('late') ? '#dc2626' : 'inherit'}">${cnt('late')}</b><small>quá giờ kết thúc, chưa đóng</small></div>
+        <div class="ad-k"><span>Ảnh bằng chứng</span><b>${eh}/${en}</b><small>${en ? Math.round(100 * eh / en) : 0}% yêu cầu đã có ảnh</small></div>
+        <div class="ad-k"><span>Đường găng chưa xong</span><b style="color:${critOpen ? '#991b1b' : 'inherit'}">${critOpen}</b><small>trễ là trễ cả Shutdown</small></div>
+        <div class="ad-k"><span>Kết thúc dự kiến</span><b style="font-size:16px">${all.length ? U.fmtDM(res.windowEnd) : '–'}</b><small>${res.windowEnd > res.targetEnd + MS_MIN ? '⚠ vượt mục tiêu' : 'trong mục tiêu'}</small></div>
+      </div>
+      <div class="ad-grid">
+        <div>
+          <div class="ad-card">
+            <h4>Danh sách task <span class="muted small" style="font-weight:400">· ${rows.length}/${all.length}</span></h4>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+              <input id="adQ" placeholder="Tìm task / người / process" value="${U.esc(f.q)}" style="flex:1;min-width:150px">
+              <select id="adSt"><option value="">Mọi trạng thái</option>${[['todo', 'Chưa bắt đầu'], ['run', 'Đang làm'], ['late', 'Trễ'], ['done', 'Hoàn thành'], ['need', 'Có ảnh – chưa đóng']].map(([k, v]) => `<option value="${k}" ${f.st === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+              <select id="adCa"><option value="">Mọi ca</option>${[1, 2, 3].map(n => `<option value="${n}" ${+f.ca === n ? 'selected' : ''}>Ca ${n}</option>`).join('')}</select>
+              <input type="date" id="adDate" value="${f.date}"><button class="btn sm" id="adClr">Xóa lọc</button>
+            </div>
+            ${rows.length ? rows.map(t => {
+              const r = res.R.get(t.id), [st, stL] = stOf(t, r), s = evStat(t);
+              return `<div class="ad-task">
+                <div><div class="ad-tn">#${t.order} ${U.esc(t.taskName)} ${r.critical ? '<span style="color:#991b1b;font-size:11px">● găng</span>' : ''}</div>
+                  <div class="ad-tm">${U.esc(t.process)} · Ca ${U.shiftOf(r.start)} · ${U.fmtDM(r.start)} → ${U.fmtDM(r.end)} · 👤 ${U.esc(t.assignee || 'Chưa phân công')}
+                  ${t.doneBy ? `<br>✅ Đóng bởi <b>${U.esc(t.doneBy)}</b> lúc ${U.fmtDM(t.doneAt)}` : ''}
+                  ${t.proofFolder ? ` · <a href="${U.esc(t.proofFolder)}" target="_blank" rel="noopener">📁 Thư mục ảnh</a>` : ''}</div></div>
+                <div style="text-align:right"><span class="ad-st ${st}">${stL}</span><div class="ad-tm" style="margin-top:4px">📷 ${s.h}/${s.n} · ${t.progress || 0}%</div></div>
+                <div class="ad-ev">${evOf(t).map(e => { const pr = prOf(t, e.id), ok = pr.length >= Math.max(1, e.min || 1);
+                  return `<span class="lbl ${ok ? 'ok' : ''}">${ok ? '✓' : '○'} ${U.esc(e.label)} ${pr.length}/${Math.max(1, e.min || 1)}</span>` +
+                    pr.map(x => `<a class="ad-th" href="${U.esc(x.url)}" target="_blank" rel="noopener" title="${U.esc(x.by)} · ${U.fmtDM(x.at)}"><img loading="lazy" src="${thumb(x.fid)}" alt=""><small>${U.esc(x.by)}</small></a>`).join(''); }).join('')}</div>
+              </div>`; }).join('') : '<div class="ad-empty">Không có task khớp bộ lọc.</div>'}
+          </div>
+        </div>
+        <div>
+          <div class="ad-card"><h4>Tiến độ theo process</h4>
+            ${[...byP].map(([k, o]) => { const pc = o.w ? o.h / o.w : 0; return `<div class="ad-proc"><span>${U.esc(k)}</span><div class="ad-bar"><div style="width:${pc}%;background:${processColor(p, k)}"></div></div><span class="muted">${o.d}/${o.n} · ${Math.round(pc)}%</span></div>`; }).join('') || '<div class="ad-empty">Chưa có task.</div>'}
+          </div>
+          <div class="ad-card"><h4>Ảnh mới cập nhật <span class="muted small" style="font-weight:400">· ${feed.length} ảnh</span></h4>
+            ${feed.slice(0, 40).map(({ t, e, x }) => `<div class="ad-feed"><a class="ad-th" href="${U.esc(x.url)}" target="_blank" rel="noopener"><img loading="lazy" src="${thumb(x.fid)}" alt=""></a>
+              <div><b>${U.esc(x.by)}</b> · ${U.fmtDM(x.at)}${x.ca ? ' · Ca ' + x.ca : ''}<br>#${t.order} ${U.esc(t.taskName)}<br><span class="muted">${U.esc(e.label)}</span></div></div>`).join('') || '<div class="ad-empty">Chưa có ảnh nào được upload.</div>'}
+          </div>
+          <div class="muted small" style="text-align:center">Tự cập nhật khi operator upload · ${new Date(now).toLocaleTimeString('vi-VN')}</div>
+        </div>
+      </div>`;
+  },
+};
+window.AdminView = Admin;
+
+function installAdmin() {
+  const v = document.createElement('div'); v.id = 'adView'; v.className = 'hidden'; document.body.appendChild(v);
+  v.addEventListener('click', e => {
+    if (e.target.closest('#adBack')) return Admin.close();
+    if (e.target.closest('#adOp')) { Admin.close(); window.OperatorView && OperatorView.open(); return; }
+    if (e.target.closest('#adClr')) { Admin.f = { st: '', ca: '', date: '', q: '' }; Admin.render(); }
+  });
+  v.addEventListener('change', e => {
+    const id = e.target.id;
+    if (id === 'adPlan') Admin.planId = e.target.value;
+    if (id === 'adSt') Admin.f.st = e.target.value;
+    if (id === 'adCa') Admin.f.ca = e.target.value;
+    if (id === 'adDate') Admin.f.date = e.target.value;
+    Admin.render();
+  });
+  let qT; v.addEventListener('input', e => { if (e.target.id === 'adQ') { clearTimeout(qT); qT = setTimeout(() => { Admin.f.q = e.target.value; Admin.render(); const q = $('#adQ'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 300); } });
+  const _r = App.render.bind(App);
+  App.render = function () { _r(); if (document.activeElement?.id !== 'adQ') Admin.render(); };
+  setInterval(() => Admin.render(), 60000);
+  window.addEventListener('hashchange', () => { if (location.hash === '#admin') Admin.open(); });
+}
+
+/* =====================================================================
+   5. KHỞI ĐỘNG – chạy SAU tất cả module khác (LDC, Ca trực, Supabase)
+   ===================================================================== */
+document.addEventListener('DOMContentLoaded', () => setTimeout(() => {
+  Auth.load(); guard(); installUI(); installAdmin(); apply();
+  if (START_HASH === '#admin') Admin.open();
+}, 0));
+})();
+</script>
+<!-- ===================== HẾT ĐĂNG NHẬP + ADMIN ===================== -->
+
   
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
