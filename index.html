@@ -401,7 +401,7 @@ table.tbl input{padding:4px 6px;width:100%}
     <option value="2">Ca 2 (14–22)</option>
     <option value="3">Ca 3 (22–06)</option>
   </select>
-  <label><input type="checkbox" id="fCrit"> Đường găng</label>
+  <label><input type="checkbox" id="fCrit"> Critical task</label>
   <label><input type="checkbox" id="fWarn"> Có cảnh báo</label>
   <label>Từ <input type="datetime-local" id="fFrom"></label>
   <label>đến <input type="datetime-local" id="fTo"></label>
@@ -669,7 +669,7 @@ const Scheduler = {
   },
 
   /**
-   * LẬP LỊCH: forward pass theo topo order → cửa sổ (sớm nhất → muộn nhất) → backward pass (slack, đường găng)
+   * LẬP LỊCH: forward pass theo topo order → cửa sổ (sớm nhất → muộn nhất) → backward pass (slack, Critical task)
    * → kiểm tra cửa sổ mục tiêu → xung đột nguồn lực → trạng thái.
    */
   schedule(plan, nowMs = Date.now()) {
@@ -1160,7 +1160,7 @@ const Gantt = {
     const { rows, visCount, total } = this.buildRows();
     $('#filterCount').textContent = `Hiển thị ${visCount}/${total} task`;
     $('#legend').innerHTML = Object.values(STATUS).map(s => `<span><span class="dot" style="background:${s.color}"></span>${s.label}</span>`).join('') +
-      '<span>Viền đỏ = đường găng</span><span>Viền cam = có cảnh báo</span><span>Kéo thanh để dời giờ · kéo mép phải để đổi thời lượng · bấm vào task để sửa</span>';
+      '<span>Viền đỏ = Critical task</span><span>Viền cam = có cảnh báo</span><span>Kéo thanh để dời giờ · kéo mép phải để đổi thời lượng · bấm vào task để sửa</span>';
     const H = Math.max(rows.length * ROW_H, 200), parts = [];
     // Header: ngày / ca / giờ
     const hd = [], hs = [], ht = [];
@@ -1314,7 +1314,7 @@ const Tip = {
       ['Đội phụ trách', U.esc(t.owner || '–')],
     ];
     if (t.dependencyIds.length) rows.push(['Chạy sau', t.dependencyIds.map(d => U.esc(byId.get(d)?.taskName || d)).join(', ')]);
-    rows.push(['Trạng thái', STATUS[r.status].label + (t.progress ? ` · ${t.progress}%` : '') + (r.critical ? ' · <b style="color:#fca5a5">đường găng</b>' : '')]);
+    rows.push(['Trạng thái', STATUS[r.status].label + (t.progress ? ` · ${t.progress}%` : '') + (r.critical ? ' · <b style="color:#fca5a5">Critical task</b>' : '')]);
     if (t.notes) rows.push(['Ghi chú', U.esc(t.notes)]);
     const warn = r.issues.filter(i => i.level !== 'info').map(i => U.esc(i.msg)).join('<br>');
     this.text(`<b style="font-size:13px">${U.esc(t.taskName)}</b><table>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>${warn ? `<div style="margin-top:6px;color:#fbbf24">${warn}</div>` : ''}`, e);
@@ -1416,7 +1416,7 @@ const Drawer = {
     const t = Store.plan().tasks.find(x => x.id === App.drawerTaskId);
     const drv = { plan: 'đầu kế hoạch', dep: 'chờ task trước', chain: 'chờ task trước cùng process', snet: 'mốc đã kéo', fixed: t.locked ? 'đã khóa' : 'cố định' }[r.driver];
     box.innerHTML = `<b>${U.fmtDT(r.start)} → ${U.fmtDT(r.end)}</b> <span class="muted">(${drv})</span><br>
-      ${r.critical ? '<span style="color:var(--st-crit);font-weight:600">Nằm trên đường găng – trễ task này sẽ trễ cả Shutdown</span>' : `<span class="muted">Có thể trễ tối đa ${U.fmtDur(r.slackH)} mà không ảnh hưởng tổng thời gian</span>`}
+      ${r.critical ? '<span style="color:var(--st-crit);font-weight:600">Nằm trên Critical task – trễ task này sẽ trễ cả Shutdown</span>' : `<span class="muted">Có thể trễ tối đa ${U.fmtDur(r.slackH)} mà không ảnh hưởng tổng thời gian</span>`}
       ${r.issues.filter(i => i.level !== 'info').map(i => `<br><span style="color:#b45309">${U.esc(i.msg)}</span>`).join('')}`;
   },
   save() {
@@ -1590,7 +1590,7 @@ const Home = {
 const Panels = {
   autoSchedule() {
     const m = openModal(`<div class="modal-h"><h3>Tự động sắp lịch</h3><button class="x" data-close>×</button></div>
-      <div class="modal-b"><p style="margin-top:0">Xếp lại toàn bộ task: các process chạy song song, task có phụ thuộc chờ task trước xong, tính đường găng.</p>
+      <div class="modal-b"><p style="margin-top:0">Xếp lại toàn bộ task: các process chạy song song, task có phụ thuộc chờ task trước xong, tính Critical task.</p>
         <label class="chk"><input type="checkbox" id="as_reset" checked> Bỏ các mốc đã kéo tay, xếp sớm nhất có thể (task cố định / khóa giữ nguyên)</label><br>
         <label class="chk"><input type="checkbox" id="as_level"> Tự dời task khi một người/đội bị trùng giờ</label></div>
       <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="as_ok">Chạy</button></div>`, 'sm');
@@ -1693,7 +1693,7 @@ const Dash = {
       card('Tổng giờ công', U.fmtNum(k.manHours) + ' h', 'thời lượng × số người'),
       card('Task song song nhiều nhất', k.maxParallel, k.maxParallelAt ? 'lúc ' + U.fmtDM(k.maxParallelAt) : ''),
       card('Xung đột người/đội', k.conflictCount),
-      card('Task đường găng', k.criticalCount),
+      card('Task Critical task', k.criticalCount),
       card('Tiến độ', U.fmtNum(k.progress, 0) + '%', `<div class="progress-bar"><div style="width:${k.progress}%"></div></div>`),
     ].join('');
     const procMap = new Map(); for (const t of p.tasks) procMap.set(t.process, (procMap.get(t.process) || 0) + t.durationHours);
@@ -1717,7 +1717,7 @@ const Dash = {
         <div class="card"><h4>Tổng giờ công theo Nhánh</h4>${this.hbar(brItems, 'giờ công')}</div>
         <div class="card" style="grid-column:1/-1"><h4>Số task đang chạy theo khung giờ</h4>${colChart}</div>
         <div class="card"><h4>Giờ làm việc theo ca</h4>${this.hbar(shItems, 'h')}</div>
-        <div class="card"><h4>Đường găng (${crit.length} task)</h4><div style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Process</th><th>Task</th><th>Người thực hiện</th><th>Thời gian</th></tr></thead><tbody>
+        <div class="card"><h4>Critical task (${crit.length} task)</h4><div style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Process</th><th>Task</th><th>Người thực hiện</th><th>Thời gian</th></tr></thead><tbody>
           ${crit.map(t => { const r = res.R.get(t.id); return `<tr><td>${U.esc(t.process)}</td><td><a href="#" data-goto="${U.esc(t.id)}">${U.esc(t.taskName)}</a></td><td>${U.esc(t.assignee || '–')}</td><td class="nowrap">${U.fmtDM(r.start)} → ${U.fmtHM(r.end)}</td></tr>`; }).join('')}</tbody></table></div></div>
       </div>`;
     $$('[data-goto]', el).forEach(a => a.onclick = e => { e.preventDefault(); App.selectTask(a.dataset.goto, true); });
@@ -1810,7 +1810,7 @@ const COLS = {   // tên cột chấp nhận (đã bỏ dấu, chữ thường)
   notes: ['ghi chu', 'note', 'notes'],
   progress: ['tien do (%)', 'tien do', 'progress'],
 };
-const EXPORT_HEAD = ['STT', 'ID', 'Nhánh', 'Process', 'Task', 'Bắt đầu', 'Kết thúc', 'Khung kế hoạch (giờ)', 'Định mức (giờ)', 'Số lượng', 'Số người', 'Người thực hiện', 'Owner', 'Cách thực hiện', 'Task phụ thuộc', 'Độ trễ (giờ)', 'Ghi chú', 'Tiến độ (%)', 'Đường găng', 'Cảnh báo'];
+const EXPORT_HEAD = ['STT', 'ID', 'Nhánh', 'Process', 'Task', 'Bắt đầu', 'Kết thúc', 'Khung kế hoạch (giờ)', 'Định mức (giờ)', 'Số lượng', 'Số người', 'Người thực hiện', 'Owner', 'Cách thực hiện', 'Task phụ thuộc', 'Độ trễ (giờ)', 'Ghi chú', 'Tiến độ (%)', 'Critical task', 'Cảnh báo'];
 
 const IO = {
   needXLSX() { if (window.XLSX) return true; toast('Chưa tải được SheetJS (cần Internet). Hãy dùng CSV/JSON.', 'err'); return false; },
@@ -3694,7 +3694,7 @@ const Admin = {
         <div class="ad-k"><span>Đang làm</span><b style="color:#2563eb">${cnt('run')}</b><small>task</small></div>
         <div class="ad-k"><span>Trễ</span><b style="color:${cnt('late') ? '#dc2626' : 'inherit'}">${cnt('late')}</b><small>quá giờ kết thúc, chưa đóng</small></div>
         <div class="ad-k"><span>Ảnh bằng chứng</span><b>${eh}/${en}</b><small>${en ? Math.round(100 * eh / en) : 0}% yêu cầu đã có ảnh</small></div>
-        <div class="ad-k"><span>Đường găng chưa xong</span><b style="color:${critOpen ? '#991b1b' : 'inherit'}">${critOpen}</b><small>trễ là trễ cả Shutdown</small></div>
+        <div class="ad-k"><span>Critical task chưa xong</span><b style="color:${critOpen ? '#991b1b' : 'inherit'}">${critOpen}</b><small>trễ là trễ cả Shutdown</small></div>
         <div class="ad-k"><span>Kết thúc dự kiến</span><b style="font-size:16px">${all.length ? U.fmtDM(res.windowEnd) : '–'}</b><small>${res.windowEnd > res.targetEnd + MS_MIN ? '⚠ vượt mục tiêu' : 'trong mục tiêu'}</small></div>
       </div>
       <div class="ad-grid">
