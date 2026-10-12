@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <title>Shutdown Planner – Lập lịch Shutdown nhà máy</title>
 <!--
   ỨNG DỤNG LẬP LỊCH SHUTDOWN NHÀ MÁY – 1 FILE DUY NHẤT
@@ -3443,7 +3445,7 @@ function install() {
   const _render = App.render.bind(App);
   App.render = function () { _render(); OP.render(); drawSheet(); };
   window.addEventListener('hashchange', () => { if (location.hash === '#op') OP.open(); });
-  if (location.hash === '#op' || matchMedia('(max-width:700px)').matches) OP.open();
+  if (location.hash === '#op' || (matchMedia('(max-width:700px)').matches && !/^#(wr|admin)$/.test(location.hash))) OP.open();
 }
 document.addEventListener('DOMContentLoaded', install);
 })();
@@ -3841,6 +3843,12 @@ body.wr-mode>*:not(#wrView):not(#toasts):not(#modalRoot):not(#tip){display:none!
 .op-req.wr-locked{opacity:.45}.op-req.wr-locked .op-acts{pointer-events:none}
 .wr-hang{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:6px 0;border-top:1px solid var(--border)}
 .wr-hang:first-of-type{border-top:0}
+.wr-flow{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:10px 0 0;padding:9px 12px;border-radius:16px;background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#ddd);font-size:12.5px}
+.wr-flow span{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+.wr-flow span i{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;font-style:normal;font-size:11px;font-weight:700;background:rgba(120,120,128,.18);color:var(--text)}
+.wr-flow span.ok{color:#15803d}.wr-flow span.ok i{background:#16a34a;color:#fff}
+.wr-flow span.cur{color:var(--text);font-weight:700}.wr-flow span.cur i{background:var(--accent,#2563eb);color:#fff;box-shadow:0 0 0 4px var(--accent-soft)}
+.wr-flow b{color:var(--muted);font-weight:400}
 @media (max-width:900px){.wr-steps{grid-template-columns:1fr}.wr-task{grid-template-columns:1fr}.wr-sf{grid-template-columns:1fr}}
 </style>
 <script>
@@ -3851,6 +3859,21 @@ try {
    0. CẤU HÌNH + DANH MỤC MẶC ĐỊNH (bị ghi đè bởi sheet LISTS của file upload)
    ===================================================================== */
 const TEMPLATE_URL = './Mau_Work_Request.xlsx';
+const TEMPLATE_ALT = ['./Mau_Work_Request.xlsx', './Mau_Work_Request_final.xlsx', './Mau_Work_Request_v3.xlsx'];
+async function downloadTemplate() {
+  for (const u of TEMPLATE_ALT) {
+    try {
+      const r = await fetch(u, { cache: 'no-store' });
+      if (!r.ok) continue;
+      const blob = await r.blob(), a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'Mau_Work_Request.xlsx'; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+      WR.dlDone = true; WR.render(); return;
+    } catch (e) { }
+  }
+  if (location.protocol === 'file:') { const a = document.createElement('a'); a.href = TEMPLATE_URL; a.download = 'Mau_Work_Request.xlsx'; a.click(); WR.dlDone = true; WR.render(); return; }
+  toast('Không tìm thấy file Mau_Work_Request.xlsx trên GitHub – hãy upload file này vào cùng thư mục với index.html.', 'err');
+}
 const DEF = {
   modes: ['Mode 0', 'Mode 1', 'Mode 2', 'Mode 3', 'Mode 4'],
   ptw: ['Không', 'Trên cao', 'Tia lửa / Công việc nóng', 'Điện nguy cơ cao', 'Không gian kín', 'Mode 4', 'Thiết bị nâng', 'Đào đất', 'Phá dỡ'],
@@ -3993,7 +4016,7 @@ function evidenceFor(row) {
 function ppeItems(s, lists) {
   if (!s || !YES(s.need) || !s.ppe || isNo(s.ppe)) return [];
   const packs = (lists && lists.packs) || DEF.packs;
-  return packs[s.ppe] || [s.ppe];
+  return (packs[s.ppe] || [s.ppe]).map(x => x.charAt(0).toUpperCase() + x.slice(1));
 }
 function wrOf(row, lists, old) {
   return { kind: row.kind, equip: row.equip, desc: row.desc, line: row.line, photos: { ...(row.photos || {}) }, safety: { ...(row.safety || {}) },
@@ -4194,6 +4217,16 @@ function tagsOf(r) {
     .filter(Boolean).forEach(x => out.push(`<span>${esc(x)}</span>`));
   return out.join('');
 }
+function flowHTML(d, p, ro) {
+  const st = p ? planStats(p) : null;
+  const steps = [
+    ['Đăng nhập', !ro], ['Tải form Excel', !!WR.dlDone || !!d || !!p], ['Upload Work Request', !!d || !!p],
+    ['Upload LDC (tùy chọn)', typeof LDC !== 'undefined' && !!LDC.data], ['Tạo kế hoạch nháp', !!p],
+    ['Sắp thứ tự & ưu tiên', !!p && !st.seq && !st.prio && !st.e], ['Phát hành cho Ca trực', !!p && p.wr.status === 'published'],
+  ];
+  const cur = steps.findIndex((x, i) => !x[1] && i !== 3);
+  return `<div class="wr-flow">${steps.map((x, i) => `<span class="${x[1] ? 'ok' : i === cur ? 'cur' : ''}"><i>${x[1] ? '✓' : i === 3 ? '–' : i + 1}</i>${x[0]}</span>`).join('<b>›</b>')}</div>`;
+}
 const issueHTML = list => list.map(f => `<div class="${f.lvl}">${f.lvl === 'e' ? '❌' : f.lvl === 'w' ? '⚠' : 'ℹ'} ${esc(f.msg)}</div>`).join('');
 
 WR.render = function () {
@@ -4215,10 +4248,12 @@ WR.render = function () {
   }
   const ldcOk = typeof LDC !== 'undefined';
   v.innerHTML = `
-    <div class="wr-h"><b>📥 Work Request</b>${ro ? '<span class="wr-pill w">👁 Chỉ xem – đăng nhập để tạo / sửa</span>' : ''}<button class="btn sm" data-wr="back">Planner</button></div>
+    <div class="wr-h"><b>📥 Work Request</b>${ro ? '<button class="wr-pill w" data-wr="login" style="border:0;cursor:pointer">👁 Chỉ xem – bấm để đăng nhập</button>' : `<span class="wr-pill ok">✓ ${esc(window.Auth ? Auth.user : '')}</span>`}
+      <button class="btn sm" data-wr="op">📱 Ca trực</button>${ro ? '' : '<button class="btn sm" data-wr="admin">🛡 Admin</button>'}<button class="btn sm" data-wr="back">Planner</button></div>
+    ${flowHTML(d, p, ro)}
     <div class="wr-steps">
       <section class="wr-card ${d ? 'ok' : ''}"><h4><span class="wr-n">1</span> File yêu cầu công việc</h4>
-        <a class="wr-dl" href="${TEMPLATE_URL}" download="Mau_Work_Request.xlsx"><span class="ic">📄</span><span><b>Tải form Work Request (Excel)</b>
+        <a class="wr-dl" href="${TEMPLATE_URL}" data-wr="dl"><span class="ic">📄</span><span><b>Tải form Work Request (Excel)</b>
           <small>Điền theo mẫu: thông tin công việc · ảnh upload · yêu cầu an toàn (Mode, WI LOTO, điểm khóa, giấy phép, PPE). Ô không áp dụng tự xám.</small></span></a>
         <div class="wr-file"><input type="file" id="wrFile" accept=".xlsx,.xlsm,.xls">${d ? `<span class="wr-pill ok">${esc(d.fileName)}</span><button class="btn sm" data-wr="clear">Bỏ file</button>` : ''}</div>
         ${preview}
@@ -4285,7 +4320,7 @@ function planHTML(p, wrPlans) {
       <div style="margin-top:8px"><button class="btn primary sm" data-wr="prio">Lưu thứ tự ưu tiên</button></div></section>` : ''}`;
 }
 WR.open = function () {
-  document.body.classList.remove('op-mode', 'admin-mode'); $('#opView') && $('#opView').classList.add('hidden'); $('#adView') && $('#adView').classList.add('hidden');
+  onlyMode('wr-mode'); Drawer.close(); closeModal();
   document.body.classList.add('wr-mode'); $('#wrView').classList.remove('hidden');
   if (location.hash !== '#wr') history.replaceState(null, '', '#wr');
   if (!findP(WR.planId)) { const a = findP(Store.state.activePlanId); WR.planId = a && a.wr ? a.id : ((plans().filter(x => x.wr).slice(-1)[0] || {}).id || null); }
@@ -4299,6 +4334,10 @@ function bindView(v) {
     if (a) {
       const k = a.dataset.wr;
       if (k === 'back') return WR.close();
+      if (k === 'dl') { e.preventDefault(); return downloadTemplate(); }
+      if (k === 'login') { const b = $('#auBadge'); if (b) b.click(); return; }
+      if (k === 'op') { WR.close(); return window.OperatorView && OperatorView.open(); }
+      if (k === 'admin') { WR.close(); return window.AdminView && AdminView.open(); }
       if (k === 'clear') { WR.data = null; WR.form.start = ''; return WR.render(); }
       if (k === 'create') return createPlan();
       if (k === 'ldc') { if (await LDC.askUpload('Upload lịch đi ca (LDC)')) WR.render(); return; }
@@ -4423,15 +4462,48 @@ function topBtn() {
   const p = findP(Store.state.activePlanId), st = p && p.wr ? planStats(p) : null, n = st ? st.e + st.seq + st.prio : 0;
   b.textContent = '📥 Work Request' + (n ? ' · ' + n + '⚠' : ''); b.classList.toggle('has', !!n);
 }
+const MODES = { 'op-mode': '#opView', 'admin-mode': '#adView', 'wr-mode': '#wrView' };
+function onlyMode(keep) {
+  for (const [cls, sel] of Object.entries(MODES)) {
+    if (cls === keep) continue;
+    document.body.classList.remove(cls);
+    const el = $(sel); if (el) el.classList.add('hidden');
+  }
+}
+function fixModes() {
+  const wrap = (obj, fn, cls) => { if (!obj || !obj[fn]) return; const o = obj[fn]; obj[fn] = function (...a) { onlyMode(cls); return o.apply(this, a); }; };
+  wrap(window.OperatorView, 'open', 'op-mode');
+  wrap(window.AdminView, 'open', 'admin-mode');
+  /* Mở Planner từ trang Ca trực / Admin: trả về đúng màn hình Planner */
+  const back = (obj) => { if (!obj || !obj.close) return; const o = obj.close; obj.close = function (...a) { const r = o.apply(this, a); onlyMode(''); return r; }; };
+  back(window.OperatorView); back(window.AdminView);
+}
+/* Trang chủ: "+ Tạo kế hoạch mới" đi theo luồng Work Request */
+function fixHome() {
+  const _hr = Home.render.bind(Home);
+  Home.render = function () {
+    _hr();
+    const go = () => WR.open();
+    ['#hNew', '#hNew2'].forEach(s => { const b = $(s); if (b) b.onclick = go; });
+    const n2 = $('#hNew2'); if (n2) n2.innerHTML = '+ Tạo kế hoạch mới<span>Theo Work Request: tải form → điền yêu cầu → upload → sắp thứ tự → phát hành</span>';
+    const h = $('#viewHome .home-h');
+    if (h && !h.querySelector('#hTpl') && !(window.Auth && !Auth.ok)) {
+      const b = document.createElement('button'); b.className = 'btn'; b.id = 'hTpl'; b.textContent = 'Tạo nhanh từ bộ task mẫu';
+      b.onclick = () => Home.wizard(); h.appendChild(b);
+    }
+  };
+}
 function install() {
   const v = document.createElement('div'); v.id = 'wrView'; v.className = 'hidden'; document.body.appendChild(v); bindView(v);
   const sp = $('.topbar .spacer');
   if (sp) { const b = document.createElement('button'); b.className = 'tb-btn wr-top'; b.id = 'wrTop'; b.onclick = () => WR.open(); sp.parentNode.insertBefore(b, sp); }
   const _ar = App.render.bind(App);
   App.render = function () { _ar(); topBtn(); const ae = document.activeElement; if (!(ae && ae.closest && ae.closest('#wrView') && /INPUT|TEXTAREA/.test(ae.tagName))) WR.render(); };
-  installOp(); installAdmin(); topBtn();
+  installOp(); installAdmin(); fixModes(); fixHome(); topBtn();
+  if (App.view === 'home') Home.render();
   window.addEventListener('hashchange', () => { if (location.hash === '#wr') WR.open(); });
   if (location.hash === '#wr') WR.open();
+  else if (location.hash === '#admin' && window.AdminView && document.body.classList.contains('admin-mode')) onlyMode('admin-mode');
 }
 WR._test = { parseWB, issuesOf, evidenceFor, ppeItems };
 document.addEventListener('DOMContentLoaded', () => setTimeout(install, 30));
