@@ -3769,6 +3769,677 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(() => {
 </script>
 <!-- ===================== HẾT ĐĂNG NHẬP + ADMIN ===================== -->
 
+<!-- =====================================================================
+     SHUTDOWN PLANNER – TAB "WORK REQUEST" (v2 – khớp file Mau_Work_Request.xlsx)
+     Dán TOÀN BỘ khối này vào index.html:
+       NGAY SAU khối "ĐĂNG NHẬP + ADMIN" và NGAY TRƯỚC dòng chứa supabase-js@2
+     Upload file Mau_Work_Request.xlsx vào repo (cùng thư mục index.html).
+     Link mở thẳng tab: …/Shutdown-activities-app/#wr
+     ===================================================================== -->
+<style id="wr-style">
+body.wr-mode>*:not(#wrView):not(#toasts):not(#modalRoot):not(#tip){display:none!important}
+#wrView{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:10px 12px 70px;width:100%;max-width:1280px;margin:0 auto}
+.wr-h{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-radius:18px;background:var(--glass,#fff);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-bd,#ddd);box-shadow:var(--glass-sh)}
+.wr-h b{font-size:17px;margin-right:auto}
+.wr-steps{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin:10px 0}
+.wr-card{background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#ddd);border-radius:18px;padding:12px 14px;margin-bottom:10px;min-width:0}
+.wr-card h4{margin:0 0 10px;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wr-n{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent,#2563eb);color:#fff;font-size:12px}
+.wr-card.ok .wr-n{background:#16a34a}
+.wr-card label.f{display:block;font-size:12px;color:var(--muted);margin-bottom:8px}
+.wr-card label.f input{display:block;width:100%;margin-top:3px}
+.wr-dl{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;margin-bottom:10px;background:linear-gradient(135deg,rgba(37,99,235,.10),rgba(14,116,144,.10));border:1px dashed rgba(37,99,235,.45);text-decoration:none;color:var(--text)}
+.wr-dl b{display:block;font-size:13.5px}.wr-dl small{color:var(--muted);font-size:11.5px}.wr-dl span.ic{font-size:26px}
+.wr-file{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.wr-sum{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.wr-sum span,.wr-pill{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;background:rgba(120,120,128,.14)}
+.wr-pill.e,.wr-sum .e{background:rgba(220,38,38,.13);color:#b91c1c}
+.wr-pill.w,.wr-sum .w{background:rgba(245,158,11,.18);color:#b45309}
+.wr-pill.i,.wr-sum .i{background:rgba(37,99,235,.12);color:#1d4ed8}
+.wr-pill.ok,.wr-sum .ok{background:rgba(22,163,74,.14);color:#15803d}
+.wr-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.wr-tbl th{position:sticky;top:0;background:var(--panel2,#f8fafc);text-align:left;font-size:11.5px;color:var(--muted);padding:6px;border-bottom:1px solid var(--border)}
+.wr-tbl td{padding:6px;border-bottom:1px solid var(--border);vertical-align:top}
+.wr-tbl tr.e td:first-child{box-shadow:inset 4px 0 0 #dc2626}
+.wr-tbl tr.w td:first-child{box-shadow:inset 4px 0 0 #f59e0b}
+.wr-wrap{max-height:52vh;overflow:auto;border-radius:12px;border:1px solid var(--border)}
+.wr-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.wr-tags span{font-size:11px;padding:1px 7px;border-radius:999px;background:rgba(217,119,6,.13);color:#9a3412}
+.wr-tags span.ph{background:rgba(14,116,144,.12);color:#0e7490}
+.wr-issue{font-size:11.5px;line-height:1.45}
+.wr-issue .e{color:#b91c1c}.wr-issue .w{color:#b45309}.wr-issue .i{color:#1d4ed8}
+.wr-proc{margin-top:12px;font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px}
+.wr-proc i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.wr-task{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(220px,1fr) auto;gap:8px;align-items:start;padding:9px 10px;border-radius:12px;margin-top:6px;background:var(--panel2,#f8fafc);border:1px solid var(--border)}
+.wr-task.e{border-color:rgba(220,38,38,.45);background:rgba(254,226,226,.35)}
+.wr-task.w{border-color:rgba(245,158,11,.55);background:rgba(254,243,199,.35)}
+.wr-task .tn{font-weight:650;font-size:13.5px}.wr-task .tm{font-size:12px;color:var(--muted)}
+.wr-task select{width:100%;font-size:12.5px}
+.wr-acts{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.wr-prio{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:12px;background:var(--panel2,#f8fafc);border:1px solid var(--border);margin-top:5px;font-size:13px}
+.wr-prio b{width:24px;text-align:center}.wr-prio span{flex:1}
+.wr-chip{display:inline-flex;margin-right:5px;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:700;vertical-align:1px;white-space:nowrap}
+.wr-chip.wr-err{background:rgba(220,38,38,.15);color:#b91c1c}.wr-chip.wr-miss{background:rgba(245,158,11,.2);color:#b45309}
+.grow.wr-err .gleft{box-shadow:inset 4px 0 0 #dc2626}.grow.wr-miss .gleft{box-shadow:inset 4px 0 0 #f59e0b}
+.wr-top.has{background:rgba(245,158,11,.25)!important}
+.wr-sf{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wr-sf label{font-size:12px;color:var(--muted)}
+.wr-sf select,.wr-sf input,.wr-sf textarea{width:100%;margin-top:3px}
+.wr-sf .full{grid-column:1/-1}
+.wr-sf.off .sf{opacity:.4;pointer-events:none}
+.wr-sec{grid-column:1/-1;font-weight:700;font-size:12.5px;margin-top:6px;color:var(--text)}
+.wr-opdraft{margin:8px 0;padding:9px 12px;border-radius:12px;background:rgba(245,158,11,.18);font-size:13px;font-weight:600}
+.wr-opbox{border:1px solid rgba(217,119,6,.35);border-radius:16px;padding:12px;margin-bottom:12px;background:rgba(254,243,199,.35)}
+.wr-desc{font-size:13.5px;margin-bottom:8px}.wr-sub{font-size:12.5px;margin-top:6px}
+.wr-pt{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+.wr-pt th,.wr-pt td{border:1px solid var(--border);padding:5px;text-align:left;vertical-align:top}
+.wr-ppe{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.wr-ppe button{border-radius:12px;padding:8px 11px;font-size:13.5px;border:1px solid var(--border);background:var(--glass-row,#fff);color:var(--text)}
+.wr-ppe button.on{background:rgba(48,209,88,.16);border-color:rgba(22,163,74,.55)}
+.wr-gate{margin-top:10px;padding:10px 12px;border-radius:12px;font-size:13.5px;font-weight:600;background:rgba(220,38,38,.1);color:#b91c1c}
+.wr-gate.ready{background:none;padding:0}.wr-gate.ok{background:rgba(22,163,74,.13);color:#15803d}
+.op-req.wr-locked{opacity:.45}.op-req.wr-locked .op-acts{pointer-events:none}
+.wr-hang{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:6px 0;border-top:1px solid var(--border)}
+.wr-hang:first-of-type{border-top:0}
+@media (max-width:900px){.wr-steps{grid-template-columns:1fr}.wr-task{grid-template-columns:1fr}.wr-sf{grid-template-columns:1fr}}
+</style>
+<script>
+(function () {
+'use strict';
+try {
+/* =====================================================================
+   0. CẤU HÌNH + DANH MỤC MẶC ĐỊNH (bị ghi đè bởi sheet LISTS của file upload)
+   ===================================================================== */
+const TEMPLATE_URL = './Mau_Work_Request.xlsx';
+const DEF = {
+  modes: ['Mode 0', 'Mode 1', 'Mode 2', 'Mode 3', 'Mode 4'],
+  ptw: ['Không', 'Trên cao', 'Tia lửa / Công việc nóng', 'Điện nguy cơ cao', 'Không gian kín', 'Mode 4', 'Thiết bị nâng', 'Đào đất', 'Phá dỡ'],
+  packs: { 'Cơ bản': ['Mũ', 'Kính', 'Giày', 'Găng tay'], 'Chịu nhiệt': ['Mũ', 'Kính', 'Giày', 'Găng tay', 'Găng chịu nhiệt', 'Áo dài tay'],
+    'Hóa chất / CIP': ['Mũ', 'Kính', 'Giày', 'Găng tay', 'Găng hóa chất', 'Mặt nạ', 'Tạp dề', 'Ủng'], 'Trên cao': ['Mũ', 'Kính', 'Giày', 'Găng tay', 'Dây an toàn toàn thân'],
+    'Không gian kín': ['Mũ', 'Kính', 'Giày', 'Găng tay', 'Máy đo khí', 'Mặt nạ'], 'Tiếng ồn': ['Nút tai / chụp tai'] },
+  yn: ['Có', 'Không'], kinds: ['Bắt buộc', 'Bổ sung'], n: ['1', '2', '3', '4', '5'],
+};
+const WR = { data: null, planId: null, onlyMiss: false, prioDraft: null, form: { name: '', start: '', target: 48 }, pendingSeq: null };
+window.WorkRequest = WR;
+
+const N = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+const YES = v => ['co', 'yes', 'x', 'true', '1'].includes(N(v));
+const isNo = v => ['khong', 'no', 'false', '0', '—', '-', ''].includes(N(v));
+const esc = s => U.esc(s ?? '');
+const plans = () => Store.state.plans;
+const findP = id => plans().find(p => p.id === id);
+const opName = () => SafeStore.get('op.name') || '';
+const slug = s => N(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const ptwOf = s => (s && YES(s.need) && s.ptw && !isNo(s.ptw)) ? s.ptw : '';
+const lotoOn = s => !!s && YES(s.need) && !!(String(s.wiLoto || '').trim() || String(s.lotoPts || '').trim());
+/* "Khí nén: HV của regulator; Điện: CB quạt MCC" → [{energy, point}] */
+function parsePts(str) {
+  return String(str || '').split(/[;\n]+/).map(x => x.trim()).filter(Boolean).map((x, i) => {
+    const k = x.indexOf(':'); return k > 0 ? { stt: i + 1, energy: x.slice(0, k).trim(), point: x.slice(k + 1).trim() } : { stt: i + 1, energy: '', point: x };
+  });
+}
+
+/* =====================================================================
+   1. ĐỌC FILE (dò theo TÊN CỘT – đổi vị trí cột vẫn đọc đúng)
+   ===================================================================== */
+const HDR = [
+  ['branch', h => h === 'nhanh'], ['process', h => h === 'process'], ['equip', h => h.startsWith('thiet bi')],
+  ['name', h => h.startsWith('ten cong viec')], ['desc', h => h.startsWith('mo ta')], ['kind', h => h.startsWith('loai cong viec')],
+  ['dur', h => h.startsWith('thoi luong')], ['people', h => h.startsWith('so nguoi')],
+  ['phCheck', h => h.startsWith('anh checklist')], ['phPtw', h => h.startsWith('anh giay phep')], ['phDone', h => h.startsWith('anh hoan thanh')],
+  ['need', h => h.startsWith('can yeu cau an toan')], ['mode', h => h.startsWith('mode')],
+  ['wiLoto', h => h === 'wi loto' || h.includes('huong dan loto')], ['lotoPts', h => h.startsWith('diem khoa')],
+  ['ptw', h => h.startsWith('giay phep lam viec')], ['risk', h => h.startsWith('phieu tien doan')], ['ppe', h => h.startsWith('bo ppe')],
+];
+const clean = h => N(String(h).split('\n')[0]).replace(/\s*\*$/, '').replace(/\s*\(.*\)$/, '').trim();
+function aoaOf(wb, name) {
+  const n = wb.SheetNames.find(x => N(x) === N(name));
+  return n ? XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: false, defval: '' }) : null;
+}
+function parseLists(A) {
+  const out = { ptw: DEF.ptw.slice(), packs: { ...DEF.packs } };
+  if (!A || !A.length) return out;
+  const H = (A[0] || []).map(x => String(x).trim()), col = n => { const i = H.indexOf(n); return i < 0 ? [] : A.slice(1).map(r => String(r[i] ?? '').trim()).filter(v => v && v !== '—'); };
+  if (col('L_PTW').length) out.ptw = col('L_PTW');
+  const pk = col('PPE_PACKS');
+  if (pk.length) {
+    const packs = {};
+    pk.forEach(x => { const k = x.indexOf('='); if (k > 0) packs[x.slice(0, k).trim()] = x.slice(k + 1).split(/[,;+]+/).map(s => s.trim()).filter(Boolean); });
+    const base = packs['Cơ bản'] || [];
+    Object.keys(packs).forEach(k => { packs[k] = [...new Set(packs[k].flatMap(s => N(s) === 'co ban' && k !== 'Cơ bản' ? base : [s]))]; });
+    if (Object.keys(packs).length) out.packs = packs;
+  }
+  return out;
+}
+function parseWB(wb, fileName) {
+  const T = aoaOf(wb, 'WORK REQUEST') || XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+  const hi = T.findIndex(r => (r || []).some(c => clean(c).startsWith('ten cong viec')));
+  if (hi < 0) throw new Error('Không tìm thấy dòng tiêu đề có cột "Tên công việc".');
+  const col = {};
+  T[hi].forEach((c, i) => { const h = clean(c); for (const [k, f] of HDR) if (col[k] === undefined && f(h)) { col[k] = i; break; } });
+  /* thông tin đầu file (nếu có): Tên kế hoạch / Bắt đầu Shutdown */
+  const meta = {};
+  T.slice(0, hi).forEach(r => (r || []).forEach((c, i) => {
+    const h = N(c), next = () => (r.slice(i + 1).find(v => String(v).trim()) || '').toString().trim();
+    if (h.startsWith('ten ke hoach')) meta.name = next();
+    if (h.startsWith('bat dau shutdown')) meta.start = next();
+  }));
+  const rows = [];
+  for (let r = hi + 1; r < T.length; r++) {
+    const R = T[r] || [], g = k => col[k] === undefined ? '' : String(R[col[k]] ?? '').trim();
+    const name = g('name'); if (!name) continue;
+    const kn = N(g('kind'));
+    rows.push({
+      line: r + 1, branch: g('branch'), process: g('process'), equip: g('equip'), name, desc: g('desc'),
+      kind: kn.startsWith('bo sung') ? 'extra' : kn.startsWith('bat buoc') ? 'mandatory' : '',
+      dur: U.num(String(g('dur')).replace(',', '.'), 0), people: Math.round(U.num(g('people'), 0)),
+      photos: { check: g('phCheck'), ptw: g('phPtw'), done: g('phDone') },
+      safety: { need: g('need'), mode: g('mode'), wiLoto: g('wiLoto'), lotoPts: g('lotoPts'), ptw: g('ptw'), risk: g('risk'), ppe: g('ppe') },
+    });
+  }
+  const missingCols = [['name', 'Tên công việc'], ['process', 'Process'], ['dur', 'Thời lượng'], ['need', 'Cần yêu cầu an toàn?'], ['phDone', 'Ảnh hoàn thành task']]
+    .filter(([k]) => col[k] === undefined).map(x => x[1]);
+  return { fileName, rows, meta, lists: parseLists(aoaOf(wb, 'LISTS')), missingCols };
+}
+function metaStart(s) {
+  const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/.exec(String(s || '').trim());
+  if (!m) return '';
+  const p = n => String(n).padStart(2, '0');
+  return `${m[3]}-${p(m[2])}-${p(m[1])}T${p(m[4] || 6)}:${p(m[5] || 0)}`;
+}
+
+/* =====================================================================
+   2. KIỂM TRA + TỰ SINH YÊU CẦU ẢNH
+   ===================================================================== */
+function issuesOf(row) {
+  const e = [], w = [], s = row.safety || {}, ph = row.photos || {};
+  if (!row.branch) e.push('Thiếu Nhánh');
+  if (!row.process) e.push('Thiếu Process');
+  if (!row.kind) e.push('Thiếu Loại công việc');
+  if (!(row.dur > 0)) e.push('Thiếu Thời lượng');
+  if (!(row.people >= 1)) e.push('Thiếu Số người');
+  if (!(+ph.done >= 1)) e.push('Thiếu số Ảnh hoàn thành task');
+  if (!s.need) e.push('Chưa chọn "Cần yêu cầu an toàn?"');
+  else if (YES(s.need)) {
+    [['mode', 'Mode can thiệp'], ['ptw', 'Giấy phép làm việc'], ['risk', 'Phiếu tiên đoán rủi ro'], ['ppe', 'Bộ PPE']].forEach(([k, l]) => { if (!s[k] || s[k] === '—') e.push('Thiếu ' + l); });
+    const m = N(s.mode);
+    if (m === 'mode 4' && N(s.ptw) !== 'mode 4') e.push('Mode 4 bắt buộc có giấy phép "Mode 4"');
+    if ((m === 'mode 3' || m === 'mode 4') && !lotoOn(s)) w.push(`${s.mode} thường phải LOTO – chưa có WI LOTO / điểm khóa`);
+    if (s.wiLoto && !String(s.lotoPts || '').trim()) w.push('Có WI LOTO nhưng chưa ghi điểm khóa – operator chụp 1 ảnh LOTO chung');
+    if (lotoOn(s) && !row.equip) w.push('Có LOTO nên ghi Thiết bị / Khu vực');
+    if (ptwOf(s) && !YES(ph.ptw)) w.push('Có giấy phép – hệ thống tự thêm ảnh giấy phép');
+  }
+  return { e, w };
+}
+function evidenceFor(row) {
+  const s = row.safety || {}, ph = row.photos || {}, pre = [], end = [], used = new Set();
+  const add = (arr, id, label, min = 1) => { if (used.has(id)) return; used.add(id); arr.push({ id, label, min }); };
+  const safe = YES(s.need), ptw = ptwOf(s);
+  if (safe && lotoOn(s)) {
+    const pts = parsePts(s.lotoPts);
+    if (pts.length) pts.forEach(p => add(pre, 'pre:loto' + p.stt, `🟡 Chuẩn bị · LOTO điểm ${p.stt}: ${[p.energy, p.point].filter(Boolean).join(' – ')}`));
+    else add(pre, 'pre:loto', '🟡 Chuẩn bị · Ảnh khóa + thẻ LOTO theo ' + (s.wiLoto || 'WI LOTO'));
+    add(pre, 'pre:zero', '🟡 Chuẩn bị · Kiểm tra zero energy (thử khởi động / đồng hồ = 0)');
+  }
+  if (YES(ph.ptw) || ptw) add(pre, 'pre:ptw', `🟡 Chuẩn bị · Ảnh giấy phép làm việc${ptw ? ' "' + ptw + '"' : ''} đã ký duyệt`);
+  if (safe && YES(s.risk)) add(pre, 'pre:risk', '🟡 Chuẩn bị · Ảnh phiếu tiên đoán rủi ro');
+  if (YES(ph.check)) add(end, 'end:check', '🟢 Kết thúc · Ảnh checklist đã điền');
+  const n = Math.min(5, Math.max(1, Math.round(+ph.done || 1)));
+  for (let i = 1; i <= n; i++) add(end, 'end:done' + i, `🟢 Kết thúc · Ảnh hoàn thành task ${i}`);
+  if (safe && lotoOn(s)) add(end, 'end:loto', '🟢 Kết thúc · Tháo LOTO, che chắn đã lắp lại');
+  if (ptw) add(end, 'end:ptw', `🟢 Kết thúc · Giấy phép "${ptw}" đã ký đóng`);
+  return [...pre, ...end];
+}
+function ppeItems(s, lists) {
+  if (!s || !YES(s.need) || !s.ppe || isNo(s.ppe)) return [];
+  const packs = (lists && lists.packs) || DEF.packs;
+  return packs[s.ppe] || [s.ppe];
+}
+function wrOf(row, lists, old) {
+  return { kind: row.kind, equip: row.equip, desc: row.desc, line: row.line, photos: { ...(row.photos || {}) }, safety: { ...(row.safety || {}) },
+    points: parsePts((row.safety || {}).lotoPts), ppeItems: ppeItems(row.safety, lists), issues: issuesOf(row),
+    seqSet: old ? old.seqSet : false, prio: old ? old.prio : null };
+}
+const rowOf = t => ({ branch: t.branch, process: t.process, equip: t.wr.equip, name: t.taskName, desc: t.wr.desc, kind: t.wr.kind,
+  dur: t.durationHours, people: t.peopleRequired, photos: t.wr.photos || {}, safety: t.wr.safety || {}, line: t.wr.line });
+function flags(t) {
+  const w = t.wr; if (!w) return [];
+  const out = [];
+  (w.issues && w.issues.e || []).forEach(m => out.push({ lvl: 'e', msg: m, short: 'Thiếu thông tin' }));
+  if (!w.seqSet) out.push({ lvl: 'w', msg: 'Chưa sắp thứ tự thực hiện', short: 'Chưa sắp thứ tự' });
+  if (w.kind === 'extra' && w.prio == null) out.push({ lvl: 'w', msg: 'Việc bổ sung chưa xếp ưu tiên', short: 'Chưa xếp ưu tiên' });
+  (w.issues && w.issues.w || []).forEach(m => out.push({ lvl: 'i', msg: m, short: 'Lưu ý' }));
+  return out;
+}
+function planStats(p) {
+  const s = { e: 0, seq: 0, prio: 0, info: 0, tasks: 0 };
+  for (const t of p.tasks) {
+    if (!t.wr) continue; s.tasks++;
+    if ((t.wr.issues && t.wr.issues.e || []).length) s.e++;
+    if (!t.wr.seqSet) s.seq++;
+    if (t.wr.kind === 'extra' && t.wr.prio == null) s.prio++;
+    if ((t.wr.issues && t.wr.issues.w || []).length) s.info++;
+  }
+  return s;
+}
+
+/* =====================================================================
+   3. GIỮ DỮ LIỆU KHI LƯU / ĐỒNG BỘ + HIGHLIGHT GANTT
+   ===================================================================== */
+const _nt = normalizeTask;
+normalizeTask = function (t) {
+  const x = _nt(t);
+  if (t) for (const k of ['wr', 'wrChecks', 'startedAt', 'startedBy']) if (t[k] !== undefined && x[k] === undefined) x[k] = t[k];
+  if (WR.pendingSeq && x.id === WR.pendingSeq && x.wr) x.wr = { ...x.wr, seqSet: true };
+  return x;
+};
+if (typeof Store.sanitize === 'function') {
+  const _san = Store.sanitize.bind(Store);
+  Store.sanitize = function (s) {
+    const out = _san(s);
+    try { (s && s.plans || []).forEach(src => { const d = out.plans.find(x => x.id === src.id); if (d) { if (src.wr && !d.wr) d.wr = src.wr; if (src.uploadUrl && !d.uploadUrl) d.uploadUrl = src.uploadUrl; } }); } catch (e) { }
+    return out;
+  };
+}
+const _dSave = Drawer.save;
+Drawer.save = function (...a) { WR.pendingSeq = App.drawerTaskId; try { return _dSave.apply(this, a); } finally { WR.pendingSeq = null; } };
+const _tr = Gantt.taskRow;
+Gantt.taskRow = function (t, g, p) {
+  let h = _tr.call(this, t, g, p);
+  const f = flags(t).filter(x => x.lvl !== 'i'); if (!f.length) return h;
+  const lvl = f.some(x => x.lvl === 'e') ? 'wr-err' : 'wr-miss';
+  const chip = `<span class="wr-chip ${lvl}" title="${esc(f.map(x => x.msg).join(' · '))}">⚠ ${esc(f[0].short)}${f.length > 1 ? ' +' + (f.length - 1) : ''}</span>`;
+  return h.replace('class="grow ', `class="grow ${lvl} `).replace(/(<span class="c-name"[^>]*>)/, '$1' + chip);
+};
+
+/* =====================================================================
+   4. THAO TÁC KẾ HOẠCH
+   ===================================================================== */
+function commitTask(planId, taskId, label, fn) {
+  Store.commit(label, () => { const p = findP(planId), t = p && p.tasks.find(x => x.id === taskId); if (!t) return false; fn(t, p); });
+}
+function needLogin() { if (window.Auth && !Auth.ok) { const b = $('#auBadge'); if (b) b.click(); else toast('Cần đăng nhập để thao tác.', 'warn'); return true; } return false; }
+
+function createPlan() {
+  const d = WR.data; if (!d || !d.rows.length) return;
+  if (needLogin()) return;
+  const name = WR.form.name.trim() || d.meta.name || d.fileName.replace(/\.\w+$/, '');
+  const start = WR.form.start; if (!start) { toast('Chọn giờ bắt đầu Shutdown.', 'warn'); return; }
+  let newId = null;
+  Store.commit('Tạo kế hoạch từ Work Request', () => {
+    const plan = makePlan({ name, start: start.slice(0, 16), targetHours: U.num(WR.form.target, 48) || 48 });
+    plan.wr = { status: 'draft', fileName: d.fileName, importedAt: Date.now(), lists: d.lists };
+    const tmp = { tasks: [] }; let order = 0;
+    for (const r of d.rows) {
+      const ev = evidenceFor(r), hrs = r.dur > 0 ? r.dur : 1;
+      const t = normalizeTask({ id: nextTaskId(tmp), order: ++order, branch: r.branch || 'Chung', process: r.process || 'Chung', taskName: r.name,
+        durationHours: hrs, standardHours: hrs, quantity: 1, peopleRequired: Math.max(1, r.people || 1),
+        assignee: '', owner: '', executionMode: 'sequential', lagHours: 0, notes: r.desc, method: '', progress: 0, evidence: ev });
+      t.wr = wrOf(r, d.lists); t.evidence = ev;
+      if (t.wr.ppeItems.length && 'ppe' in t) t.ppe = t.wr.ppeItems.slice();
+      tmp.tasks.push(t);
+    }
+    plan.tasks = tmp.tasks;
+    Store.state.plans.push(plan); Store.state.activePlanId = plan.id; newId = plan.id;
+    try { const res = Scheduler.schedule(plan); if (plan.targetHours < res.kpi.windowHours) plan.targetHours = Math.ceil(res.kpi.windowHours); } catch (e) { }
+  });
+  if (!newId || !findP(newId)) return;
+  WR.planId = newId; WR.data = null; WR.prioDraft = null; WR.form = { name: '', start: '', target: 48 };
+  toast(`Đã tạo kế hoạch nháp "${name}" – sắp thứ tự & xếp ưu tiên bên dưới.`, 'ok');
+  WR.render();
+  if (typeof LDC !== 'undefined' && LDC.data) setTimeout(() => LDC.review(newId), 300);
+}
+function applySeq(planId, taskId, v) {
+  commitTask(planId, taskId, 'Sắp thứ tự task', t => {
+    if (v === 'start') { t.executionMode = 'parallel'; t.dependencyIds = []; }
+    else if (v.startsWith('after:')) { t.executionMode = 'after_dependency'; t.dependencyIds = [v.slice(6)]; }
+    else { t.executionMode = 'sequential'; t.dependencyIds = []; }
+    t.wr = { ...t.wr, seqSet: true };
+  });
+}
+function acceptAll(planId) {
+  Store.commit('Nối tiếp cho task chưa sắp', () => { findP(planId).tasks.forEach(t => { if (t.wr && !t.wr.seqSet) t.wr = { ...t.wr, seqSet: true }; }); });
+}
+function savePrio(planId) {
+  const ids = WR.prioDraft; if (!ids) return;
+  Store.commit('Xếp ưu tiên việc bổ sung', () => {
+    const p = findP(planId), ext = ids.map(id => p.tasks.find(t => t.id === id)).filter(Boolean);
+    const slots = ext.map(t => t.order).sort((a, b) => a - b);
+    ext.forEach((t, i) => { t.wr = { ...t.wr, prio: i + 1 }; t.order = slots[i]; });
+  });
+  WR.prioDraft = null; toast('Đã lưu thứ tự ưu tiên việc bổ sung.', 'ok');
+}
+async function publish(planId, on) {
+  const p = findP(planId); if (!p) return;
+  if (on) {
+    const s = planStats(p);
+    if (s.e) { toast(`Còn ${s.e} task thiếu thông tin – sửa trước khi phát hành.`, 'err'); WR.onlyMiss = true; WR.render(); return; }
+    if ((s.seq || s.prio) && !(await confirmBox('Phát hành cho Ca trực', `Còn <b>${s.seq}</b> task chưa sắp thứ tự và <b>${s.prio}</b> việc bổ sung chưa xếp ưu tiên.<br>Vẫn phát hành?`, 'Phát hành'))) return;
+  }
+  Store.commit(on ? 'Phát hành Work Request' : 'Chuyển kế hoạch về nháp', () => {
+    const q = findP(planId); q.wr = { ...q.wr, status: on ? 'published' : 'draft', publishedAt: on ? Date.now() : null, publishedBy: on ? (window.Auth && Auth.user || '') : '' };
+  });
+  toast(on ? 'Đã phát hành cho Ca trực.' : 'Kế hoạch đã về trạng thái nháp.', 'ok');
+}
+
+/* Sửa thông tin task trên web – cùng các ô như file Excel */
+function editTask(planId, taskId) {
+  const p = findP(planId), t = p && p.tasks.find(x => x.id === taskId); if (!t || !t.wr) return;
+  const L = p.wr.lists || {}, s = { ...(t.wr.safety || {}) }, ph = { ...(t.wr.photos || {}) };
+  const opt = (arr, v) => `<option value="">— chọn —</option>${[...new Set([...(arr || []), ...(v && v !== '—' ? [v] : [])])].map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}`;
+  const kindV = t.wr.kind === 'extra' ? 'Bổ sung' : t.wr.kind === 'mandatory' ? 'Bắt buộc' : '';
+  const m = openModal(`<div class="modal-h"><h3>#${t.order} ${esc(t.taskName)}</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><div class="wr-sf" id="sF">
+      <div class="wr-sec">A. Thông tin công việc</div>
+      <label>Loại công việc<select id="sKind">${opt(DEF.kinds, kindV)}</select></label>
+      <label>Thiết bị / Khu vực<input id="sEq" value="${esc(t.wr.equip)}"></label>
+      <label class="full">Mô tả ngắn cho operator<textarea id="sDesc" rows="2">${esc(t.wr.desc)}</textarea></label>
+      <div class="wr-sec">Ảnh upload</div>
+      <label>Ảnh checklist<select id="pCheck">${opt(DEF.yn, ph.check)}</select></label>
+      <label>Ảnh giấy phép làm việc<select id="pPtw">${opt(DEF.yn, ph.ptw)}</select></label>
+      <label>Ảnh hoàn thành task (số ảnh)<select id="pDone">${opt(DEF.n, ph.done ? String(ph.done) : '')}</select></label>
+      <div class="wr-sec">B. Cần yêu cầu an toàn?</div>
+      <label class="full"><select id="sNeed">${opt(DEF.yn, s.need)}</select></label>
+    </div>
+    <div class="wr-sf" id="sBox" style="margin-top:8px">
+      <div class="wr-sec">C. Yêu cầu an toàn</div>
+      <label class="sf">Mode can thiệp<select data-k="mode">${opt(DEF.modes, s.mode)}</select></label>
+      <label class="sf">WI LOTO<input data-k="wiLoto" value="${esc(s.wiLoto)}" placeholder="6589.ENG.LOTO.…"></label>
+      <label class="sf full">Điểm khóa LOTO (Năng lượng: điểm khóa; …)<textarea data-k="lotoPts" rows="2" placeholder="Khí nén: HV regulator; Điện: CB quạt tủ MCC">${esc(s.lotoPts)}</textarea></label>
+      <label class="sf">Giấy phép làm việc<select data-k="ptw">${opt(L.ptw || DEF.ptw, s.ptw)}</select></label>
+      <label class="sf">Phiếu tiên đoán rủi ro<select data-k="risk">${opt(DEF.yn, s.risk)}</select></label>
+      <label class="sf full">Bộ PPE<select data-k="ppe">${opt(Object.keys(L.packs || DEF.packs), s.ppe)}</select></label>
+    </div>
+    <div class="wr-issue" id="sIss" style="margin-top:8px"></div>
+    <div class="small muted" id="sEv" style="margin-top:6px"></div></div>
+    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="sOk">Lưu</button></div>`);
+  const read = () => {
+    const ns = { ...s, need: $('#sNeed', m).value }; $$('#sBox [data-k]', m).forEach(x => ns[x.dataset.k] = x.value.trim());
+    const kv = N($('#sKind', m).value);
+    return { ...rowOf(t), equip: $('#sEq', m).value.trim(), desc: $('#sDesc', m).value.trim(),
+      kind: kv.startsWith('bo sung') ? 'extra' : kv.startsWith('bat buoc') ? 'mandatory' : '',
+      photos: { check: $('#pCheck', m).value, ptw: $('#pPtw', m).value, done: $('#pDone', m).value }, safety: ns };
+  };
+  const refresh = () => {
+    $('#sBox', m).classList.toggle('off', !YES($('#sNeed', m).value));
+    const row = read(), is = issuesOf(row);
+    $('#sIss', m).innerHTML = is.e.map(x => `<div class="e">❌ ${esc(x)}</div>`).join('') + is.w.map(x => `<div class="w">⚠ ${esc(x)}</div>`).join('') || '<div style="color:#15803d">✅ Đủ thông tin</div>';
+    $('#sEv', m).innerHTML = '<b>Operator sẽ phải:</b> ' + evidenceFor(row).map(e => esc(e.label.replace(/^.*?· /, ''))).join(' · ');
+  };
+  m.addEventListener('change', refresh); m.addEventListener('input', refresh); refresh();
+  $('#sOk', m).onclick = () => {
+    if (needLogin()) return;
+    const row = read();
+    Store.commit('Sửa Work Request: ' + t.taskName, () => {
+      const q = findP(planId), tk = q.tasks.find(x => x.id === taskId); if (!tk) return false;
+      tk.notes = row.desc;
+      tk.wr = wrOf(row, q.wr.lists, tk.wr);
+      tk.evidence = evidenceFor(row);
+    });
+    closeModal();
+  };
+}
+
+/* =====================================================================
+   5. GIAO DIỆN TAB
+   ===================================================================== */
+function defStart() { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(6, 0, 0, 0); return U.toLocalISO(d.getTime()).slice(0, 16); }
+function tagsOf(r) {
+  const s = r.safety || {}, ph = r.photos || {}, out = [];
+  if (YES(ph.check)) out.push('<span class="ph">📋 Checklist</span>');
+  if (YES(ph.ptw) || ptwOf(s)) out.push('<span class="ph">📄 Ảnh GP</span>');
+  out.push(`<span class="ph">📷 ${esc(ph.done || 1)} ảnh HT</span>`);
+  if (!YES(s.need)) { out.push('<span style="background:rgba(120,120,128,.14);color:var(--muted)">Không YC an toàn</span>'); return out.join(''); }
+  [s.mode, lotoOn(s) ? '🔒 ' + (s.wiLoto || 'LOTO') : '', ptwOf(s) ? '📄 ' + ptwOf(s) : '', YES(s.risk) ? '⚠ Tiên đoán RR' : '', s.ppe && !isNo(s.ppe) ? '🦺 ' + s.ppe : '']
+    .filter(Boolean).forEach(x => out.push(`<span>${esc(x)}</span>`));
+  return out.join('');
+}
+const issueHTML = list => list.map(f => `<div class="${f.lvl}">${f.lvl === 'e' ? '❌' : f.lvl === 'w' ? '⚠' : 'ℹ'} ${esc(f.msg)}</div>`).join('');
+
+WR.render = function () {
+  const v = $('#wrView'); if (!v || !document.body.classList.contains('wr-mode')) return;
+  const d = WR.data, wrPlans = plans().filter(p => p.wr), cur = findP(WR.planId), p = cur && cur.wr ? cur : null, ro = window.Auth && !Auth.ok;
+  if (!WR.form.start) WR.form.start = (d && metaStart(d.meta.start)) || defStart();
+  let preview = '';
+  if (d) {
+    const iss = d.rows.map(r => issuesOf(r)), ne = iss.filter(x => x.e.length).length, nw = iss.filter(x => !x.e.length && x.w.length).length;
+    preview = `<div class="wr-sum"><span>${d.rows.length} task</span><span class="ok">${d.rows.length - ne - nw} đủ</span>${ne ? `<span class="e">${ne} thiếu thông tin</span>` : ''}${nw ? `<span class="w">${nw} có lưu ý</span>` : ''}
+        ${d.missingCols.length ? `<span class="e">Thiếu cột: ${esc(d.missingCols.join(', '))}</span>` : ''}</div>
+      <div class="wr-wrap"><table class="wr-tbl"><thead><tr><th>Dòng</th><th>Process</th><th>Công việc</th><th>Loại</th><th>Giờ / Người</th><th>Ảnh & an toàn</th><th>Kiểm tra</th></tr></thead><tbody>
+      ${d.rows.map((r, i) => { const x = iss[i]; return `<tr class="${x.e.length ? 'e' : x.w.length ? 'w' : ''}"><td>${r.line}</td><td>${esc(r.process)}</td>
+        <td><b>${esc(r.name)}</b>${r.equip ? `<br><span class="muted">${esc(r.equip)}</span>` : ''}</td><td>${r.kind === 'extra' ? 'Bổ sung' : r.kind === 'mandatory' ? 'Bắt buộc' : '–'}</td>
+        <td class="nowrap">${r.dur || '–'}h · ${r.people || '–'}</td><td><div class="wr-tags">${tagsOf(r)}</div></td>
+        <td class="wr-issue">${x.e.map(m => `<div class="e">❌ ${esc(m)}</div>`).join('')}${x.w.map(m => `<div class="w">⚠ ${esc(m)}</div>`).join('')}${!x.e.length && !x.w.length ? '<span style="color:#15803d">✅</span>' : ''}</td></tr>`; }).join('')}
+      </tbody></table></div>
+      <p class="muted small">Task thiếu thông tin vẫn được tạo nhưng bị highlight – sửa bằng nút 🛡 Sửa ở bước sắp xếp.</p>`;
+  }
+  const ldcOk = typeof LDC !== 'undefined';
+  v.innerHTML = `
+    <div class="wr-h"><b>📥 Work Request</b>${ro ? '<span class="wr-pill w">👁 Chỉ xem – đăng nhập để tạo / sửa</span>' : ''}<button class="btn sm" data-wr="back">Planner</button></div>
+    <div class="wr-steps">
+      <section class="wr-card ${d ? 'ok' : ''}"><h4><span class="wr-n">1</span> File yêu cầu công việc</h4>
+        <a class="wr-dl" href="${TEMPLATE_URL}" download="Mau_Work_Request.xlsx"><span class="ic">📄</span><span><b>Tải form Work Request (Excel)</b>
+          <small>Điền theo mẫu: thông tin công việc · ảnh upload · yêu cầu an toàn (Mode, WI LOTO, điểm khóa, giấy phép, PPE). Ô không áp dụng tự xám.</small></span></a>
+        <div class="wr-file"><input type="file" id="wrFile" accept=".xlsx,.xlsm,.xls">${d ? `<span class="wr-pill ok">${esc(d.fileName)}</span><button class="btn sm" data-wr="clear">Bỏ file</button>` : ''}</div>
+        ${preview}
+      </section>
+      <section class="wr-card ${ldcOk && LDC.data ? 'ok' : ''}"><h4><span class="wr-n">2</span> Lịch đi ca (LDC) <span class="muted small">tùy chọn</span></h4>
+        ${ldcOk ? `<p class="small">${LDC.data ? `✅ ${esc(LDC.data.fileName)} · ${LDC.data.people.length} người` : 'Chưa tải. Nếu tải, sau khi tạo kế hoạch hệ thống mở bảng gợi ý người thực hiện.'}</p>
+          <button class="btn sm" data-wr="ldc">${LDC.data ? 'Đổi file LDC' : 'Upload LDC.xlsx'}</button>` : '<p class="muted small">Chưa cài module LDC.</p>'}
+      </section>
+      <section class="wr-card"><h4><span class="wr-n">3</span> Tạo kế hoạch (nháp)</h4>
+        <label class="f">Tên kế hoạch<input id="wrName" value="${esc(WR.form.name)}" placeholder="${esc(d ? (d.meta.name || d.fileName.replace(/\.\w+$/, '')) : 'Shutdown …')}"></label>
+        <label class="f">Bắt đầu Shutdown<input id="wrStart" type="datetime-local" value="${esc(WR.form.start)}"></label>
+        <label class="f">Mục tiêu (giờ)<input id="wrTarget" type="number" min="1" value="${esc(WR.form.target)}"></label>
+        <button class="btn primary" data-wr="create" ${d && d.rows.length && !d.missingCols.length && !ro ? '' : 'disabled'} style="width:100%">Tạo kế hoạch từ file</button>
+      </section>
+    </div>
+    ${wrPlans.length ? planHTML(p, wrPlans) : ''}`;
+};
+function planHTML(p, wrPlans) {
+  const sel = `<select id="wrPlan"><option value="">— Chọn kế hoạch Work Request —</option>${wrPlans.map(x => `<option value="${esc(x.id)}" ${p && x.id === p.id ? 'selected' : ''}>${esc(x.name)}${x.wr.status === 'published' ? ' ✓' : ' (nháp)'}</option>`).join('')}</select>`;
+  if (!p) return `<section class="wr-card"><h4>Kiểm tra & sắp xếp ${sel}</h4></section>`;
+  const st = planStats(p), pub = p.wr.status === 'published', res = Scheduler.schedule(p);
+  const byProc = new Map(), cand = p.tasks.slice().sort((a, b) => a.order - b.order);
+  cand.forEach(t => { if (!byProc.has(t.process)) byProc.set(t.process, []); byProc.get(t.process).push(t); });
+  const taskRow = t => {
+    const f = flags(t), lvl = f.some(x => x.lvl === 'e') ? 'e' : f.some(x => x.lvl === 'w') ? 'w' : '';
+    if (WR.onlyMiss && !lvl) return '';
+    const r = res.R.get(t.id), bl = Scheduler.descendants(p, t.id);
+    const curV = !t.wr || !t.wr.seqSet ? '' : t.executionMode === 'parallel' ? 'start' : t.dependencyIds.length ? 'after:' + t.dependencyIds[t.dependencyIds.length - 1] : 'seq';
+    const groups = new Map(); cand.filter(c => c.id !== t.id && !bl.has(c.id)).forEach(c => { if (!groups.has(c.process)) groups.set(c.process, []); groups.get(c.process).push(c); });
+    return `<div class="wr-task ${lvl}">
+      <div><div class="tn">#${t.order} ${esc(t.taskName)} ${t.wr && t.wr.kind === 'extra' ? `<span class="wr-pill i">Bổ sung${t.wr.prio != null ? ' · ưu tiên ' + t.wr.prio : ''}</span>` : ''}</div>
+        <div class="tm">${t.wr && t.wr.equip ? esc(t.wr.equip) + ' · ' : ''}${U.fmtDur(t.durationHours)} · ${t.peopleRequired} người${r ? ' · ' + U.fmtDM(r.start) + ' → ' + U.fmtDM(r.end) : ''}</div>
+        ${t.wr ? `<div class="wr-tags">${tagsOf(rowOf(t))}</div>` : ''}
+        <div class="wr-issue" style="margin-top:4px">${issueHTML(f)}</div></div>
+      <div><select data-seq="${esc(t.id)}" ${t.executionMode === 'fixed' ? 'disabled' : ''}>
+        ${curV ? '' : '<option value="" selected>⚠ Bắt đầu khi nào? — chọn —</option>'}
+        <option value="seq" ${curV === 'seq' ? 'selected' : ''}>≡ Nối tiếp task trước (cùng process)</option>
+        <option value="start" ${curV === 'start' ? 'selected' : ''}>▶ Bắt đầu ngay khi Shutdown</option>
+        ${[...groups].map(([g, l]) => `<optgroup label="⤷ Sau task – ${esc(g)}">${l.map(c => `<option value="after:${esc(c.id)}" ${curV === 'after:' + c.id ? 'selected' : ''}>#${c.order} ${esc(c.taskName)}</option>`).join('')}</optgroup>`).join('')}
+      </select></div>
+      <div class="wr-acts">${t.wr && !t.wr.seqSet ? `<button class="btn sm" data-ok="${esc(t.id)}" title="Giữ: nối tiếp task trước">✓</button>` : ''}
+        ${t.wr ? `<button class="btn sm" data-edit="${esc(t.id)}">🛡 Sửa</button>` : ''}</div></div>`;
+  };
+  const ext = p.tasks.filter(t => t.wr && t.wr.kind === 'extra');
+  if (!WR.prioDraft || WR.prioDraft.length !== ext.length || WR.prioDraft.some(id => !ext.find(t => t.id === id)))
+    WR.prioDraft = ext.slice().sort((a, b) => (a.wr.prio ?? 1e9) - (b.wr.prio ?? 1e9) || a.order - b.order).map(t => t.id);
+  return `
+    <section class="wr-card"><h4>Kiểm tra & sắp xếp ${sel}
+        <span class="wr-pill ${pub ? 'ok' : 'w'}">${pub ? '✓ Đã phát hành' + (p.wr.publishedBy ? ' – ' + esc(p.wr.publishedBy) : '') : 'Nháp – chưa phát hành'}</span></h4>
+      <div class="wr-sum">
+        ${st.e ? `<span class="e">❌ ${st.e} task thiếu thông tin</span>` : ''}${st.seq ? `<span class="w">⚠ ${st.seq} task chưa sắp thứ tự</span>` : ''}
+        ${st.prio ? `<span class="w">⚠ ${st.prio} việc bổ sung chưa xếp ưu tiên</span>` : ''}${st.info ? `<span class="i">ℹ ${st.info} lưu ý</span>` : ''}
+        ${!st.e && !st.seq && !st.prio ? '<span class="ok">✅ Sẵn sàng phát hành</span>' : ''}</div>
+      <div class="wr-acts" style="margin-bottom:6px">
+        <label class="chk"><input type="checkbox" id="wrOnly" ${WR.onlyMiss ? 'checked' : ''}> Chỉ hiện task chưa đủ</label>
+        ${st.seq ? '<button class="btn sm" data-wr="acceptall">≡ Nối tiếp cho tất cả task chưa sắp</button>' : ''}
+        <button class="btn sm" data-wr="open">📊 Mở Gantt</button>
+        ${pub ? '<button class="btn sm" data-wr="unpub">↩ Về nháp</button>' : '<button class="btn primary sm" data-wr="pub">🚀 Phát hành cho Ca trực</button>'}</div>
+      ${[...byProc].map(([pr, list]) => { const rows = list.map(taskRow).join(''); return rows ? `<div class="wr-proc"><i style="background:${processColor(p, pr)}"></i>${esc(pr)} <span class="muted small">· ${list.length} task</span></div>${rows}` : ''; }).join('') || '<div class="muted small" style="padding:10px">Không có task cần xử lý.</div>'}
+    </section>
+    ${ext.length ? `<section class="wr-card"><h4>Ưu tiên việc bổ sung <span class="muted small" style="font-weight:400">· trên cùng = làm trước khi còn thời gian</span></h4>
+      ${WR.prioDraft.map((id, i) => { const t = p.tasks.find(x => x.id === id); return `<div class="wr-prio"><b>${i + 1}</b><span>#${t.order} ${esc(t.taskName)} <span class="muted small">· ${esc(t.process)} · ${U.fmtDur(t.durationHours)}</span>${t.wr.prio == null ? ' <span class="wr-pill w">chưa xếp</span>' : ''}</span>
+        <button class="btn sm" data-up="${i}" ${i ? '' : 'disabled'}>▲</button><button class="btn sm" data-down="${i}" ${i < WR.prioDraft.length - 1 ? '' : 'disabled'}>▼</button></div>`; }).join('')}
+      <div style="margin-top:8px"><button class="btn primary sm" data-wr="prio">Lưu thứ tự ưu tiên</button></div></section>` : ''}`;
+}
+WR.open = function () {
+  document.body.classList.remove('op-mode', 'admin-mode'); $('#opView') && $('#opView').classList.add('hidden'); $('#adView') && $('#adView').classList.add('hidden');
+  document.body.classList.add('wr-mode'); $('#wrView').classList.remove('hidden');
+  if (location.hash !== '#wr') history.replaceState(null, '', '#wr');
+  if (!findP(WR.planId)) { const a = findP(Store.state.activePlanId); WR.planId = a && a.wr ? a.id : ((plans().filter(x => x.wr).slice(-1)[0] || {}).id || null); }
+  WR.render();
+};
+WR.close = function () { document.body.classList.remove('wr-mode'); $('#wrView').classList.add('hidden'); history.replaceState(null, '', location.pathname + location.search); App.render(); };
+
+function bindView(v) {
+  v.addEventListener('click', async e => {
+    const a = e.target.closest('[data-wr]');
+    if (a) {
+      const k = a.dataset.wr;
+      if (k === 'back') return WR.close();
+      if (k === 'clear') { WR.data = null; WR.form.start = ''; return WR.render(); }
+      if (k === 'create') return createPlan();
+      if (k === 'ldc') { if (await LDC.askUpload('Upload lịch đi ca (LDC)')) WR.render(); return; }
+      if (needLogin()) return;
+      if (k === 'acceptall') return acceptAll(WR.planId);
+      if (k === 'pub') return publish(WR.planId, true);
+      if (k === 'unpub') return publish(WR.planId, false);
+      if (k === 'prio') return savePrio(WR.planId);
+      if (k === 'open') { Store.state.activePlanId = WR.planId; WR.close(); App.openPlan(WR.planId); return; }
+    }
+    const ok = e.target.closest('[data-ok]'); if (ok) { if (!needLogin()) applySeq(WR.planId, ok.dataset.ok, 'seq'); return; }
+    const ed = e.target.closest('[data-edit]'); if (ed) return editTask(WR.planId, ed.dataset.edit);
+    const up = e.target.closest('[data-up]'), dn = e.target.closest('[data-down]');
+    if (up || dn) { const i = +(up || dn).dataset[up ? 'up' : 'down'], j = up ? i - 1 : i + 1, l = WR.prioDraft; [l[i], l[j]] = [l[j], l[i]]; WR.render(); }
+  });
+  v.addEventListener('change', async e => {
+    const id = e.target.id;
+    if (id === 'wrFile') {
+      const f = e.target.files[0]; if (!f) return;
+      if (!window.XLSX) { toast('Chưa tải được thư viện Excel (SheetJS).', 'err'); return; }
+      try { WR.data = parseWB(XLSX.read(await f.arrayBuffer(), { type: 'array' }), f.name); WR.form.start = ''; if (!WR.data.rows.length) toast('File không có dòng công việc nào.', 'warn'); }
+      catch (err) { console.error(err); toast('Không đọc được file: ' + err.message, 'err'); WR.data = null; }
+      return WR.render();
+    }
+    if (id === 'wrPlan') { WR.planId = e.target.value || null; WR.prioDraft = null; return WR.render(); }
+    if (id === 'wrOnly') { WR.onlyMiss = e.target.checked; return WR.render(); }
+    if (e.target.dataset.seq) { if (needLogin()) return WR.render(); if (e.target.value) applySeq(WR.planId, e.target.dataset.seq, e.target.value); }
+  });
+  v.addEventListener('input', e => {
+    if (e.target.id === 'wrName') WR.form.name = e.target.value;
+    if (e.target.id === 'wrStart') WR.form.start = e.target.value;
+    if (e.target.id === 'wrTarget') WR.form.target = e.target.value;
+  });
+}
+
+/* =====================================================================
+   6. CA TRỰC: hiển thị yêu cầu, tick PPE, cổng "Chuẩn bị → Bắt đầu → Đóng"
+   ===================================================================== */
+const evOf = t => (Array.isArray(t.evidence) && t.evidence.length ? t.evidence : [{ id: 'done', label: 'Ảnh xác nhận hoàn thành', min: 1 }]);
+const proofs = (t, id) => ((t.proofs || {})[id] || []);
+const chk = (t, k, x) => { const c = t.wrChecks && t.wrChecks[k]; return x === undefined ? c || null : c && c[x] || null; };
+function gate(t) {
+  const pre = evOf(t).filter(e => String(e.id).startsWith('pre:')), ppe = (t.wr && t.wr.ppeItems) || [];
+  let missing = 0;
+  pre.forEach(e => missing += Math.max(0, Math.max(1, e.min || 1) - proofs(t, e.id).length));
+  ppe.forEach(x => { if (!chk(t, 'ppe', x)) missing++; });
+  return { has: !!(pre.length || ppe.length), missing, preOk: missing === 0, started: !!t.startedAt || t.progress >= 100 };
+}
+function decorate(s) {
+  const b = s && document.body.contains(s.m) && $('#opSheetB', s.m); if (!b || b.querySelector('#wrOpBox')) return;
+  const p = findP(s.planId), t = p && p.tasks.find(x => x.id === s.taskId); if (!t || !t.wr) return;
+  const sf = t.wr.safety || {}, need = YES(sf.need), g = gate(t), pts = lotoOn(sf) ? (t.wr.points || []) : [];
+  const box = document.createElement('div'); box.id = 'wrOpBox'; box.className = 'wr-opbox';
+  box.innerHTML = `${t.wr.desc ? `<div class="wr-desc">📝 ${esc(t.wr.desc)}</div>` : ''}
+    <div class="wr-tags">${tagsOf(rowOf(t))}</div>
+    ${need && lotoOn(sf) ? `<div class="wr-sub">WI LOTO: <b>${esc(sf.wiLoto || '—')}</b></div>` : ''}
+    ${pts.length ? `<table class="wr-pt"><tr><th>#</th><th>Năng lượng</th><th>Điểm khóa</th></tr>${pts.map(x => `<tr><td>${x.stt}</td><td>${esc(x.energy)}</td><td>${esc(x.point)}</td></tr>`).join('')}</table>` : ''}
+    ${(t.wr.ppeItems || []).length ? `<div class="wr-sub"><b>PPE (${esc(sf.ppe)}) – tick khi đã mang đủ</b></div><div class="wr-ppe">${t.wr.ppeItems.map(x => { const c = chk(t, 'ppe', x); return `<button type="button" class="${c ? 'on' : ''}" data-wrppe="${esc(x)}" ${t.progress >= 100 ? 'disabled' : ''}>${c ? '✅' : '⬜'} ${esc(x)}</button>`; }).join('')}</div>` : ''}
+    ${g.has ? `<div class="wr-gate ${g.started ? 'ok' : g.preOk ? 'ready' : ''}">${g.started ? `▶ Đã bắt đầu${t.startedAt ? ' lúc ' + U.fmtDM(t.startedAt) : ''}${t.startedBy ? ' – ' + esc(t.startedBy) : ''}`
+      : g.preOk ? '<button type="button" class="op-close" data-wrstart>▶ Bắt đầu công việc</button>' : `🔒 Bước chuẩn bị còn ${g.missing} mục (ảnh 🟡 / PPE). Đủ mới được bắt đầu.`}</div>` : ''}`;
+  const info = b.querySelector('.op-info'); if (info) info.after(box); else b.prepend(box);
+  if (g.has && !g.started) {
+    $$('.op-req', b).forEach(r => { const i = r.querySelector('input[data-req]'); if (i && !String(i.dataset.req).startsWith('pre:')) { r.classList.add('wr-locked'); $$('input', r).forEach(x => x.disabled = true); } });
+    const dn = $('#opDone', s.m); if (dn) { dn.disabled = true; dn.textContent = g.preOk ? '▶ Bấm "Bắt đầu công việc" trước' : '🔒 Hoàn tất bước chuẩn bị trước'; }
+  }
+  box.onclick = e => {
+    const nm = opName(), pp = e.target.closest('[data-wrppe]'), stt = e.target.closest('[data-wrstart]');
+    if (!pp && !stt) return;
+    if (!nm) { toast('Nhập tên trước (nút 👤).', 'warn'); return; }
+    if (pp) commitTask(s.planId, t.id, 'Tick PPE', tk => { const w = tk.wrChecks = { ...(tk.wrChecks || {}) }; w.ppe = { ...(w.ppe || {}) }; const x = pp.dataset.wrppe; if (w.ppe[x]) delete w.ppe[x]; else w.ppe[x] = { by: nm, at: Date.now() }; });
+    if (stt) commitTask(s.planId, t.id, 'Bắt đầu công việc', tk => { if (!gate(tk).preOk) return false; tk.startedAt = Date.now(); tk.startedBy = nm; tk.progress = Math.max(tk.progress || 0, 10); });
+  };
+}
+function installOp() {
+  const O = window.OperatorView; if (!O) return;
+  const _r = O.render;
+  O.render = function (...a) {
+    _r.apply(this, a);
+    try {
+      const p = findP(O.planId), v = $('#opView');
+      if (p && p.wr && p.wr.status !== 'published' && v && !v.querySelector('.wr-opdraft')) {
+        const d = document.createElement('div'); d.className = 'wr-opdraft'; d.textContent = '⚠ Kế hoạch đang NHÁP – chưa phát hành cho ca trực, nội dung có thể thay đổi.';
+        const h = v.querySelector('.op-h'); h ? h.after(d) : v.prepend(d);
+      }
+    } catch (e) { console.warn(e); }
+  };
+  const _o = O.openTask;
+  O.openTask = function (...a) {
+    _o.apply(this, a);
+    const s = O.sheet, b = s && $('#opSheetB', s.m); if (!b) return;
+    new MutationObserver(() => decorate(O.sheet)).observe(b, { childList: true });
+    decorate(s);
+  };
+}
+
+/* =====================================================================
+   7. ADMIN: thẻ "LOTO đang treo" + tình trạng Work Request
+   ===================================================================== */
+function installAdmin() {
+  const A = window.AdminView; if (!A) return;
+  const _r = A.render;
+  A.render = function (...a) {
+    _r.apply(this, a);
+    try {
+      const p = findP(A.planId), col = $('#adView .ad-grid > div:last-child'); if (!p || !p.wr || !col) return;
+      const hang = p.tasks.filter(t => t.wr && lotoOn(t.wr.safety) && evOf(t).some(e => String(e.id).startsWith('pre:loto') && proofs(t, e.id).length) && !proofs(t, 'end:loto').length);
+      const st = planStats(p), card = document.createElement('div'); card.className = 'ad-card';
+      card.innerHTML = `<h4>🔒 LOTO đang treo <span class="muted small" style="font-weight:400">· ${hang.length} thiết bị</span></h4>
+        ${hang.map(t => { const ps = evOf(t).filter(e => String(e.id).startsWith('pre:loto')).flatMap(e => proofs(t, e.id)).sort((x, y) => x.at - y.at)[0];
+          return `<div class="wr-hang"><span><b>${esc(t.wr.equip || t.taskName)}</b><br><span class="muted">#${t.order} ${esc(t.taskName)}</span></span><span class="muted" style="text-align:right">${esc(ps ? ps.by : '')}<br>${ps ? U.fmtDM(ps.at) : ''}</span></div>`; }).join('') || '<div class="ad-empty">Không có LOTO nào đang treo.</div>'}
+        <div class="small muted" style="margin-top:6px">Work Request: ${p.wr.status === 'published' ? '✓ đã phát hành' : 'nháp'}${st.e ? ` · ❌ ${st.e} thiếu thông tin` : ''}${st.seq ? ` · ⚠ ${st.seq} chưa sắp` : ''}</div>`;
+      col.prepend(card);
+    } catch (e) { console.warn(e); }
+  };
+}
+
+/* =====================================================================
+   8. CÀI ĐẶT
+   ===================================================================== */
+function topBtn() {
+  const b = $('#wrTop'); if (!b) return;
+  const p = findP(Store.state.activePlanId), st = p && p.wr ? planStats(p) : null, n = st ? st.e + st.seq + st.prio : 0;
+  b.textContent = '📥 Work Request' + (n ? ' · ' + n + '⚠' : ''); b.classList.toggle('has', !!n);
+}
+function install() {
+  const v = document.createElement('div'); v.id = 'wrView'; v.className = 'hidden'; document.body.appendChild(v); bindView(v);
+  const sp = $('.topbar .spacer');
+  if (sp) { const b = document.createElement('button'); b.className = 'tb-btn wr-top'; b.id = 'wrTop'; b.onclick = () => WR.open(); sp.parentNode.insertBefore(b, sp); }
+  const _ar = App.render.bind(App);
+  App.render = function () { _ar(); topBtn(); const ae = document.activeElement; if (!(ae && ae.closest && ae.closest('#wrView') && /INPUT|TEXTAREA/.test(ae.tagName))) WR.render(); };
+  installOp(); installAdmin(); topBtn();
+  window.addEventListener('hashchange', () => { if (location.hash === '#wr') WR.open(); });
+  if (location.hash === '#wr') WR.open();
+}
+WR._test = { parseWB, issuesOf, evidenceFor, ppeItems };
+document.addEventListener('DOMContentLoaded', () => setTimeout(install, 30));
+} catch (err) { console.error('[Work Request] lỗi gói:', err); }
+})();
+</script>
+<!-- ===================== HẾT TAB WORK REQUEST ===================== -->
+  
   
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
