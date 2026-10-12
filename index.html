@@ -3849,6 +3849,16 @@ body.wr-mode>*:not(#wrView):not(#toasts):not(#modalRoot):not(#tip){display:none!
 .wr-flow span.ok{color:#15803d}.wr-flow span.ok i{background:#16a34a;color:#fff}
 .wr-flow span.cur{color:var(--text);font-weight:700}.wr-flow span.cur i{background:var(--accent,#2563eb);color:#fff;box-shadow:0 0 0 4px var(--accent-soft)}
 .wr-flow b{color:var(--muted);font-weight:400}
+.wr-dlbox{padding:12px;border-radius:14px;margin-bottom:10px;background:linear-gradient(135deg,rgba(37,99,235,.10),rgba(14,116,144,.10));border:1px solid rgba(37,99,235,.35)}
+.wr-dlh{display:flex;gap:10px;align-items:center}.wr-dlh .ic{font-size:28px}.wr-dlh b{display:block;font-size:14px}.wr-dlh small{color:var(--muted);font-size:12px}
+.wr-dlbtns{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.wr-dlbtn{font-size:14px;padding:9px 16px;text-decoration:none}
+.wr-form{margin-top:8px;font-size:12.5px}.wr-form summary{cursor:pointer;color:var(--accent);font-weight:600}
+.wr-form table{width:100%;border-collapse:collapse;margin-top:6px;background:var(--glass-row,#fff)}
+.wr-form th,.wr-form td{border:1px solid var(--border);padding:5px 7px;text-align:left;vertical-align:top}
+.wr-drop{display:flex;align-items:center;gap:10px;padding:14px;border-radius:14px;border:2px dashed rgba(22,163,74,.45);background:rgba(48,209,88,.06);cursor:pointer;margin-bottom:8px}
+.wr-drop:hover{background:rgba(48,209,88,.12)}.wr-drop input{display:none}
+.wr-drop span{font-size:20px}.wr-drop b{font-size:14px;margin-left:4px}.wr-drop small{display:block;font-size:12px;color:var(--muted);margin-left:30px;margin-top:-2px}
 @media (max-width:900px){.wr-steps{grid-template-columns:1fr}.wr-task{grid-template-columns:1fr}.wr-sf{grid-template-columns:1fr}}
 </style>
 <script>
@@ -4253,9 +4263,25 @@ WR.render = function () {
     ${flowHTML(d, p, ro)}
     <div class="wr-steps">
       <section class="wr-card ${d ? 'ok' : ''}"><h4><span class="wr-n">1</span> File yêu cầu công việc</h4>
-        <a class="wr-dl" href="${TEMPLATE_URL}" data-wr="dl"><span class="ic">📄</span><span><b>Tải form Work Request (Excel)</b>
-          <small>Điền theo mẫu: thông tin công việc · ảnh upload · yêu cầu an toàn (Mode, WI LOTO, điểm khóa, giấy phép, PPE). Ô không áp dụng tự xám.</small></span></a>
-        <div class="wr-file"><input type="file" id="wrFile" accept=".xlsx,.xlsm,.xls">${d ? `<span class="wr-pill ok">${esc(d.fileName)}</span><button class="btn sm" data-wr="clear">Bỏ file</button>` : ''}</div>
+        <div class="wr-dlbox">
+          <div class="wr-dlh"><span class="ic">📄</span><div><b>Bước 1a · Tải form Work Request</b><small>File Excel mẫu – điền yêu cầu công việc rồi upload lại ở bước 1b</small></div></div>
+          <div class="wr-dlbtns">
+            <a class="btn primary wr-dlbtn" href="Mau_Work_Request.xlsx" download="Mau_Work_Request.xlsx" data-dl>⬇ Tải file Excel mẫu</a>
+            <a class="btn sm" href="https://github.com/dinhdeyy/Shutdown-activities-app/raw/main/Mau_Work_Request.xlsx" target="_blank" rel="noopener" data-dl>Link dự phòng</a>
+          </div>
+          <details class="wr-form"><summary>Xem form gồm những cột nào</summary>
+            <table><tr><th>Nhóm</th><th>Cột</th><th>Cách điền</th></tr>
+            <tr><td rowspan="3"><b>A. Công việc</b></td><td>Nhánh *, Process *</td><td>Chọn ▼ (Process đổi theo Nhánh)</td></tr>
+            <tr><td>Thiết bị, Tên công việc *, Mô tả</td><td>Gõ ngắn gọn, operator đọc trên điện thoại</td></tr>
+            <tr><td>Loại *, Thời lượng *, Số người *</td><td>Bắt buộc / Bổ sung · số giờ · số người</td></tr>
+            <tr><td><b>Ảnh upload</b></td><td>Ảnh checklist · Ảnh giấy phép · Số ảnh hoàn thành *</td><td>Có/Không · Có/Không · 1–5</td></tr>
+            <tr><td><b>B. An toàn?</b></td><td>Cần yêu cầu an toàn? *</td><td>Không → phần C khóa xám</td></tr>
+            <tr><td rowspan="2"><b>C. Yêu cầu an toàn</b></td><td>Mode · Giấy phép · Phiếu tiên đoán RR · Bộ PPE</td><td>Chọn ▼ (Mode 4 bắt buộc giấy phép Mode 4)</td></tr>
+            <tr><td>WI LOTO · Điểm khóa LOTO</td><td>Mã WI · <i>Năng lượng: điểm khóa; …</i> (mỗi điểm = 1 ảnh)</td></tr>
+            </table></details>
+        </div>
+        <label class="wr-drop"><input type="file" id="wrFile" accept=".xlsx,.xlsm,.xls"><span>📤 <b>Bước 1b · Upload file đã điền</b><small>${d ? '✅ ' + esc(d.fileName) + ' – chọn file khác để thay' : 'Bấm để chọn file .xlsx'}</small></span></label>
+        ${d ? `<div class="wr-file"><span class="wr-pill ok">${esc(d.fileName)}</span><button class="btn sm" data-wr="clear">Bỏ file</button></div>` : ''}
         ${preview}
       </section>
       <section class="wr-card ${ldcOk && LDC.data ? 'ok' : ''}"><h4><span class="wr-n">2</span> Lịch đi ca (LDC) <span class="muted small">tùy chọn</span></h4>
@@ -4330,6 +4356,7 @@ WR.close = function () { document.body.classList.remove('wr-mode'); $('#wrView')
 
 function bindView(v) {
   v.addEventListener('click', async e => {
+    if (e.target.closest('[data-dl]')) { WR.dlDone = true; setTimeout(() => WR.render(), 300); return; }
     const a = e.target.closest('[data-wr]');
     if (a) {
       const k = a.dataset.wr;
