@@ -5649,6 +5649,274 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 220));
 })();
 </script>
 <!-- ===================== HẾT v6 ===================== -->
+<!-- =====================================================================
+     v7 – REPORT CA: thẻ gọn (không sọc màu), chọn người bằng danh sách,
+          bảng THỐNG KÊ hoàn thành theo kế hoạch / ca / process
+     ===================================================================== -->
+<style id="v7-style">
+/* ---------- thẻ việc gọn, ít chữ đậm ---------- */
+.rp-card::before{display:none!important}
+.rp-card{padding:14px 16px!important;gap:8px!important;border-radius:20px!important;box-shadow:0 1px 2px rgba(15,23,42,.04),0 4px 14px rgba(15,23,42,.05)!important}
+.rp-card:hover{box-shadow:0 10px 26px rgba(15,23,42,.10)!important}
+.rp-card.st-late{box-shadow:0 0 0 1.5px rgba(255,59,48,.45),0 4px 14px rgba(255,59,48,.08)!important}
+.rp-card.st-done{opacity:.82}
+.r7-top{display:flex;align-items:center;gap:8px}
+.r7-proc{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);font-weight:500}
+.r7-proc i{width:8px;height:8px;border-radius:50%;background:var(--c)}
+.r7-st{margin-left:auto;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
+.r7-st.todo{background:rgba(142,142,147,.14);color:var(--muted)}.r7-st.run{background:rgba(10,132,255,.12);color:#0a84ff}
+.r7-st.done{background:rgba(48,209,88,.14);color:#1f9d47}.r7-st.late{background:rgba(255,59,48,.12);color:#e5372c}
+.r7-name{font-size:15.5px;font-weight:600;line-height:1.35;letter-spacing:-.15px;color:var(--text)}
+.r7-row{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--muted)}
+.r7-icons{display:flex;gap:6px}
+.r7-icons span{width:26px;height:26px;border-radius:9px;display:grid;place-items:center;font-size:13px;background:rgba(120,120,128,.1)}
+.r7-foot{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--muted)}
+.r7-foot .rp-pb{height:6px}
+/* ---------- bộ lọc trạng thái dạng chip ---------- */
+.r7-chips{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 12px}
+.r7-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--glass-bd);background:var(--glass-row);color:var(--text);
+  border-radius:999px;padding:8px 14px;font-size:14px;cursor:pointer;transition:all .3s var(--spring)}
+.r7-chip i{width:8px;height:8px;border-radius:50%;background:var(--kc)}
+.r7-chip em{font-style:normal;color:var(--muted);font-variant-numeric:tabular-nums}
+.r7-chip.on{background:var(--text);color:var(--bg,#fff);border-color:transparent}
+.r7-chip.on em{color:inherit;opacity:.7}
+body.dark .r7-chip.on{background:#f2f4f8;color:#0b0f1a}
+/* ---------- chọn người ---------- */
+.r7-pick{position:relative}
+.r7-field{display:flex;align-items:center;gap:8px;min-height:50px;padding:6px 8px 6px 16px;border-radius:999px;background:var(--glass-row);border:1px solid var(--glass-bd);cursor:text;transition:box-shadow .25s}
+.r7-field:focus-within{box-shadow:0 0 0 4px var(--accent-soft)}
+.r7-field input{flex:1;border:0!important;background:transparent!important;box-shadow:none!important;font-size:16px;padding:8px 2px;min-width:0}
+.r7-sel{display:inline-flex;align-items:center;gap:8px;padding:6px 6px 6px 12px;border-radius:999px;background:rgba(10,132,255,.12);color:#0a84ff;font-weight:600;font-size:14.5px}
+.r7-sel button{border:0;width:24px;height:24px;border-radius:50%;background:rgba(10,132,255,.2);color:#0a84ff;cursor:pointer;font-size:12px}
+.r7-clear{border:0;border-radius:999px;padding:8px 14px;background:rgba(120,120,128,.14);color:var(--text);font-size:13.5px;cursor:pointer;white-space:nowrap}
+.r7-list{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:30;max-height:320px;overflow:auto;padding:6px;border-radius:18px;
+  background:var(--glass-2);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-bd);box-shadow:0 18px 40px rgba(15,23,42,.18);animation:rpIn .3s var(--spring)}
+.r7-opt{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border:0;border-radius:12px;background:transparent;color:var(--text);text-align:left;cursor:pointer;font-size:14.5px}
+.r7-opt:hover,.r7-opt.act{background:rgba(10,132,255,.1)}
+.r7-av{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;color:#fff;background:linear-gradient(135deg,#0a84ff,#5e5ce6)}
+.r7-opt small{margin-left:auto;color:var(--muted);font-size:12px}
+.r7-none{padding:12px;color:var(--muted);font-size:13.5px}
+.r7-who{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:20px;margin-bottom:12px;background:linear-gradient(135deg,rgba(10,132,255,.10),rgba(94,92,230,.10));border:1px solid rgba(10,132,255,.18)}
+.r7-who .r7-av{width:42px;height:42px;font-size:15px}
+.r7-who b{font-size:16px;font-weight:600}.r7-who small{display:block;color:var(--muted);font-size:13px}
+/* ---------- THỐNG KÊ ---------- */
+.r7-stats{display:grid;grid-template-columns:minmax(260px,1.15fr) minmax(0,2.4fr);gap:12px;margin:12px 0}
+.r7-box{background:var(--glass-row);border:1px solid var(--glass-bd);border-radius:24px;padding:16px 18px;box-shadow:0 4px 18px rgba(15,23,42,.06);animation:rpIn .55s var(--spring) both}
+.r7-box h6{margin:0 0 12px;font-size:12.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;display:flex;align-items:center;gap:8px}
+.r7-hero{display:flex;align-items:center;gap:18px}
+.r7-ring{--p:0;--c1:#30d158;--c2:#34c7ff;flex:none;position:relative;width:132px;height:132px;border-radius:50%;
+  background:conic-gradient(from -90deg,var(--c1),var(--c2) calc(var(--p)*1%),rgba(120,120,128,.16) 0);transition:--p 1s}
+.r7-ring::after{content:'';position:absolute;inset:12px;border-radius:50%;background:var(--glass-row)}
+.r7-ring div{position:absolute;inset:0;z-index:1;display:grid;place-content:center;text-align:center}
+.r7-ring b{font-size:32px;font-weight:700;letter-spacing:-1px;font-variant-numeric:tabular-nums;line-height:1}
+.r7-ring small{font-size:11.5px;color:var(--muted);margin-top:3px}
+.r7-hl{display:grid;gap:10px;flex:1;min-width:0}
+.r7-hl div{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13.5px;color:var(--muted);border-bottom:1px dashed var(--border);padding-bottom:6px}
+.r7-hl div:last-child{border:0;padding:0}
+.r7-hl strong{font-size:19px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+.r7-right{display:grid;grid-template-rows:auto auto;gap:12px}
+.r7-shifts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.r7-sh{display:flex;align-items:center;gap:12px;padding:12px;border-radius:18px;background:rgba(120,120,128,.06);border:1px solid transparent;cursor:pointer;color:var(--text);text-align:left;transition:all .3s var(--spring)}
+.r7-sh:hover{transform:translateY(-2px)}
+.r7-sh.on{border-color:rgba(10,132,255,.45);background:rgba(10,132,255,.08)}
+.r7-sh .r7-ring{width:58px;height:58px}.r7-sh .r7-ring::after{inset:7px}.r7-sh .r7-ring b{font-size:14px;letter-spacing:0}
+.r7-sh span{font-size:13px;color:var(--muted);line-height:1.5}.r7-sh span strong{display:block;color:var(--text);font-size:15px;font-weight:600}
+.r7-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.r7-tile{padding:12px 14px;border-radius:18px;background:rgba(120,120,128,.06)}
+.r7-tile span{font-size:12.5px;color:var(--muted)}
+.r7-tile b{display:block;font-size:24px;font-weight:700;letter-spacing:-.5px;color:var(--tc,var(--text));font-variant-numeric:tabular-nums;margin:2px 0 6px}
+.r7-tile .r7-bar{height:5px;border-radius:999px;background:rgba(120,120,128,.16);overflow:hidden}
+.r7-tile .r7-bar i{display:block;height:100%;border-radius:999px;background:var(--tc,#0a84ff);transition:width 1s var(--spring)}
+.r7-procs{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px 22px}
+.r7-pr{display:grid;grid-template-columns:96px 1fr 70px;align-items:center;gap:10px;font-size:13px}
+.r7-pr span{display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r7-pr span i{flex:none;width:8px;height:8px;border-radius:50%;background:var(--c)}
+.r7-pr .r7-bar{height:8px;border-radius:999px;background:rgba(120,120,128,.14);overflow:hidden}
+.r7-pr .r7-bar i{display:block;height:100%;border-radius:999px;background:var(--c);transition:width 1s var(--spring)}
+.r7-pr em{font-style:normal;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.r7-toggle{margin-left:auto;border:0;background:transparent;color:var(--accent);font-size:13px;cursor:pointer;text-transform:none;letter-spacing:0}
+@property --p{syntax:'<number>';inherits:false;initial-value:0}
+@media (max-width:1100px){.r7-stats{grid-template-columns:1fr}.r7-tiles{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:600px){.r7-shifts{grid-template-columns:1fr}.r7-hero{flex-direction:column;align-items:stretch}.r7-hero .r7-ring{margin:0 auto}.r7-pr{grid-template-columns:80px 1fr 62px}}
+</style>
+<script>
+(function () {
+'use strict';
+function boot() {
+try {
+const OP = window.OperatorView; if (!OP) return;
+const esc = s => U.esc(s ?? '');
+const plans = () => Store.state.plans;
+const myName = () => SafeStore.get('op.name') || '';
+const SHIFTS = [{ n: 1, s: 6, label: '06:00 – 14:00' }, { n: 2, s: 14, label: '14:00 – 22:00' }, { n: 3, s: 22, label: '22:00 – 06:00' }];
+const ST = { todo: 'Chưa làm', run: 'Đang làm', done: 'Đã xong', late: 'Trễ' };
+const KC = { all: '#64748b', todo: '#8e8e93', run: '#0a84ff', done: '#30d158', late: '#ff3b30' };
+const evOf = t => (Array.isArray(t.evidence) && t.evidence.length ? t.evidence : [{ id: 'done', min: 1 }]);
+const pr = (t, id) => ((t.proofs || {})[id] || []);
+const evStat = t => { let h = 0, n = 0; for (const e of evOf(t)) { const k = Math.max(1, e.min || 1); n += k; h += Math.min(k, pr(t, e.id).length); } return { h, n }; };
+const statusOf = (t, r) => { if (t.progress >= 100) return 'done'; const now = Date.now(); if (now >= r.end) return 'late'; if (now >= r.start || t.startedAt || evStat(t).h) return 'run'; return 'todo'; };
+const shiftWin = (date, ca) => { const s = U.parseLocalISO(date + 'T00:00') + SHIFTS[ca - 1].s * MS_H; return [s, s + 8 * MS_H]; };
+const inWin = (r, ws, we) => r && (r.end > r.start ? r.start < we && r.end > ws : r.start >= ws && r.start < we);
+const pct = (a, b) => b ? Math.round(100 * a / b) : 0;
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const nameHit = (name, q) => { const tk = U.norm(q).split(' ').filter(Boolean); const h = U.norm(name); return tk.every(k => new RegExp('(^|\\s)' + reEsc(k)).test(h)); };
+const initials = n => String(n).trim().split(/\s+/).slice(-2).map(w => w[0] || '').join('').toUpperCase();
+const hasPerson = (t, key) => U.splitOwners(t.assignee).some(n => U.norm(n) === key);
+OP.person = OP.person || ''; OP.st = OP.st || 'all';
+if (OP.showStats === undefined) OP.showStats = !matchMedia('(max-width:700px)').matches;
+let pickOpen = false, pickQ = '', pickIdx = 0, lastKey = '';
+
+function stats(plan, res) {
+  const all = plan.tasks, now = Date.now();
+  const closed = all.filter(t => t.progress >= 100);
+  const onTime = closed.filter(t => { const r = res.R.get(t.id); return r && (!t.doneAt || t.doneAt <= r.end + 15 * MS_MIN); });
+  let ph = 0, pn = 0; all.forEach(t => { const s = evStat(t); ph += s.h; pn += s.n; });
+  const fullPhoto = closed.filter(t => { const s = evStat(t); return s.h >= s.n; });
+  const late = all.filter(t => statusOf(t, res.R.get(t.id)) === 'late');
+  const due = all.filter(t => res.R.get(t.id).end <= now), dueDone = due.filter(t => t.progress >= 100);
+  return { total: all.length, closed: closed.length, onTime: onTime.length, ph, pn, fullPhoto: fullPhoto.length, late: late.length, due: due.length, dueDone: dueDone.length };
+}
+function shiftStat(plan, res, ca) {
+  const [ws, we] = shiftWin(OP.date, ca), list = plan.tasks.filter(t => inWin(res.R.get(t.id), ws, we));
+  const done = list.filter(t => t.progress >= 100).length, late = list.filter(t => statusOf(t, res.R.get(t.id)) === 'late').length;
+  let h = 0, n = 0; list.forEach(t => { const s = evStat(t); h += s.h; n += s.n; });
+  return { n: list.length, done, late, photo: pct(h, n) };
+}
+function statsHTML(plan, res) {
+  const s = stats(plan, res), p = pct(s.closed, s.total);
+  const procs = new Map();
+  plan.tasks.forEach(t => { if (!procs.has(t.process)) procs.set(t.process, { n: 0, d: 0 }); const o = procs.get(t.process); o.n++; if (t.progress >= 100) o.d++; });
+  const tile = (l, v, sub, c, w) => `<div class="r7-tile" style="--tc:${c}"><span>${l}</span><b>${v}</b><div class="r7-bar"><i style="width:${w}%"></i></div><span>${sub}</span></div>`;
+  return `<section class="r7-stats">
+    <div class="r7-box"><h6>📊 Toàn bộ Shutdown</h6>
+      <div class="r7-hero"><div class="r7-ring" style="--p:${p}"><div><b>${p}%</b><small>đã hoàn thành</small></div></div>
+        <div class="r7-hl"><div>Việc đã đóng<strong>${s.closed}/${s.total}</strong></div><div>Đang trễ<strong style="color:${s.late ? '#ff3b30' : 'inherit'}">${s.late}</strong></div>
+          <div>Đến hạn đã xong<strong>${s.dueDone}/${s.due}</strong></div></div></div></div>
+    <div class="r7-right">
+      <div class="r7-box" style="animation-delay:60ms"><h6>🕒 Theo ca · ${OP.date.split('-').reverse().join('/')}</h6>
+        <div class="r7-shifts">${SHIFTS.map(x => { const z = shiftStat(plan, res, x.n), q = pct(z.done, z.n);
+          return `<button class="r7-sh ${OP.ca === x.n && !OP.person ? 'on' : ''}" data-ca="${x.n}"><div class="r7-ring" style="--p:${q}"><div><b>${z.n ? q + '%' : '–'}</b></div></div>
+            <span><strong>Ca ${x.n}</strong>${x.label}<br>${z.done}/${z.n} xong${z.late ? ` · <span style="color:#ff3b30">${z.late} trễ</span>` : ''} · 📷 ${z.photo}%</span></button>`; }).join('')}</div></div>
+      <div class="r7-box" style="animation-delay:120ms"><h6>✅ Chất lượng các việc đã đóng</h6>
+        <div class="r7-tiles">
+          ${tile('Đóng đúng giờ', pct(s.onTime, s.closed) + '%', `${s.onTime}/${s.closed} việc`, '#30d158', pct(s.onTime, s.closed))}
+          ${tile('Đóng đủ ảnh', pct(s.fullPhoto, s.closed) + '%', `${s.fullPhoto}/${s.closed} việc`, '#0a84ff', pct(s.fullPhoto, s.closed))}
+          ${tile('Ảnh đã nộp', pct(s.ph, s.pn) + '%', `${s.ph}/${s.pn} ảnh`, '#5e5ce6', pct(s.ph, s.pn))}
+          ${tile('Đúng tiến độ', pct(s.dueDone, s.due) + '%', s.due ? `${s.dueDone}/${s.due} việc đến hạn` : 'chưa có việc đến hạn', '#ff9f0a', pct(s.dueDone, s.due))}
+        </div></div>
+    </div>
+    <div class="r7-box r7-procs" style="animation-delay:180ms"><h6 style="grid-column:1/-1">🏭 Theo process</h6>
+      ${[...procs].map(([k, o]) => `<div class="r7-pr" style="--c:${processColor(plan, k)}"><span><i></i>${esc(k)}</span><div class="r7-bar"><i style="width:${pct(o.d, o.n)}%"></i></div><em>${o.d}/${o.n}</em></div>`).join('')}</div>
+  </section>`;
+}
+function people(plan) {
+  const m = new Map();
+  plan.tasks.forEach(t => U.splitOwners(t.assignee).forEach(n => { const k = U.norm(n); if (!m.has(k)) m.set(k, { name: n, n: 0 }); m.get(k).n++; }));
+  return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+}
+function pickHTML(plan) {
+  const sel = OP.person ? people(plan).find(p => U.norm(p.name) === OP.person) : null;
+  const opts = pickOpen ? people(plan).filter(p => !pickQ || nameHit(p.name, pickQ)) : [];
+  if (pickIdx >= opts.length) pickIdx = 0;
+  return `<div class="r7-pick"><div class="r7-field" id="r7Field">
+      ${sel ? `<span class="r7-sel">👤 ${esc(sel.name)}<button data-r7="clear" title="Bỏ chọn">✕</button></span>` : '<span style="opacity:.6">👤</span>'}
+      <input id="r7Q" value="${esc(pickQ)}" placeholder="${sel ? 'Đổi người khác…' : 'Chọn người – gõ vài chữ của tên (vd: ky)'}" autocomplete="off">
+      ${sel ? '<button class="r7-clear" data-r7="clear">Xem tất cả</button>' : ''}</div>
+    ${pickOpen ? `<div class="r7-list">${opts.length ? opts.map((p, i) => `<button class="r7-opt ${i === pickIdx ? 'act' : ''}" data-r7p="${esc(U.norm(p.name))}"><span class="r7-av">${esc(initials(p.name))}</span>${esc(p.name)}<small>${p.n} việc</small></button>`).join('')
+      : `<div class="r7-none">Không có ai tên “${esc(pickQ)}”</div>`}</div>` : ''}</div>`;
+}
+
+OP.render = function () {
+  const v = $('#opView'); if (!v || !document.body.classList.contains('op-mode')) return;
+  let plan = plans().find(p => p.id === OP.planId);
+  if (!plan) { plan = plans().find(p => p.id === Store.state.activePlanId) || plans()[0]; OP.planId = plan.id; }
+  if (!OP.date) { const n = new Date(), h = n.getHours(), d = new Date(n.getFullYear(), n.getMonth(), n.getDate()); if (h < 6) d.setDate(d.getDate() - 1); OP.date = U.toLocalISO(d.getTime()).slice(0, 10); OP.ca = h >= 6 && h < 14 ? 1 : h >= 14 && h < 22 ? 2 : 3; }
+  const res = Scheduler.schedule(plan), [ws, we] = shiftWin(OP.date, OP.ca);
+  const sel = OP.person ? people(plan).find(p => U.norm(p.name) === OP.person) : null; if (OP.person && !sel) OP.person = '';
+  const base = (OP.person ? plan.tasks.filter(t => hasPerson(t, OP.person)) : plan.tasks.filter(t => inWin(res.R.get(t.id), ws, we)))
+    .sort((a, b) => res.R.get(a.id).start - res.R.get(b.id).start || a.order - b.order);
+  const stOf = new Map(base.map(t => [t.id, statusOf(t, res.R.get(t.id))]));
+  const cnt = k => k === 'all' ? base.length : base.filter(t => stOf.get(t.id) === k).length;
+  const list = OP.st === 'all' ? base : base.filter(t => stOf.get(t.id) === OP.st);
+  const key = [plan.id, OP.date, OP.ca, OP.st, OP.person].join('|'), anim = key !== lastKey; lastKey = key;
+  const focusQ = document.activeElement && document.activeElement.id === 'r7Q';
+  const dd = OP.date.split('-').reverse().join('/');
+  const pDone = base.filter(t => t.progress >= 100).length;
+  v.innerHTML = `
+    <header class="rp-h">
+      <div class="rp-title"><span class="rp-logo">📋</span><div><b>Report ca</b><small>${esc(plan.name)}</small></div></div>
+      <button class="rp-pill" id="opName">✍️ ${esc(myName() || 'Tên của bạn')}</button>
+      <button class="rp-ico" data-r7="dark" title="Sáng / tối">${document.body.classList.contains('dark') ? '☀️' : '🌙'}</button>
+      <button class="rp-pill" id="opBack">Planner</button>
+    </header>
+    ${OP.showStats ? statsHTML(plan, res) : ''}
+    <section class="rp-ctrl">
+      ${pickHTML(plan)}
+      <div class="rp-seg" style="--i:${OP.ca - 1};${OP.person ? 'opacity:.45' : ''}"><i></i>${SHIFTS.map(s => `<button data-ca="${s.n}">Ca ${s.n}<small>${s.label.replace(':00', '').replace(':00', '')}</small></button>`).join('')}</div>
+      <input type="date" id="opDate" value="${OP.date}">
+      <button class="rp-pill" id="opNow">⟳ Ca hiện tại</button>
+      ${plans().length > 1 ? `<select id="opPlan" style="grid-column:1/-1">${plans().map(p => `<option value="${esc(p.id)}" ${p.id === plan.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : ''}
+    </section>
+    ${sel ? `<div class="r7-who"><span class="r7-av">${esc(initials(sel.name))}</span><div><b>${esc(sel.name)}</b><small>${base.length} việc trong kế hoạch · đã xong ${pDone} (${pct(pDone, base.length)}%)</small></div>
+      <button class="r7-clear" data-r7="clear" style="margin-left:auto">✕ Bỏ chọn</button></div>` : ''}
+    <div class="r7-chips">
+      ${[['all', 'Tất cả'], ['todo', 'Chưa làm'], ['run', 'Đang làm'], ['done', 'Đã xong'], ['late', 'Trễ']].map(([k, l]) =>
+        `<button class="r7-chip ${OP.st === k ? 'on' : ''}" data-rpst="${k}" style="--kc:${KC[k]}">${k === 'all' ? '' : '<i></i>'}${l} <em>${cnt(k)}</em></button>`).join('')}
+      <button class="r7-chip" data-r7="stats" style="margin-left:auto">${OP.showStats ? '▴ Ẩn thống kê' : '📊 Xem thống kê'}</button>
+    </div>
+    <div class="rp-grid ${anim ? '' : 'rp-noanim'}">
+      ${list.length ? list.map((t, i) => {
+        const r = res.R.get(t.id), st = stOf.get(t.id), s = evStat(t), w = t.wr || {}, sf = w.safety || {};
+        const p = t.progress >= 100 ? 100 : pct(s.h, s.n);
+        const ic = [(sf.wiLoto || sf.lotoPts) ? '<span title="Cần khóa LOTO">🔒</span>' : '', sf.ptw && !/^kh[oô]ng$/i.test(sf.ptw) ? '<span title="Cần giấy phép">📄</span>' : '',
+          (w.ppeItems || t.ppe || []).length ? '<span title="Đồ bảo hộ">🦺</span>' : ''].join('');
+        return `<button class="rp-card st-${st}" data-op-task="${esc(t.id)}" style="--c:${processColor(plan, t.process)};--d:${Math.min(i, 14) * 30}ms">
+          <div class="r7-top"><span class="r7-proc"><i></i>${esc(t.process)}</span><span class="r7-st ${st}">${ST[st]}</span></div>
+          <div class="r7-name">${esc(t.taskName)}</div>
+          <div class="r7-row"><span>🕒 ${U.fmtHM(r.start)} – ${U.fmtHM(r.end)}${OP.person || new Date(r.start).toDateString() !== new Date(r.end).toDateString() ? ` · ${U.fmtDM(r.start).slice(0, 5)}` : ''}</span>
+            <span>👤 ${t.assignee ? esc(t.assignee) : 'Chưa có người'}</span></div>
+          <div class="r7-foot">${ic ? `<div class="r7-icons">${ic}</div>` : ''}<span>📷 ${s.h}/${s.n}</span><div class="rp-pb"><i style="width:${p}%"></i></div><span>${p}%</span></div>
+        </button>`; }).join('')
+      : `<div class="rp-empty"><b>☕</b>${OP.person ? 'Người này không có việc ở mục đang chọn.' : `Ca ${OP.ca} ngày ${dd} không có việc${OP.st !== 'all' ? ' ở mục “' + ({ todo: 'Chưa làm', run: 'Đang làm', done: 'Đã xong', late: 'Trễ' })[OP.st] + '”' : ''}.`}</div>`}
+    </div>`;
+  if (focusQ) { const q = $('#r7Q'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
+};
+
+/* ---------- sự kiện ---------- */
+const v = $('#opView');
+const choose = key => { OP.person = key; OP.st = 'all'; pickOpen = false; pickQ = ''; OP.render(); };
+v.addEventListener('focusin', e => { if (e.target.id === 'r7Q' && !pickOpen) { pickOpen = true; pickIdx = 0; OP.render(); } });
+v.addEventListener('input', e => { if (e.target.id !== 'r7Q') return; pickQ = e.target.value; pickOpen = true; pickIdx = 0; OP.render(); });
+v.addEventListener('keydown', e => {
+  if (e.target.id !== 'r7Q') return;
+  const opts = $$('.r7-opt', v);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); pickIdx = (pickIdx + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % Math.max(1, opts.length); OP.render(); }
+  if (e.key === 'Enter' && opts[pickIdx]) { e.preventDefault(); choose(opts[pickIdx].dataset.r7p); }
+  if (e.key === 'Escape') { pickOpen = false; pickQ = ''; e.target.blur(); OP.render(); }
+});
+v.addEventListener('mousedown', e => { if (e.target.closest('.r7-opt')) e.preventDefault(); });
+v.addEventListener('click', e => {
+  const o = e.target.closest('[data-r7p]'); if (o) { e.stopPropagation(); return choose(o.dataset.r7p); }
+  const a = e.target.closest('[data-r7]');
+  if (a) {
+    e.stopPropagation();
+    const k = a.dataset.r7;
+    if (k === 'clear') { OP.person = ''; pickQ = ''; pickOpen = false; return OP.render(); }
+    if (k === 'stats') { OP.showStats = !OP.showStats; return OP.render(); }
+    if (k === 'dark') { document.body.classList.toggle('dark'); Store.ui().dark = document.body.classList.contains('dark'); Store.save(); $$('[data-dark]').forEach(b => b.textContent = Store.ui().dark ? '☀️' : '🌙'); return OP.render(); }
+  }
+  if (e.target.closest('[data-ca]') && OP.person) { OP.person = ''; }
+  if (pickOpen && !e.target.closest('.r7-pick')) { pickOpen = false; pickQ = ''; OP.render(); }
+}, true);
+if (document.body.classList.contains('op-mode')) OP.render();
+console.log('[v7] đã nạp – Report ca: chọn người + thống kê');
+} catch (err) { console.error('[v7] lỗi:', err); }
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 300));
+})();
+</script>
+<!-- ===================== HẾT v7 ===================== -->
+
 
 </body>
 </html>
