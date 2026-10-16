@@ -4538,6 +4538,398 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(install, 30));
 })();
 </script>
 <!-- ===================== HẾT TAB WORK REQUEST ===================== -->
+<!-- =====================================================================
+     WORK REQUEST v4 – SETUP GỌN: 2 lựa chọn
+       ⚡ Tự động theo template  |  🛠 Tinh chỉnh riêng
+       → Upload Lịch đi ca (LDC) + File task (Work Request) → 🚀 Tạo ngay → Gantt
+     Khối này thay giao diện tab Work Request cũ (code cũ vẫn giữ để dùng lại hàm).
+     ===================================================================== -->
+<style id="w4-style">
+.w4-steps{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0;padding:9px 12px;border-radius:16px;background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#ddd);font-size:13px}
+.w4-steps span{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+.w4-steps i{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;font-style:normal;font-size:11.5px;font-weight:700;background:rgba(120,120,128,.18);color:var(--text)}
+.w4-steps span.ok{color:#15803d}.w4-steps span.ok i{background:#16a34a;color:#fff}
+.w4-steps span.cur{color:var(--text);font-weight:700}.w4-steps span.cur i{background:var(--accent,#2563eb);color:#fff}
+.w4-steps b{color:var(--muted);font-weight:400}
+.w4-card{background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#ddd);border-radius:18px;padding:14px 16px;margin-bottom:10px}
+.w4-card>h4{margin:0 0 12px;font-size:15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.w4-n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent,#2563eb);color:#fff;font-size:12.5px}
+.w4-card.done>h4 .w4-n{background:#16a34a}
+.w4-opts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.w4-opt{display:flex;gap:12px;align-items:flex-start;text-align:left;padding:14px 16px;border-radius:16px;border:1.5px solid var(--border);background:var(--panel2,#f8fafc);color:var(--text);cursor:pointer;transition:all .2s}
+.w4-opt:hover{border-color:var(--accent)}
+.w4-opt.on{border-color:var(--accent,#2563eb);background:var(--accent-soft,#eff6ff);box-shadow:0 6px 18px rgba(37,99,235,.16)}
+.w4-opt .ic{font-size:28px;line-height:1}
+.w4-opt>span>b{display:block;font-size:15px;margin-bottom:3px}
+.w4-opt small b{display:inline;font-size:inherit}
+.w4-opt small{color:var(--muted);font-size:12.5px;line-height:1.45;display:block}
+.w4-opt.on small{color:var(--text)}
+.w4-info{display:grid;grid-template-columns:2fr 1.3fr .7fr;gap:10px;margin-bottom:12px}
+.w4-info label,.w4-cfg label{font-size:12px;color:var(--muted);font-weight:600}
+.w4-info input,.w4-cfg select{display:block;width:100%;margin-top:4px}
+.w4-cfg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:12px;border-radius:14px;background:rgba(37,99,235,.06);border:1px dashed rgba(37,99,235,.35);margin-bottom:12px}
+.w4-cfg .t{grid-column:1/-1;font-weight:700;font-size:13px;color:var(--text)}
+.w4-files{display:grid;grid-template-columns:1fr 1.4fr;gap:10px}
+.w4-file{padding:12px;border-radius:14px;border:1px solid var(--border);background:var(--panel2,#f8fafc)}
+.w4-file.ok{border-color:rgba(22,163,74,.5);background:rgba(48,209,88,.07)}
+.w4-file h5{margin:0 0 4px;font-size:14px;display:flex;gap:6px;align-items:center}
+.w4-file h5 em{font-style:normal;font-size:11px;font-weight:600;color:var(--muted);margin-left:auto}
+.w4-file p{margin:0 0 8px;font-size:12.5px;color:var(--muted)}
+.w4-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.w4-drop{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;border:1.5px dashed rgba(22,163,74,.6);background:rgba(48,209,88,.08);cursor:pointer;font-weight:600;font-size:13px}
+.w4-drop input{display:none}
+.w4-tpl{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;padding:8px 10px;border-radius:10px;background:rgba(245,158,11,.1)}
+.w4-proc{margin:12px 0 4px;font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px}
+.w4-proc i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.w4-step{display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px dashed var(--border);font-size:13px}
+.w4-step:first-of-type{border-top:0}
+.w4-step>i{flex:none;display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent,#2563eb);color:#fff;font-style:normal;font-size:11px;font-weight:700}
+.w4-step .sub{font-size:11.5px;color:var(--muted)}
+.w4-row{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(200px,1fr) minmax(150px,.7fr) auto;gap:8px;align-items:start;padding:9px 10px;border-radius:12px;margin-top:6px;background:var(--panel2,#f8fafc);border:1px solid var(--border)}
+.w4-row.unset{border-color:rgba(245,158,11,.6);background:rgba(254,243,199,.4)}
+.w4-row.err{border-color:rgba(220,38,38,.45);background:rgba(254,226,226,.35)}
+.w4-row .tn{font-weight:650;font-size:13.5px}.w4-row .tm{font-size:12px;color:var(--muted)}
+.w4-row label{font-size:11px;color:var(--muted);display:block}
+.w4-row select{width:100%;font-size:12.5px}
+.w4-bar{position:sticky;bottom:8px;z-index:7;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding:12px 14px;border-radius:18px;background:var(--glass,#fff);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-bd,#ddd);box-shadow:0 10px 30px rgba(31,45,90,.18)}
+.w4-bar .sum{flex:1;display:flex;gap:6px;flex-wrap:wrap}
+.w4-go{font-size:16px;font-weight:700;padding:12px 28px;border-radius:14px;border:0;color:#fff;cursor:pointer;background:linear-gradient(135deg,#16a34a,#0ea5e9);box-shadow:0 8px 20px rgba(14,165,233,.3)}
+.w4-go:disabled{background:rgba(120,120,128,.3);box-shadow:none;cursor:not-allowed}
+@media (max-width:900px){.w4-opts,.w4-files,.w4-info{grid-template-columns:1fr}.w4-cfg{grid-template-columns:1fr 1fr}.w4-row{grid-template-columns:1fr}}
+</style>
+<script>
+(function () {
+'use strict';
+function boot() {
+try {
+const WR = window.WorkRequest;
+if (!WR || !WR._test) { console.warn('[WR v4] Chưa có module Work Request cũ.'); return; }
+const { issuesOf, evidenceFor, ppeItems } = WR._test;
+const esc = s => U.esc(s ?? '');
+const N = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+const YES = v => ['co', 'yes', 'x', 'true', '1'].includes(N(v));
+const isNo = v => ['khong', 'no', 'false', '0', '—', '-', ''].includes(N(v));
+const ro = () => !!(window.Auth && !Auth.ok);
+const hasLDC = () => typeof LDC !== 'undefined' && !!LDC.data;
+const S = WR.setup = { mode: null, useTpl: false, cfg: { order: 'file', extra: 'after', assign: 'ldc', hc: 'no' }, seq: {}, pri: {} };
+const PRI = [['high', '⚑ Cao – làm trước'], ['normal', 'Bình thường'], ['low', 'Thấp – khi còn thời gian']];
+const RANK = { high: 0, normal: 1, low: 2 };
+let srcRef = null;
+const sync = () => { if (srcRef !== WR.data) { srcRef = WR.data; S.seq = {}; S.pri = {}; if (WR.data) S.useTpl = false; } };
+const priOf = (r, i) => S.pri[i] || (r.kind === 'extra' ? 'low' : 'normal');
+
+/* ---------- tiện ích ---------- */
+function parsePts(str) {
+  return String(str || '').split(/[;\n]+/).map(x => x.trim()).filter(Boolean).map((x, i) => {
+    const k = x.indexOf(':'); return k > 0 ? { stt: i + 1, energy: x.slice(0, k).trim(), point: x.slice(k + 1).trim() } : { stt: i + 1, energy: '', point: x };
+  });
+}
+function metaStart(s) {
+  const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/.exec(String(s || '').trim());
+  if (!m) return '';
+  const p = n => String(n).padStart(2, '0');
+  return `${m[3]}-${p(m[2])}-${p(m[1])}T${p(m[4] || 6)}:${p(m[5] || 0)}`;
+}
+function defStart() { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(6, 0, 0, 0); return U.toLocalISO(d.getTime()).slice(0, 16); }
+const ptwOf = s => (s && YES(s.need) && s.ptw && !isNo(s.ptw)) ? s.ptw : '';
+const lotoOn = s => !!s && YES(s.need) && !!(String(s.wiLoto || '').trim() || String(s.lotoPts || '').trim());
+function tags(r) {
+  const s = r.safety || {}, ph = r.photos || {}, o = [];
+  if (YES(ph.check)) o.push('<span class="ph">📋 Checklist</span>');
+  if (YES(ph.ptw) || ptwOf(s)) o.push('<span class="ph">📄 Ảnh GP</span>');
+  o.push(`<span class="ph">📷 ${esc(ph.done || 1)} ảnh HT</span>`);
+  if (!YES(s.need)) o.push('<span style="background:rgba(120,120,128,.14);color:var(--muted)">Không YC an toàn</span>');
+  else [s.mode, lotoOn(s) ? '🔒 ' + (s.wiLoto || 'LOTO') : '', ptwOf(s) ? '📄 ' + ptwOf(s) : '', YES(s.risk) ? '⚠ Tiên đoán RR' : '', s.ppe && !isNo(s.ppe) ? '🦺 ' + s.ppe : '']
+    .filter(Boolean).forEach(x => o.push(`<span>${esc(x)}</span>`));
+  return o.join('');
+}
+/** Nguồn task: 'file' (Work Request) | 'tpl' (bộ task mẫu) | null */
+function source() {
+  if (WR.data && WR.data.rows.length) return 'file';
+  if (S.mode === 'auto' && S.useTpl) return 'tpl';
+  return null;
+}
+const manual = () => S.mode === 'custom' && S.cfg.order === 'manual';
+
+/* ---------- xếp thứ tự ---------- */
+function buildOrder(rows) {
+  const groups = new Map();
+  rows.forEach((r, i) => { const k = r.process || 'Chung'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(i); });
+  const out = [];
+  for (const [proc, list] of groups) {
+    const sorted = manual()
+      ? list.slice().sort((a, b) => RANK[priOf(rows[a], a)] - RANK[priOf(rows[b], b)] || a - b)
+      : list.slice().sort((a, b) => (rows[a].kind === 'extra') - (rows[b].kind === 'extra') || a - b);
+    sorted.forEach(i => {
+      let seq = 'seq';
+      if (manual()) seq = S.seq[i] || 'seq';
+      else if (S.mode === 'custom' && S.cfg.extra === 'parallel' && rows[i].kind === 'extra') seq = 'start';
+      out.push({ i, proc, seq });
+    });
+  }
+  return out;
+}
+function hasCycle(rows) {
+  const dep = i => { const v = S.seq[i] || ''; return v.startsWith('after:') ? +v.slice(6) : null; };
+  for (let i = 0; i < rows.length; i++) { const seen = new Set([i]); let j = dep(i); while (j != null) { if (seen.has(j)) return true; seen.add(j); j = dep(j); } }
+  return false;
+}
+
+/* ---------- RENDER ---------- */
+function steps(src, ready) {
+  const st = [['Chọn cách tạo lịch', !!S.mode], ['Thông tin & tải file', !!src], ['Tạo ngay → Gantt', false]];
+  const cur = st.findIndex(x => !x[1]);
+  return `<div class="w4-steps">${st.map((x, i) => `<span class="${x[1] ? 'ok' : i === cur ? 'cur' : ''}"><i>${x[1] ? '✓' : i + 1}</i>${x[0]}</span>`).join('<b>›</b>')}</div>`;
+}
+function stepMode() {
+  return `<section class="w4-card ${S.mode ? 'done' : ''}"><h4><span class="w4-n">1</span> Bạn muốn tạo lịch Shutdown thế nào?</h4>
+    <div class="w4-opts">
+      <button class="w4-opt ${S.mode === 'auto' ? 'on' : ''}" data-w4="mode" data-v="auto"><span class="ic">⚡</span><span>
+        <b>Tự động theo template</b>
+        <small>Hệ thống tự xếp: các process chạy song song, việc <b>Bắt buộc</b> trước – <b>Bổ sung</b> sau, tự gán người theo lịch đi ca. Chưa có file task thì dùng bộ task mẫu.</small></span></button>
+      <button class="w4-opt ${S.mode === 'custom' ? 'on' : ''}" data-w4="mode" data-v="custom"><span class="ic">🛠</span><span>
+        <b>Tinh chỉnh riêng</b>
+        <small>Bạn tự chọn: thứ tự task (theo file hoặc từng task), cách xếp việc bổ sung, cách gán người, mức ưu tiên.</small></span></button>
+    </div></section>`;
+}
+function stepFiles(d, src) {
+  const sel = (k, opts) => `<select data-cfg="${k}">${opts.map(([v, l]) => `<option value="${v}" ${S.cfg[k] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const ne = d ? d.rows.filter(r => issuesOf(r).e.length).length : 0;
+  return `<section class="w4-card ${src ? 'done' : ''}"><h4><span class="w4-n">2</span> Thông tin & tải file</h4>
+    <div class="w4-info">
+      <label>Tên kế hoạch<input id="wrName" value="${esc(WR.form.name)}" placeholder="${esc(d ? (d.meta.name || d.fileName.replace(/\.\w+$/, '')) : 'Shutdown ...')}"></label>
+      <label>Bắt đầu Shutdown<input id="wrStart" type="datetime-local" value="${esc(WR.form.start)}"></label>
+      <label>Mục tiêu (giờ)<input id="wrTarget" type="number" min="1" value="${esc(WR.form.target)}"></label>
+    </div>
+    ${S.mode === 'custom' ? `<div class="w4-cfg"><div class="t">🛠 Yêu cầu setup riêng</div>
+      <label>Thứ tự task${sel('order', [['file', 'Theo thứ tự trong file'], ['manual', 'Tự chọn từng task']])}</label>
+      <label>Việc bổ sung${sel('extra', [['after', 'Làm sau việc bắt buộc'], ['parallel', 'Chạy song song từ đầu']])}</label>
+      <label>Gán người${sel('assign', [['ldc', 'Tự gán theo lịch đi ca'], ['none', 'Để trống – gán sau']])}</label>
+      <label>Khi thiếu người${sel('hc', [['no', 'Chỉ người đúng team'], ['yes', 'Cho phép team HC']])}</label>
+    </div>` : ''}
+    <div class="w4-files">
+      <div class="w4-file ${hasLDC() ? 'ok' : ''}"><h5>👥 Lịch đi ca (LDC)<em>${S.mode === 'custom' && S.cfg.assign === 'none' ? 'không cần' : 'để tự gán người'}</em></h5>
+        <p>${hasLDC() ? `✅ ${esc(LDC.data.fileName)} · ${LDC.data.people.length} người` : 'File LDC.xlsx tải từ SharePoint về máy.'}</p>
+        <div class="w4-acts">${typeof LDC !== 'undefined' ? `<button class="btn sm" data-w4="ldc">${hasLDC() ? 'Đổi file LDC' : '📤 Upload LDC.xlsx'}</button>` : '<span class="muted small">Chưa cài module LDC</span>'}</div></div>
+      <div class="w4-file ${src ? 'ok' : ''}"><h5>📋 File task (Work Request)<em>${S.mode === 'auto' ? 'tùy chọn' : 'bắt buộc'}</em></h5>
+        <p>${d ? `✅ ${esc(d.fileName)} · ${d.rows.length} task${ne ? ` · <span style="color:#b91c1c">❌ ${ne} thiếu thông tin</span>` : ''}${d.missingCols.length ? ` · <span style="color:#b91c1c">thiếu cột: ${esc(d.missingCols.join(', '))}</span>` : ''}` : 'Tải form mẫu, điền yêu cầu công việc rồi upload lại.'}</p>
+        <div class="w4-acts"><a class="btn sm" href="Mau_Work_Request.xlsx" download="Mau_Work_Request.xlsx" data-dl>⬇ Tải form mẫu</a>
+          <label class="w4-drop"><input type="file" id="wrFile" accept=".xlsx,.xlsm,.xls">📤 ${d ? 'Đổi file' : 'Upload file đã điền'}</label>
+          ${d ? '<button class="btn sm" data-wr="clear">Bỏ file</button>' : ''}</div>
+        ${S.mode === 'auto' && !d ? `<label class="w4-tpl"><input type="checkbox" id="w4Tpl" ${S.useTpl ? 'checked' : ''}> Chưa có file – dùng <b>bộ task mẫu (14 task)</b></label>` : ''}</div>
+    </div></section>`;
+}
+function rowManual(d, r, i) {
+  const is = issuesOf(r), v = S.seq[i] || '', pr = priOf(r, i);
+  const others = new Map(); d.rows.forEach((x, j) => { if (j === i) return; const k = x.process || 'Chung'; if (!others.has(k)) others.set(k, []); others.get(k).push(j); });
+  return `<div class="w4-row ${is.e.length ? 'err' : !v ? 'unset' : ''}">
+    <div><div class="tn">${esc(r.name)} ${r.kind === 'extra' ? '<span class="wr-pill i">Bổ sung</span>' : ''}</div>
+      <div class="tm">${esc(r.equip || '')}${r.equip ? ' · ' : ''}${r.dur || '–'}h · ${r.people || '–'} người</div>
+      <div class="wr-tags">${tags(r)}</div>
+      <div class="wr-issue">${is.e.map(m => `<div class="e">❌ ${esc(m)}</div>`).join('')}${!v ? '<div class="w">⚠ Chưa chọn bắt đầu khi nào</div>' : ''}</div></div>
+    <div><label>Bắt đầu khi nào?</label><select data-s4="${i}">
+      ${v ? '' : '<option value="" selected>— chọn —</option>'}
+      <option value="seq" ${v === 'seq' ? 'selected' : ''}>≡ Nối tiếp task trước (cùng process)</option>
+      <option value="start" ${v === 'start' ? 'selected' : ''}>▶ Bắt đầu ngay khi Shutdown</option>
+      ${[...others].map(([g, l]) => `<optgroup label="⤷ Sau khi xong – ${esc(g)}">${l.map(j => `<option value="after:${j}" ${v === 'after:' + j ? 'selected' : ''}>${esc(d.rows[j].name)}</option>`).join('')}</optgroup>`).join('')}
+    </select></div>
+    <div><label>Ưu tiên</label><select data-p4="${i}">${PRI.map(([k, l]) => `<option value="${k}" ${pr === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div><button class="btn sm" data-w4="edit" data-i="${i}">🛡 Sửa</button></div></div>`;
+}
+function stepPreview(d, src) {
+  if (src === 'tpl') {
+    const T = templateTasks(), byId = new Map(T.map(t => [t.id, t])), by = new Map();
+    T.forEach(t => { if (!by.has(t.process)) by.set(t.process, []); by.get(t.process).push(t); });
+    return `<section class="w4-card"><h4><span class="w4-n">3</span> Xem trước – bộ task mẫu (${T.length} task)</h4>
+      ${[...by].map(([p, l]) => `<div class="w4-proc"><i style="background:${processColor(null, p)}"></i>${esc(p)}</div>${l.map((t, k) => `<div class="w4-step"><i>${k + 1}</i><div><b>${esc(t.taskName)}</b>
+        <div class="sub">${t.dependencyIds.length ? '⤷ sau ' + t.dependencyIds.map(x => esc(byId.get(x)?.taskName || x)).join(', ') : k ? '≡ nối tiếp task trước' : '▶ bắt đầu ngay'} · ${U.fmtDur(t.durationHours, true)} · ${t.peopleRequired} người</div></div></div>`).join('')}`).join('')}</section>`;
+  }
+  if (manual()) {
+    const unset = d.rows.filter((r, i) => !S.seq[i]).length;
+    return `<section class="w4-card"><h4><span class="w4-n">3</span> Sắp xếp từng task</h4>
+      <div class="w4-acts" style="margin-bottom:4px">${unset ? `<span class="wr-pill w">⚠ ${unset} task chưa chọn</span><button class="btn sm" data-w4="allseq">≡ Nối tiếp cho tất cả task chưa chọn</button>` : '<span class="wr-pill ok">✅ Đã chọn đủ</span>'}</div>
+      ${[...new Set(d.rows.map(r => r.process || 'Chung'))].map(p => `<div class="w4-proc"><i style="background:${processColor(null, p)}"></i>${esc(p)}</div>${d.rows.map((r, i) => (r.process || 'Chung') === p ? rowManual(d, r, i) : '').join('')}`).join('')}</section>`;
+  }
+  const ord = buildOrder(d.rows), by = new Map();
+  ord.forEach(o => { if (!by.has(o.proc)) by.set(o.proc, []); by.get(o.proc).push(o); });
+  return `<section class="w4-card"><h4><span class="w4-n">3</span> Xem trước thứ tự <span class="muted small" style="font-weight:400">· process chạy song song, mỗi process xếp từ trên xuống</span></h4>
+    ${[...by].map(([p, l]) => `<div class="w4-proc"><i style="background:${processColor(null, p)}"></i>${esc(p)} <span class="muted small">· ${l.length} task</span></div>${l.map((o, k) => {
+      const r = d.rows[o.i], e = issuesOf(r).e.length;
+      return `<div class="w4-step"><i>${k + 1}</i><div style="flex:1"><b>${esc(r.name)}</b> ${r.kind === 'extra' ? '<span class="wr-pill i">Bổ sung</span>' : ''} ${e ? '<span class="wr-pill e">❌ thiếu</span>' : ''}
+        <div class="sub">${o.seq === 'start' ? '▶ bắt đầu ngay' : k ? '⤷ sau task ' + k : '▶ bắt đầu ngay'} · ${r.dur || '–'}h · ${r.people || '–'} người</div><div class="wr-tags">${tags(r)}</div></div>
+        <button class="btn sm" data-w4="edit" data-i="${o.i}" title="Sửa">🛡</button></div>`; }).join('')}`).join('')}</section>`;
+}
+function render() {
+  const v = $('#wrView'); if (!v || !document.body.classList.contains('wr-mode')) return;
+  sync();
+  const d = WR.data, src = source();
+  if (!WR.form.start) WR.form.start = (d && metaStart(d.meta && d.meta.start)) || defStart();
+  if (d && !WR.form.name && d.meta && d.meta.name) WR.form.name = d.meta.name;
+  const ne = src === 'file' ? d.rows.filter(r => issuesOf(r).e.length).length : 0;
+  const unset = src === 'file' && manual() ? d.rows.filter((r, i) => !S.seq[i]).length : 0;
+  const n = src === 'file' ? d.rows.length : src === 'tpl' ? templateTasks().length : 0;
+  const block = ro() ? 'Đăng nhập để tạo' : !S.mode ? 'Chọn cách tạo lịch' : !src ? (S.mode === 'auto' ? 'Upload file task hoặc tick dùng bộ task mẫu' : 'Upload file task (Work Request)')
+    : (src === 'file' && d.missingCols.length) ? 'File thiếu cột bắt buộc' : '';
+  const ae = document.activeElement, focusId = ae && ae.closest && ae.closest('#wrView') ? ae.id : '';
+  v.innerHTML = `
+    <div class="wr-h"><b>📥 Tạo lịch Shutdown</b>${ro() ? '<button class="wr-pill w" data-wr="login" style="border:0;cursor:pointer">👁 Chỉ xem – bấm để đăng nhập</button>' : `<span class="wr-pill ok">✓ ${esc(Auth.user)}</span>`}
+      <button class="btn sm" data-wr="op">📱 Ca trực</button>${ro() ? '' : '<button class="btn sm" data-wr="admin">🛡 Admin</button>'}<button class="btn sm" data-wr="back">Planner</button></div>
+    ${steps(src)}
+    ${stepMode()}
+    ${S.mode ? stepFiles(d, src) : ''}
+    ${S.mode && src ? stepPreview(d, src) : ''}
+    ${S.mode ? `<div class="w4-bar"><div class="sum">
+        ${n ? `<span class="wr-pill">${n} task</span>` : ''}${ne ? `<span class="wr-pill e">❌ ${ne} thiếu thông tin</span>` : ''}${unset ? `<span class="wr-pill w">⚠ ${unset} chưa chọn thứ tự</span>` : ''}
+        <span class="wr-pill i">${S.mode === 'auto' ? '⚡ Tự động' : '🛠 Tinh chỉnh'}</span>${hasLDC() && (S.mode === 'auto' || S.cfg.assign === 'ldc') ? '<span class="wr-pill ok">👥 Tự gán người</span>' : ''}
+        ${block ? `<span class="wr-pill w">${esc(block)}</span>` : ''}</div>
+      <button class="w4-go" data-w4="go" ${block ? 'disabled' : ''}>🚀 Tạo ngay</button></div>` : ''}`;
+  if (focusId) { const el = document.getElementById(focusId); if (el && el.tagName === 'INPUT' && el.type !== 'file') { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { } } }
+}
+
+/* ---------- sửa 1 dòng trước khi tạo ---------- */
+function editRow(i) {
+  const d = WR.data, r = d && d.rows[i]; if (!r) return;
+  const L = d.lists || {}, s = { ...(r.safety || {}) }, ph = { ...(r.photos || {}) };
+  const opt = (arr, val) => `<option value="">— chọn —</option>${[...new Set([...(arr || []), ...(val && val !== '—' ? [val] : [])])].map(o => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}`;
+  const kindV = r.kind === 'extra' ? 'Bổ sung' : r.kind === 'mandatory' ? 'Bắt buộc' : '';
+  const m = openModal(`<div class="modal-h"><h3>${esc(r.name)}</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><div class="wr-sf">
+      <div class="wr-sec">A. Thông tin công việc</div>
+      <label>Nhánh<input id="eBr" value="${esc(r.branch)}"></label><label>Process<input id="ePr" value="${esc(r.process)}"></label>
+      <label>Loại công việc<select id="eKind">${opt(['Bắt buộc', 'Bổ sung'], kindV)}</select></label><label>Thiết bị / Khu vực<input id="eEq" value="${esc(r.equip)}"></label>
+      <label>Thời lượng (giờ)<input id="eDur" type="number" step="0.1" min="0" value="${esc(r.dur || '')}"></label><label>Số người<input id="ePp" type="number" min="1" value="${esc(r.people || '')}"></label>
+      <label class="full">Mô tả ngắn cho operator<textarea id="eDesc" rows="2">${esc(r.desc)}</textarea></label>
+      <div class="wr-sec">Ảnh upload</div>
+      <label>Ảnh checklist<select id="pC">${opt(['Có', 'Không'], ph.check)}</select></label>
+      <label>Ảnh giấy phép<select id="pP">${opt(['Có', 'Không'], ph.ptw)}</select></label>
+      <label>Ảnh hoàn thành (số)<select id="pD">${opt(['1', '2', '3', '4', '5'], ph.done ? String(ph.done) : '')}</select></label>
+      <div class="wr-sec">B. Cần yêu cầu an toàn?</div><label class="full"><select id="eNeed">${opt(['Có', 'Không'], s.need)}</select></label></div>
+    <div class="wr-sf" id="eBox" style="margin-top:8px"><div class="wr-sec">C. Yêu cầu an toàn</div>
+      <label class="sf">Mode can thiệp<select data-k="mode">${opt(['Mode 0', 'Mode 1', 'Mode 2', 'Mode 3', 'Mode 4'], s.mode)}</select></label>
+      <label class="sf">WI LOTO<input data-k="wiLoto" value="${esc(s.wiLoto)}"></label>
+      <label class="sf full">Điểm khóa LOTO (Năng lượng: điểm khóa; …)<textarea data-k="lotoPts" rows="2">${esc(s.lotoPts)}</textarea></label>
+      <label class="sf">Giấy phép làm việc<select data-k="ptw">${opt(L.ptw, s.ptw)}</select></label>
+      <label class="sf">Phiếu tiên đoán rủi ro<select data-k="risk">${opt(['Có', 'Không'], s.risk)}</select></label>
+      <label class="sf full">Bộ PPE<select data-k="ppe">${opt(Object.keys(L.packs || {}), s.ppe)}</select></label></div>
+    <div class="wr-issue" id="eIss" style="margin-top:8px"></div></div>
+    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="eOk">Lưu</button></div>`);
+  const read = () => {
+    const ns = { ...s, need: $('#eNeed', m).value }; $$('#eBox [data-k]', m).forEach(x => ns[x.dataset.k] = x.value.trim());
+    const kv = N($('#eKind', m).value);
+    return { ...r, branch: $('#eBr', m).value.trim(), process: $('#ePr', m).value.trim(), equip: $('#eEq', m).value.trim(), desc: $('#eDesc', m).value.trim(),
+      kind: kv.startsWith('bo sung') ? 'extra' : kv.startsWith('bat buoc') ? 'mandatory' : '', dur: U.num($('#eDur', m).value, 0), people: Math.round(U.num($('#ePp', m).value, 0)),
+      photos: { check: $('#pC', m).value, ptw: $('#pP', m).value, done: $('#pD', m).value }, safety: ns };
+  };
+  const refresh = () => {
+    $('#eBox', m).classList.toggle('off', !YES($('#eNeed', m).value));
+    const is = issuesOf(read());
+    $('#eIss', m).innerHTML = is.e.map(x => `<div class="e">❌ ${esc(x)}</div>`).join('') + is.w.map(x => `<div class="w">⚠ ${esc(x)}</div>`).join('') || '<div style="color:#15803d">✅ Đủ thông tin</div>';
+  };
+  m.addEventListener('change', refresh); m.addEventListener('input', refresh); refresh();
+  $('#eOk', m).onclick = () => { d.rows[i] = read(); closeModal(); render(); };
+}
+
+/* ---------- TẠO NGAY ---------- */
+function fitTarget(plan) { try { const res = Scheduler.schedule(plan); if (plan.targetHours < res.kpi.windowHours) plan.targetHours = Math.ceil(res.kpi.windowHours); } catch (e) { } }
+async function createNow() {
+  if (ro()) { const b = $('#auBadge'); if (b) b.click(); return; }
+  const src = source(); if (!S.mode || !src) return;
+  const d = WR.data;
+  if (src === 'file' && manual() && hasCycle(d.rows)) { toast('Có vòng lặp "chạy sau" giữa các task – kiểm tra lại ô "Bắt đầu khi nào?".', 'err'); return; }
+  if (src === 'file') {
+    const ne = d.rows.filter(r => issuesOf(r).e.length).length, unset = manual() ? d.rows.filter((r, i) => !S.seq[i]).length : 0;
+    if ((ne || unset) && !(await confirmBox('Tạo lịch Shutdown', `${ne ? `<b>${ne}</b> task còn thiếu thông tin (sẽ highlight trên Gantt).<br>` : ''}${unset ? `<b>${unset}</b> task chưa chọn thứ tự → nối tiếp task trước.<br>` : ''}Vẫn tạo?`, 'Tạo ngay'))) return;
+  }
+  const start = (WR.form.start || defStart()).slice(0, 16), target = U.num(WR.form.target, 48) || 48;
+  const name = WR.form.name.trim() || (src === 'file' ? (d.meta.name || d.fileName.replace(/\.\w+$/, '')) : 'Shutdown ' + start.slice(0, 10).split('-').reverse().join('/'));
+  const wrMeta = { status: 'published', source: src, arrange: S.mode, cfg: { ...S.cfg }, importedAt: Date.now(), publishedAt: Date.now(), publishedBy: (window.Auth && Auth.user) || '' };
+  let newId = null;
+  if (src === 'tpl') {
+    Store.commit('Tạo lịch từ bộ task mẫu', () => {
+      const plan = makePlan({ name, start, targetHours: target, tasks: templateTasks(), resourceCapacity: { 'Nhà thầu': 3 } });
+      plan.wr = { ...wrMeta, fileName: 'Bộ task mẫu' };
+      Store.state.plans.push(plan); Store.state.activePlanId = plan.id; newId = plan.id; fitTarget(plan);
+    });
+  } else {
+    const ord = buildOrder(d.rows);
+    Store.commit('Tạo lịch từ Work Request', () => {
+      const plan = makePlan({ name, start, targetHours: target });
+      plan.wr = { ...wrMeta, fileName: d.fileName, lists: d.lists };
+      const tmp = { tasks: [] }, idOf = {}; let order = 0, prio = 0;
+      for (const o of ord) {
+        const r = d.rows[o.i], hrs = r.dur > 0 ? r.dur : 1, ev = evidenceFor(r);
+        const t = normalizeTask({ id: nextTaskId(tmp), order: ++order, branch: r.branch || 'Chung', process: r.process || 'Chung', taskName: r.name,
+          durationHours: hrs, standardHours: hrs, quantity: 1, peopleRequired: Math.max(1, r.people || 1), assignee: '', owner: '',
+          executionMode: 'sequential', lagHours: 0, notes: r.desc, method: '', progress: 0, evidence: ev });
+        t.wr = { kind: r.kind, equip: r.equip, desc: r.desc, line: r.line, photos: { ...(r.photos || {}) }, safety: { ...(r.safety || {}) },
+          points: parsePts((r.safety || {}).lotoPts), ppeItems: ppeItems(r.safety, d.lists), issues: issuesOf(r), seqSet: true, prio: r.kind === 'extra' ? ++prio : null };
+        t.evidence = ev;
+        if (t.wr.ppeItems.length && 'ppe' in t) t.ppe = t.wr.ppeItems.slice();
+        if (manual() && priOf(r, o.i) === 'high') t.priority = true;
+        idOf[o.i] = t.id; t._seq = o.seq; tmp.tasks.push(t);
+      }
+      for (const t of tmp.tasks) {
+        const v = t._seq; delete t._seq;
+        if (v === 'start') { t.executionMode = 'parallel'; t.dependencyIds = []; }
+        else if (v && v.startsWith('after:') && idOf[+v.slice(6)]) { t.executionMode = 'after_dependency'; t.dependencyIds = [idOf[+v.slice(6)]]; }
+      }
+      plan.tasks = tmp.tasks;
+      Store.state.plans.push(plan); Store.state.activePlanId = plan.id; newId = plan.id; fitTarget(plan);
+    });
+  }
+  const plan = Store.state.plans.find(p => p.id === newId); if (!plan) return;
+  let assigned = 0;
+  if (hasLDC() && (S.mode === 'auto' || S.cfg.assign === 'ldc')) {
+    try {
+      const dk = LDC.dayKey(U.parseLocalISO(plan.start)); LDC.planDay = dk; if (LDC.autoPick) LDC.autoPick(dk);
+      const sug = LDC.suggest(plan, { overwrite: false, allowHC: S.mode === 'custom' && S.cfg.hc === 'yes', anyTeam: false }).filter(x => !x.keep && x.names.length);
+      if (sug.length) Store.commit('Tự gán người theo LDC', p => { for (const x of sug) { const t = p.tasks.find(k => k.id === x.t.id); if (t) { t.assignee = x.names.join(' + '); assigned++; } } });
+    } catch (e) { console.warn('[WR v4] gán người LDC lỗi:', e); }
+  }
+  WR.data = null; WR.form = { name: '', start: '', target: 48 }; WR.planId = newId;
+  S.mode = null; S.useTpl = false; S.seq = {}; S.pri = {};
+  WR.close(); App.openPlan(newId);
+  toast(`Đã tạo "${name}" · ${plan.tasks.length} task${assigned ? ` · đã gán người ${assigned} task` : ''}`, 'ok');
+}
+
+/* ---------- sự kiện ---------- */
+const v = $('#wrView');
+v.addEventListener('click', async e => {
+  const b = e.target.closest('[data-w4]'); if (!b) return;
+  const k = b.dataset.w4;
+  if (k === 'mode') { S.mode = b.dataset.v; return render(); }
+  if (k === 'allseq') { WR.data.rows.forEach((r, i) => { if (!S.seq[i]) S.seq[i] = 'seq'; }); return render(); }
+  if (k === 'edit') return editRow(+b.dataset.i);
+  if (k === 'go') return createNow();
+  if (k === 'ldc') { await LDC.askUpload('Upload lịch đi ca (LDC)'); return render(); }
+});
+v.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.cfg) { S.cfg[t.dataset.cfg] = t.value; return render(); }
+  if (t.dataset.s4 !== undefined) { if (t.value) S.seq[+t.dataset.s4] = t.value; else delete S.seq[+t.dataset.s4]; return render(); }
+  if (t.dataset.p4 !== undefined) { S.pri[+t.dataset.p4] = t.value; return render(); }
+  if (t.id === 'w4Tpl') { S.useTpl = t.checked; return render(); }
+});
+
+/* Thay giao diện tab cũ; mở tab luôn bắt đầu từ bước chọn cách */
+WR.render = render;
+const _open = WR.open;
+WR.open = function (...a) { if (!WR.data) S.mode = S.mode || null; return _open.apply(this, a); };
+const h2 = $('#hNew2'); if (h2) h2.innerHTML = '+ Tạo lịch Shutdown mới<span>⚡ Tự động theo template · 🛠 Tinh chỉnh riêng</span>';
+const _hr = Home.render;
+Home.render = function (...a) { _hr.apply(this, a); const n2 = $('#hNew2'); if (n2) n2.innerHTML = '+ Tạo lịch Shutdown mới<span>⚡ Tự động theo template · 🛠 Tinh chỉnh riêng</span>'; const tpl = $('#hTpl'); if (tpl) tpl.remove(); };
+if (App.view === 'home') Home.render();
+const top = $('#wrTop'); if (top) top.title = 'Tạo lịch Shutdown';
+if (document.body.classList.contains('wr-mode')) render();
+WR._t4 = { buildOrder, hasCycle, source, S };
+console.log('[WR v4] đã nạp – setup gọn 2 lựa chọn');
+} catch (err) { console.error('[WR v4] lỗi:', err); }
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 90));
+})();
+</script>
+<!-- ===================== HẾT WORK REQUEST v4 ===================== -->
+
   
   
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
