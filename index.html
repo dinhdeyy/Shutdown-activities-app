@@ -6350,6 +6350,70 @@ console.log('[v11] đã nạp – sửa vị trí menu');
 </script>
 <!-- ===================== HẾT v11 ===================== -->
 
+<!-- =====================================================================
+     v12 – SỬA TRIỆT ĐỂ MENU ☰ / Export BỊ LỆCH (máy tính + điện thoại)
+     Nguyên nhân: thanh trên cùng dùng hiệu ứng kính mờ (backdrop-filter)
+     → menu bị "nhốt" trong thanh đó, không canh theo màn hình được.
+     Cách sửa: đưa menu ra ngoài thanh, tự canh vị trí theo nút bấm.
+     DÁN NGAY TRƯỚC dòng </body>  (nếu đã dán v11 thì để v12 ngay sau v11)
+     ===================================================================== -->
+<style id="v12-style">
+.dd-menu.v12{position:fixed!important;right:auto!important;bottom:auto!important;margin:0!important;transform:none!important;
+  z-index:500!important;max-height:calc(100dvh - 24px);overflow-y:auto;min-width:240px}
+@media (max-width:700px){
+  .dd-menu.v12{left:8px!important;right:8px!important;top:auto!important;bottom:8px!important;width:auto!important;min-width:0!important;
+    max-height:72dvh;border-radius:22px!important;padding:8px!important;animation:v12Up .35s cubic-bezier(.22,1.2,.36,1)}
+  .dd-menu.v12 button{width:100%;text-align:left;padding:13px 14px!important;font-size:15px!important;border-radius:14px!important}
+  .dd-menu.v12::before{content:'';display:block;width:40px;height:5px;border-radius:999px;background:rgba(120,120,128,.35);margin:2px auto 8px}
+  body.v12-open::after{content:'';position:fixed;inset:0;z-index:499;background:rgba(15,23,42,.35)}
+}
+@keyframes v12Up{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+</style>
+<script>
+(function () {
+'use strict';
+const pairs = [];   // [menu, nút mở]
+const mobile = () => matchMedia('(max-width:700px)').matches;
+const isOpen = m => !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none';
+function setup() {
+  document.querySelectorAll('.dd-menu').forEach(m => {
+    if (m.classList.contains('v12')) return;
+    const wrap = m.parentElement;
+    const btn = (m.id === 'menuMore' && document.getElementById('btnMore')) || (m.id === 'menuExport' && document.getElementById('btnExport'))
+      || (wrap && wrap.querySelector('button:not(.dd-menu button)'));
+    m.classList.add('v12');
+    document.body.appendChild(m);          // đưa menu ra khỏi thanh kính mờ
+    pairs.push([m, btn]);
+  });
+}
+function place() {
+  let any = false;
+  pairs.forEach(([m, b]) => {
+    if (!isOpen(m)) return;
+    any = true;
+    if (mobile() || !b) { m.style.left = ''; m.style.top = ''; return; }
+    const r = b.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight, pad = 8;
+    let left = r.right - w; left = Math.max(pad, Math.min(left, innerWidth - w - pad));
+    let top = r.bottom + 6; if (top + h > innerHeight - pad) top = Math.max(pad, r.top - h - 6);
+    m.style.left = left + 'px'; m.style.top = top + 'px';
+  });
+  document.body.classList.toggle('v12-open', any && mobile());
+}
+const tick = () => requestAnimationFrame(() => requestAnimationFrame(place));
+document.addEventListener('click', tick, true);
+window.addEventListener('resize', place);
+window.addEventListener('scroll', place, true);
+/* điện thoại: chạm nền mờ để đóng */
+document.addEventListener('click', e => {
+  if (!document.body.classList.contains('v12-open')) return;
+  if (e.target.closest('.dd-menu') || pairs.some(([, b]) => b && b.contains(e.target))) return;
+  pairs.forEach(([m]) => m.classList.add('hidden')); document.body.classList.remove('v12-open');
+}, true);
+document.addEventListener('DOMContentLoaded', () => setTimeout(() => { setup(); place(); console.log('[v12] đã nạp – sửa vị trí menu'); }, 600));
+})();
+</script>
+<!-- ===================== HẾT v12 ===================== -->
+
   
 </body>
 </html>
