@@ -6298,6 +6298,58 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 480));
 </script>
 <!-- ===================== HẾT v10 ===================== -->
 
+<!-- =====================================================================
+     v11 – SỬA MENU ☰ / Export BỊ LỆCH RA NGOÀI MÀN HÌNH
+       - Điện thoại: menu hiện dạng bảng trượt từ dưới lên, đủ chiều ngang
+       - Máy tính: menu tự dịch vào trong nếu bị tràn mép
+     DÁN NGAY TRƯỚC dòng </body>
+     ===================================================================== -->
+<style id="v11-style">
+@media (max-width:700px){
+  .dd-menu{position:fixed!important;left:8px!important;right:8px!important;top:auto!important;bottom:8px!important;
+    width:auto!important;min-width:0!important;max-width:none!important;max-height:72dvh;overflow-y:auto;
+    transform:none!important;z-index:400!important;border-radius:22px!important;padding:8px!important;
+    box-shadow:0 -10px 40px rgba(15,23,42,.28)!important;animation:v11Up .35s cubic-bezier(.22,1.2,.36,1)}
+  .dd-menu button{width:100%;text-align:left;padding:13px 14px!important;font-size:15px!important;border-radius:14px!important}
+  .dd-menu hr{margin:6px 4px}
+  .dd-menu::before{content:'';display:block;width:40px;height:5px;border-radius:999px;background:rgba(120,120,128,.35);margin:2px auto 8px}
+  body.v11-open::after{content:'';position:fixed;inset:0;z-index:399;background:rgba(15,23,42,.35);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+}
+@keyframes v11Up{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+</style>
+<script>
+(function () {
+'use strict';
+const mobile = () => matchMedia('(max-width:700px)').matches;
+const isOpen = m => m && !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none';
+function fit() {
+  const menus = [...document.querySelectorAll('.dd-menu')], any = menus.some(isOpen);
+  document.body.classList.toggle('v11-open', any && mobile());
+  if (mobile()) return;
+  menus.forEach(m => {
+    if (!isOpen(m)) { m.style.removeProperty('margin-left'); return; }
+    m.style.marginLeft = '0px';
+    const r = m.getBoundingClientRect(), pad = 8;
+    let dx = 0;
+    if (r.left < pad) dx = pad - r.left;
+    else if (r.right > innerWidth - pad) dx = innerWidth - pad - r.right;
+    if (dx) m.style.marginLeft = dx + 'px';
+  });
+}
+document.addEventListener('click', () => requestAnimationFrame(() => requestAnimationFrame(fit)), true);
+window.addEventListener('resize', fit);
+/* bấm nền mờ (điện thoại) để đóng menu */
+document.addEventListener('click', e => {
+  if (!document.body.classList.contains('v11-open')) return;
+  if (e.target.closest('.dd-menu') || e.target.closest('#btnMore') || e.target.closest('#btnExport')) return;
+  document.querySelectorAll('.dd-menu').forEach(m => m.classList.add('hidden'));
+  document.body.classList.remove('v11-open');
+}, true);
+console.log('[v11] đã nạp – sửa vị trí menu');
+})();
+</script>
+<!-- ===================== HẾT v11 ===================== -->
+
   
 </body>
 </html>
