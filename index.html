@@ -6052,6 +6052,69 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 360));
 
 
 
+<!-- =====================================================================
+     v9 – LƯU CLOUD AN TOÀN: tự thử lại khi mất mạng / Supabase lỗi,
+          không báo lỗi liên tục, dữ liệu vẫn giữ trên máy và tự đồng bộ lại
+     ===================================================================== -->
+<style id="v9-style">
+#v9Sync{position:fixed;right:14px;bottom:14px;z-index:250;display:none;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;font-size:13px;font-weight:600;
+  background:var(--glass-2,#fff);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border:1px solid var(--glass-bd,#ddd);box-shadow:0 8px 24px rgba(15,23,42,.18);cursor:pointer}
+#v9Sync.show{display:flex}
+#v9Sync i{width:9px;height:9px;border-radius:50%;background:#ff9f0a;animation:v9p 1.4s infinite}
+#v9Sync.ok i{background:#30d158;animation:none}
+@keyframes v9p{50%{opacity:.3}}
+</style>
+<script>
+(function () {
+'use strict';
+function boot() {
+try {
+if (typeof sb === 'undefined' || typeof cloudSave !== 'function') { console.warn('[v9] Chưa có Supabase.'); return; }
+const pill = document.createElement('div'); pill.id = 'v9Sync'; pill.title = 'Bấm để thử đồng bộ lại'; document.body.appendChild(pill);
+let timer = null, retry = null, tries = 0, pending = false, busy = false, warned = false;
+const canWrite = () => !(window.Auth && !Auth.ok) || document.body.classList.contains('op-mode');
+function show(state, text) {
+  pill.className = state ? 'show ' + state : '';
+  pill.innerHTML = state ? `<i></i>${text}` : '';
+  if (state === 'ok') setTimeout(() => { if (pill.classList.contains('ok')) pill.className = ''; }, 2500);
+}
+async function push() {
+  if (busy) { pending = true; return; }
+  busy = true; pending = false;
+  const payload = { plans: Store.state.plans, savedAt: Date.now(), by: CLIENT_ID };
+  try {
+    const { error } = await sb.from('planner_state').upsert({ id: 1, data: payload, updated_at: new Date().toISOString() });
+    if (error) throw new Error(error.message || 'Supabase lỗi');
+    lastCloudAt = payload.savedAt;
+    if (tries || warned) show('ok', 'Đã đồng bộ cloud ✓');
+    tries = 0; warned = false; clearTimeout(retry);
+  } catch (e) {
+    tries++;
+    console.warn('[v9] lưu cloud lỗi lần ' + tries + ':', e && e.message);
+    const wait = Math.min(60, [3, 8, 15, 30][tries - 1] || 60);
+    show('wait', `Chưa lưu được lên cloud – tự thử lại sau ${wait}s (dữ liệu vẫn trên máy)`);
+    if (!warned) { warned = true; toast('Mất kết nối cloud – dữ liệu vẫn lưu trên máy này, sẽ tự đồng bộ khi có mạng.', 'warn'); }
+    clearTimeout(retry); retry = setTimeout(push, wait * 1000);
+  } finally {
+    busy = false;
+    if (pending) { clearTimeout(timer); timer = setTimeout(push, 500); }
+  }
+}
+/* Thay hàm lưu cũ (cũ: báo lỗi đỏ mỗi lần, không thử lại) */
+cloudSave = function () {
+  if (!canWrite()) return;
+  clearTimeout(timer); timer = setTimeout(push, 800);
+};
+pill.onclick = () => { tries = 0; clearTimeout(retry); push(); };
+window.addEventListener('online', () => { if (tries) { tries = 0; push(); } });
+console.log('[v9] đã nạp – lưu cloud tự thử lại');
+} catch (err) { console.error('[v9] lỗi:', err); }
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 420));
+})();
+</script>
+<!-- ===================== HẾT v9 ===================== -->
+
 </body>
 </html>
 
