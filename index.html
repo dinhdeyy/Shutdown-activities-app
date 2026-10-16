@@ -5021,6 +5021,323 @@ if (document.readyState === 'loading') {
   cloudLoad();
 }
 </script>
+
+<!-- =====================================================================
+     WORK REQUEST v5 – XẾP LỊCH THEO 3 CỘT TÍM TRONG FILE EXCEL
+       Giai đoạn (1→5) · Song song với task trên? · Loại (Bắt buộc / Bổ sung A / B)
+     Dán TOÀN BỘ khối này NGAY TRƯỚC dòng </body> (cuối file index.html).
+     Cần có sẵn: khối Work Request cũ + khối WORK REQUEST v4.
+     ===================================================================== -->
+<style id="w5-style">
+.w5-ph{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(124,58,237,.13);color:#6d28d9;margin-right:4px}
+.w5-par{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(14,165,233,.14);color:#0369a1;margin-right:4px}
+.w5-k{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;margin-right:4px}
+.w5-k.A{background:rgba(37,99,235,.12);color:#1d4ed8}.w5-k.B{background:rgba(120,120,128,.16);color:#475569}
+.w5-grp{border-left:3px solid var(--c,#94a3b8);padding-left:8px;margin:6px 0}
+.w5-grp .gt{font-size:11.5px;color:var(--muted);margin-bottom:2px}
+.w5-t{display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:13px}
+.w5-t>div{flex:1;min-width:0}
+.w5-t .sub{font-size:11.5px;color:var(--muted)}
+.w5-edit{display:grid;grid-template-columns:minmax(0,1.6fr) 190px 150px auto;gap:8px;align-items:center;padding:8px 10px;border-radius:12px;margin-top:6px;background:var(--panel2,#f8fafc);border:1px solid var(--border)}
+.w5-edit.unset{border-color:rgba(245,158,11,.6);background:rgba(254,243,199,.4)}
+.w5-edit label{font-size:11px;color:var(--muted);display:block}
+.w5-edit select{width:100%;font-size:12.5px}
+@media (max-width:900px){.w5-edit{grid-template-columns:1fr}}
+</style>
+<script>
+(function () {
+'use strict';
+const PHASES = ['1. Dừng máy & CIP đầu', '2. LOTO & tháo', '3. Vệ sinh / CIP', '4. Lắp line & Leak test', '5. Release & Startup'];
+const N = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+const YES = v => ['co', 'yes', 'x', 'true', '1'].includes(N(v));
+
+/* ---- Bắt workbook vừa upload để đọc thêm 3 cột tím ---- */
+let lastWB = null;
+function wrapXLSX() {
+  if (!window.XLSX || XLSX.__w5) return;
+  const r = XLSX.read; XLSX.read = function (...a) { const wb = r.apply(this, a); lastWB = wb; return wb; }; XLSX.__w5 = true;
+}
+document.addEventListener('change', e => { if (e.target && e.target.id === 'wrFile') wrapXLSX(); }, true);
+document.addEventListener('click', e => { if (e.target && e.target.closest && e.target.closest('label.w4-drop')) wrapXLSX(); }, true);
+
+function boot() {
+try {
+const WR = window.WorkRequest;
+if (!WR || !WR._test || !WR.setup) { console.warn('[WR v5] Cần khối Work Request cũ + WR v4 trước khối này.'); return; }
+wrapXLSX();
+const { issuesOf, evidenceFor, ppeItems } = WR._test;
+const S = WR.setup;
+if (!S.cfg.order || S.cfg.order === 'manual') S.cfg.order = 'file';
+const esc = s => U.esc(s ?? '');
+const ro = () => !!(window.Auth && !Auth.ok);
+const hasLDC = () => typeof LDC !== 'undefined' && !!LDC.data;
+
+/* ---------- đọc thêm Giai đoạn / Song song / Bổ sung A-B ---------- */
+let enriched = null;
+function enrich() {
+  const d = WR.data; if (!d || enriched === d) return;
+  enriched = d; d.hasPhase = false;
+  try {
+    const wb = lastWB; if (!wb) throw 0;
+    const sn = wb.SheetNames.find(x => N(x) === 'work request') || wb.SheetNames[0];
+    const T = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: false, defval: '' });
+    const hi = T.findIndex(r => (r || []).some(c => N(c).startsWith('ten cong viec'))); if (hi < 0) throw 0;
+    const H = T[hi].map(c => N(String(c).split('\n')[0]));
+    const cPh = H.findIndex(h => h.startsWith('giai doan')), cPar = H.findIndex(h => h.startsWith('song song')), cK = H.findIndex(h => h.startsWith('loai cong viec'));
+    d.hasPhase = cPh >= 0;
+    d.rows.forEach(r => {
+      const R = T[r.line - 1] || [];
+      const m = /(\d)/.exec(String(cPh >= 0 ? R[cPh] : '')); r.phase = m ? Math.min(5, Math.max(1, +m[1])) : 0;
+      r.par = cPar >= 0 && YES(R[cPar]);
+      const k = N(cK >= 0 ? R[cK] : '');
+      r.sub = r.kind === 'extra' ? (/\bb$/.test(k) ? 'B' : 'A') : '';
+    });
+  } catch (e) { d.rows.forEach(r => { r.phase = r.phase || 0; r.par = !!r.par; r.sub = r.kind === 'extra' ? (r.sub || 'A') : ''; }); }
+}
+const kRank = r => r.kind === 'extra' ? (r.sub === 'B' ? 2 : 1) : 0;
+const ph = r => r.phase || (WR.data && WR.data.hasPhase ? 3 : 1);
+
+/* ---------- XẾP LỊCH: nhóm theo process → (Loại, Giai đoạn, thứ tự dòng) → nhóm song song ---------- */
+function buildPlan(rows) {
+  const byP = new Map();
+  rows.forEach((r, i) => { const k = r.process || 'Chung'; if (!byP.has(k)) byP.set(k, []); byP.get(k).push(i); });
+  const out = [];
+  const chain = (list, proc) => {
+    let prev = [], cur = [], gid = 0;
+    list.forEach((i, k) => {
+      const r = rows[i], p = k ? rows[list[k - 1]] : null;
+      const join = k > 0 && r.par && ph(r) === ph(p) && kRank(r) === kRank(p);
+      if (!join) { prev = cur; cur = []; gid++; }
+      cur.push(i); out.push({ i, proc, deps: prev.slice(), gid, join });
+    });
+  };
+  for (const [proc, list] of byP) {
+    const sorted = list.slice().sort((a, b) => kRank(rows[a]) - kRank(rows[b]) || ph(rows[a]) - ph(rows[b]) || a - b);
+    if (S.mode === 'custom' && S.cfg.extra === 'parallel') {
+      chain(sorted.filter(i => rows[i].kind !== 'extra'), proc);
+      chain(sorted.filter(i => rows[i].kind === 'extra'), proc);
+    } else chain(sorted, proc);
+  }
+  return out;
+}
+
+/* ---------- RENDER ---------- */
+function source() { if (WR.data && WR.data.rows.length) return 'file'; if (S.mode === 'auto' && S.useTpl) return 'tpl'; return null; }
+function metaStart(s) {
+  const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/.exec(String(s || '').trim()); if (!m) return '';
+  const p = n => String(n).padStart(2, '0'); return `${m[3]}-${p(m[2])}-${p(m[1])}T${p(m[4] || 6)}:${p(m[5] || 0)}`;
+}
+function defStart() { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(6, 0, 0, 0); return U.toLocalISO(d.getTime()).slice(0, 16); }
+const badges = r => `<span class="w5-ph">GĐ ${ph(r)}</span>${r.kind === 'extra' ? `<span class="w5-k ${r.sub}">Bổ sung ${r.sub}</span>` : ''}`;
+const webEdit = () => S.mode === 'custom' && S.cfg.order === 'web';
+
+function stepMode() {
+  return `<section class="w4-card ${S.mode ? 'done' : ''}"><h4><span class="w4-n">1</span> Bạn muốn tạo lịch Shutdown thế nào?</h4>
+    <div class="w4-opts">
+      <button class="w4-opt ${S.mode === 'auto' ? 'on' : ''}" data-w5="mode" data-v="auto"><span class="ic">⚡</span><span><b>Tự động theo file</b>
+        <small>Xếp theo 3 cột tím trong file: <b>Giai đoạn</b> 1→5, <b>Song song</b> với task trên, <b>Bắt buộc</b> trước – Bổ sung A – Bổ sung B. Tự gán người theo lịch đi ca. Chưa có file thì dùng bộ task mẫu.</small></span></button>
+      <button class="w4-opt ${S.mode === 'custom' ? 'on' : ''}" data-w5="mode" data-v="custom"><span class="ic">🛠</span><span><b>Tinh chỉnh riêng</b>
+        <small>Chỉnh Giai đoạn / Song song ngay trên web, chọn cách xếp việc bổ sung và cách gán người.</small></span></button>
+    </div></section>`;
+}
+function stepFiles(d, src) {
+  const sel = (k, opts) => `<select data-c5="${k}">${opts.map(([v, l]) => `<option value="${v}" ${S.cfg[k] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const ne = d ? d.rows.filter(r => issuesOf(r).e.length).length : 0;
+  return `<section class="w4-card ${src ? 'done' : ''}"><h4><span class="w4-n">2</span> Thông tin & tải file</h4>
+    <div class="w4-info">
+      <label>Tên kế hoạch<input id="wrName" value="${esc(WR.form.name)}" placeholder="${esc(d ? (d.meta.name || d.fileName.replace(/\.\w+$/, '')) : 'Shutdown ...')}"></label>
+      <label>Bắt đầu Shutdown<input id="wrStart" type="datetime-local" value="${esc(WR.form.start)}"></label>
+      <label>Mục tiêu (giờ)<input id="wrTarget" type="number" min="1" value="${esc(WR.form.target)}"></label></div>
+    ${S.mode === 'custom' ? `<div class="w4-cfg"><div class="t">🛠 Yêu cầu setup riêng</div>
+      <label>Thứ tự task${sel('order', [['file', 'Theo Giai đoạn & Song song trong file'], ['web', 'Chỉnh Giai đoạn / Song song trên web']])}</label>
+      <label>Việc bổ sung${sel('extra', [['after', 'Làm sau việc bắt buộc'], ['parallel', 'Chạy song song từ đầu']])}</label>
+      <label>Gán người${sel('assign', [['ldc', 'Tự gán theo lịch đi ca'], ['none', 'Để trống – gán sau']])}</label>
+      <label>Khi thiếu người${sel('hc', [['no', 'Chỉ người đúng team'], ['yes', 'Cho phép team HC']])}</label></div>` : ''}
+    <div class="w4-files">
+      <div class="w4-file ${hasLDC() ? 'ok' : ''}"><h5>👥 Lịch đi ca (LDC)<em>${S.mode === 'custom' && S.cfg.assign === 'none' ? 'không cần' : 'để tự gán người'}</em></h5>
+        <p>${hasLDC() ? `✅ ${esc(LDC.data.fileName)} · ${LDC.data.people.length} người` : 'File LDC.xlsx tải từ SharePoint về máy.'}</p>
+        <div class="w4-acts">${typeof LDC !== 'undefined' ? `<button class="btn sm" data-w5="ldc">${hasLDC() ? 'Đổi file LDC' : '📤 Upload LDC.xlsx'}</button>` : ''}</div></div>
+      <div class="w4-file ${src ? 'ok' : ''}"><h5>📋 File task (Work Request)<em>${S.mode === 'auto' ? 'tùy chọn' : 'bắt buộc'}</em></h5>
+        <p>${d ? `✅ ${esc(d.fileName)} · ${d.rows.length} task${ne ? ` · <span style="color:#b91c1c">❌ ${ne} thiếu thông tin</span>` : ''}${d.hasPhase ? '' : ' · <span style="color:#b45309">file cũ – không có cột Giai đoạn, xếp nối tiếp</span>'}` : 'Tải form mẫu (đã có sẵn task), chỉnh nếu cần rồi upload lại.'}</p>
+        <div class="w4-acts"><a class="btn sm" href="Mau_Work_Request.xlsx" download="Mau_Work_Request.xlsx">⬇ Tải form mẫu</a>
+          <label class="w4-drop"><input type="file" id="wrFile" accept=".xlsx,.xlsm,.xls">📤 ${d ? 'Đổi file' : 'Upload file đã điền'}</label>
+          ${d ? '<button class="btn sm" data-wr="clear">Bỏ file</button>' : ''}</div>
+        ${S.mode === 'auto' && !d ? `<label class="w4-tpl"><input type="checkbox" id="w5Tpl" ${S.useTpl ? 'checked' : ''}> Chưa có file – dùng <b>bộ task mẫu (14 task)</b></label>` : ''}</div>
+    </div></section>`;
+}
+function previewFile(d) {
+  const P = buildPlan(d.rows), byP = new Map();
+  P.forEach(o => { if (!byP.has(o.proc)) byP.set(o.proc, []); byP.get(o.proc).push(o); });
+  const unset = d.hasPhase ? d.rows.filter(r => !r.phase).length : 0;
+  let html = `<section class="w4-card"><h4><span class="w4-n">3</span> ${webEdit() ? 'Chỉnh Giai đoạn & Song song' : 'Xem trước thứ tự'}
+      <span class="muted small" style="font-weight:400">· các process chạy song song · trong 1 process: nhóm trên xong → nhóm dưới · <b>‖</b> = chạy cùng lúc</span></h4>
+    ${unset ? `<div class="w4-tpl" style="background:rgba(245,158,11,.16)">⚠ ${unset} task chưa chọn Giai đoạn → tạm xếp vào GĐ 3</div>` : ''}`;
+  for (const [proc, list] of byP) {
+    html += `<div class="w4-proc"><i style="background:${processColor(null, proc)}"></i>${esc(proc)} <span class="muted small">· ${list.length} task · ${U.fmtDur(list.reduce((s, o) => s + (d.rows[o.i].dur || 0), 0))} tổng công</span></div>`;
+    if (webEdit()) {
+      html += list.map((o, k) => { const r = d.rows[o.i];
+        return `<div class="w5-edit ${d.hasPhase && !r.phase ? 'unset' : ''}"><div><b>${esc(r.name)}</b> ${badges(r)}<div class="w5-t sub">${r.dur || '–'}h · ${r.people || '–'} người${issuesOf(r).e.length ? ' · <span style="color:#b91c1c">❌ thiếu thông tin</span>' : ''}</div></div>
+          <div><label>Giai đoạn</label><select data-ph5="${o.i}">${!r.phase ? '<option value="" selected>— chọn —</option>' : ''}${PHASES.map((p, j) => `<option value="${j + 1}" ${r.phase === j + 1 ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+          <div><label>Song song với task trên?</label><select data-par5="${o.i}" ${k ? '' : 'disabled'}><option value="0">Không – làm sau</option><option value="1" ${r.par ? 'selected' : ''}>‖ Có – cùng lúc</option></select></div>
+          <div><button class="btn sm" data-w5="edit" data-i="${o.i}">🛡</button></div></div>`; }).join('');
+    } else {
+      const groups = []; list.forEach(o => { if (!o.join) groups.push([]); groups[groups.length - 1].push(o); });
+      html += groups.map((g, gi) => `<div class="w5-grp" style="--c:${processColor(null, proc)}"><div class="gt">${gi ? '⤷ sau nhóm ' + gi : '▶ bắt đầu ngay'}${g.length > 1 ? ` · <span class="w5-par">‖ ${g.length} task song song</span>` : ''}</div>
+        ${g.map(o => { const r = d.rows[o.i], e = issuesOf(r).e.length; return `<div class="w5-t"><div><b>${esc(r.name)}</b> ${badges(r)}${e ? '<span class="wr-pill e">❌ thiếu</span>' : ''}
+          <div class="sub">${r.dur || '–'}h · ${r.people || '–'} người${r.equip ? ' · ' + esc(r.equip) : ''}</div></div><button class="btn sm" data-w5="edit" data-i="${o.i}">🛡</button></div>`; }).join('')}</div>`).join('');
+    }
+  }
+  return html + '</section>';
+}
+function previewTpl() {
+  const T = templateTasks(), byId = new Map(T.map(t => [t.id, t])), by = new Map();
+  T.forEach(t => { if (!by.has(t.process)) by.set(t.process, []); by.get(t.process).push(t); });
+  return `<section class="w4-card"><h4><span class="w4-n">3</span> Xem trước – bộ task mẫu (${T.length} task)</h4>
+    ${[...by].map(([p, l]) => `<div class="w4-proc"><i style="background:${processColor(null, p)}"></i>${esc(p)}</div>${l.map((t, k) => `<div class="w5-t"><div><b>${esc(t.taskName)}</b>
+      <div class="sub">${t.dependencyIds.length ? '⤷ sau ' + t.dependencyIds.map(x => esc(byId.get(x)?.taskName || x)).join(', ') : k ? '≡ nối tiếp' : '▶ bắt đầu ngay'} · ${U.fmtDur(t.durationHours, true)}</div></div></div>`).join('')}`).join('')}</section>`;
+}
+function render() {
+  const v = $('#wrView'); if (!v || !document.body.classList.contains('wr-mode')) return;
+  enrich();
+  const d = WR.data, src = source();
+  if (!WR.form.start) WR.form.start = (d && metaStart(d.meta && d.meta.start)) || defStart();
+  if (d && !WR.form.name && d.meta && d.meta.name) WR.form.name = d.meta.name;
+  const ne = src === 'file' ? d.rows.filter(r => issuesOf(r).e.length).length : 0;
+  const n = src === 'file' ? d.rows.length : src === 'tpl' ? templateTasks().length : 0;
+  const block = ro() ? 'Đăng nhập để tạo' : !S.mode ? 'Chọn cách tạo lịch' : !src ? (S.mode === 'auto' ? 'Upload file task hoặc tick dùng bộ task mẫu' : 'Upload file task') : (src === 'file' && d.missingCols.length) ? 'File thiếu cột bắt buộc' : '';
+  const st = [['Chọn cách tạo lịch', !!S.mode], ['Thông tin & tải file', !!src], ['Tạo ngay → Gantt', false]], cur = st.findIndex(x => !x[1]);
+  const fid = document.activeElement && document.activeElement.closest && document.activeElement.closest('#wrView') ? document.activeElement.id : '';
+  v.innerHTML = `
+    <div class="wr-h"><b>📥 Tạo lịch Shutdown</b>${ro() ? '<button class="wr-pill w" data-wr="login" style="border:0;cursor:pointer">👁 Chỉ xem – bấm để đăng nhập</button>' : `<span class="wr-pill ok">✓ ${esc(Auth.user)}</span>`}
+      <button class="btn sm" data-wr="op">📱 Ca trực</button>${ro() ? '' : '<button class="btn sm" data-wr="admin">🛡 Admin</button>'}<button class="btn sm" data-wr="back">Planner</button></div>
+    <div class="w4-steps">${st.map((x, i) => `<span class="${x[1] ? 'ok' : i === cur ? 'cur' : ''}"><i>${x[1] ? '✓' : i + 1}</i>${x[0]}</span>`).join('<b>›</b>')}</div>
+    ${stepMode()}${S.mode ? stepFiles(d, src) : ''}${S.mode && src ? (src === 'tpl' ? previewTpl() : previewFile(d)) : ''}
+    ${S.mode ? `<div class="w4-bar"><div class="sum">${n ? `<span class="wr-pill">${n} task</span>` : ''}${ne ? `<span class="wr-pill e">❌ ${ne} thiếu thông tin</span>` : ''}
+      <span class="wr-pill i">${S.mode === 'auto' ? '⚡ Tự động' : '🛠 Tinh chỉnh'}</span>${hasLDC() && (S.mode === 'auto' || S.cfg.assign === 'ldc') ? '<span class="wr-pill ok">👥 Tự gán người</span>' : ''}
+      ${block ? `<span class="wr-pill w">${esc(block)}</span>` : ''}</div><button class="w4-go" data-w5="go" ${block ? 'disabled' : ''}>🚀 Tạo ngay</button></div>` : ''}`;
+  if (fid) { const el = document.getElementById(fid); if (el && el.tagName === 'INPUT' && el.type !== 'file') { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { } } }
+}
+
+/* ---------- sửa 1 task ---------- */
+function editRow(i) {
+  const d = WR.data, r = d && d.rows[i]; if (!r) return;
+  const L = d.lists || {}, s = { ...(r.safety || {}) }, pv = { ...(r.photos || {}) };
+  const opt = (arr, val) => `<option value="">— chọn —</option>${[...new Set([...(arr || []), ...(val && val !== '—' ? [val] : [])])].map(o => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}`;
+  const kindV = r.kind === 'extra' ? 'Bổ sung – ' + (r.sub || 'A') : r.kind === 'mandatory' ? 'Bắt buộc' : '';
+  const m = openModal(`<div class="modal-h"><h3>${esc(r.name)}</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><div class="wr-sf">
+      <div class="wr-sec">A. Công việc</div>
+      <label>Loại công việc<select id="eKind">${opt(['Bắt buộc', 'Bổ sung – A', 'Bổ sung – B'], kindV)}</select></label><label>Thiết bị / Khu vực<input id="eEq" value="${esc(r.equip)}"></label>
+      <label>Giai đoạn<select id="ePh">${opt(PHASES, r.phase ? PHASES[r.phase - 1] : '')}</select></label><label>Song song với task trên?<select id="ePar">${opt(['Có', 'Không'], r.par ? 'Có' : 'Không')}</select></label>
+      <label>Thời lượng (giờ)<input id="eDur" type="number" step="0.1" min="0" value="${esc(r.dur || '')}"></label><label>Số người<input id="ePp" type="number" min="1" value="${esc(r.people || '')}"></label>
+      <label class="full">Mô tả ngắn cho operator<textarea id="eDesc" rows="2">${esc(r.desc)}</textarea></label>
+      <div class="wr-sec">Ảnh upload</div>
+      <label>Ảnh checklist<select id="pC">${opt(['Có', 'Không'], pv.check)}</select></label><label>Ảnh giấy phép<select id="pP">${opt(['Có', 'Không'], pv.ptw)}</select></label>
+      <label>Ảnh hoàn thành (số)<select id="pD">${opt(['1', '2', '3', '4', '5'], pv.done ? String(pv.done) : '')}</select></label>
+      <div class="wr-sec">B. Cần yêu cầu an toàn?</div><label class="full"><select id="eNeed">${opt(['Có', 'Không'], s.need)}</select></label></div>
+    <div class="wr-sf" id="eBox" style="margin-top:8px"><div class="wr-sec">C. Yêu cầu an toàn</div>
+      <label class="sf">Mode can thiệp<select data-k="mode">${opt(['Mode 0', 'Mode 1', 'Mode 2', 'Mode 3', 'Mode 4'], s.mode)}</select></label>
+      <label class="sf">WI LOTO<input data-k="wiLoto" value="${esc(s.wiLoto)}"></label>
+      <label class="sf full">Điểm khóa LOTO (Năng lượng: điểm khóa; …)<textarea data-k="lotoPts" rows="2">${esc(s.lotoPts)}</textarea></label>
+      <label class="sf">Giấy phép làm việc<select data-k="ptw">${opt(L.ptw, s.ptw)}</select></label>
+      <label class="sf">Phiếu tiên đoán rủi ro<select data-k="risk">${opt(['Có', 'Không'], s.risk)}</select></label>
+      <label class="sf full">Bộ PPE<select data-k="ppe">${opt(Object.keys(L.packs || {}), s.ppe)}</select></label></div>
+    <div class="wr-issue" id="eIss" style="margin-top:8px"></div></div>
+    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="eOk">Lưu</button></div>`);
+  const read = () => {
+    const ns = { ...s, need: $('#eNeed', m).value }; $$('#eBox [data-k]', m).forEach(x => ns[x.dataset.k] = x.value.trim());
+    const kv = N($('#eKind', m).value), phv = /(\d)/.exec($('#ePh', m).value);
+    return { ...r, equip: $('#eEq', m).value.trim(), desc: $('#eDesc', m).value.trim(), kind: kv.startsWith('bo sung') ? 'extra' : kv.startsWith('bat buoc') ? 'mandatory' : '',
+      sub: kv.startsWith('bo sung') ? (/\bb$/.test(kv) ? 'B' : 'A') : '', phase: phv ? +phv[1] : 0, par: YES($('#ePar', m).value),
+      dur: U.num($('#eDur', m).value, 0), people: Math.round(U.num($('#ePp', m).value, 0)),
+      photos: { check: $('#pC', m).value, ptw: $('#pP', m).value, done: $('#pD', m).value }, safety: ns };
+  };
+  const refresh = () => { $('#eBox', m).classList.toggle('off', !YES($('#eNeed', m).value)); const is = issuesOf(read());
+    $('#eIss', m).innerHTML = is.e.map(x => `<div class="e">❌ ${esc(x)}</div>`).join('') + is.w.map(x => `<div class="w">⚠ ${esc(x)}</div>`).join('') || '<div style="color:#15803d">✅ Đủ thông tin</div>'; };
+  m.addEventListener('change', refresh); m.addEventListener('input', refresh); refresh();
+  $('#eOk', m).onclick = () => { d.rows[i] = read(); closeModal(); render(); };
+}
+
+/* ---------- TẠO NGAY ---------- */
+function parsePts(str) { return String(str || '').split(/[;\n]+/).map(x => x.trim()).filter(Boolean).map((x, i) => { const k = x.indexOf(':'); return k > 0 ? { stt: i + 1, energy: x.slice(0, k).trim(), point: x.slice(k + 1).trim() } : { stt: i + 1, energy: '', point: x }; }); }
+function fit(plan) { try { const r = Scheduler.schedule(plan); if (plan.targetHours < r.kpi.windowHours) plan.targetHours = Math.ceil(r.kpi.windowHours); } catch (e) { } }
+async function createNow() {
+  if (ro()) { const b = $('#auBadge'); if (b) b.click(); return; }
+  const src = source(); if (!S.mode || !src) return;
+  const d = WR.data;
+  if (src === 'file') {
+    const ne = d.rows.filter(r => issuesOf(r).e.length).length;
+    if (ne && !(await confirmBox('Tạo lịch Shutdown', `<b>${ne}</b> task còn thiếu thông tin (sẽ highlight trên Gantt). Vẫn tạo?`, 'Tạo ngay'))) return;
+  }
+  const start = (WR.form.start || defStart()).slice(0, 16), target = U.num(WR.form.target, 48) || 48;
+  const name = WR.form.name.trim() || (src === 'file' ? (d.meta.name || d.fileName.replace(/\.\w+$/, '')) : 'Shutdown ' + start.slice(0, 10).split('-').reverse().join('/'));
+  const meta = { status: 'published', source: src, arrange: S.mode, cfg: { ...S.cfg }, importedAt: Date.now(), publishedAt: Date.now(), publishedBy: (window.Auth && Auth.user) || '' };
+  let newId = null;
+  if (src === 'tpl') {
+    Store.commit('Tạo lịch từ bộ task mẫu', () => { const plan = makePlan({ name, start, targetHours: target, tasks: templateTasks(), resourceCapacity: { 'Nhà thầu': 3 } });
+      plan.wr = { ...meta, fileName: 'Bộ task mẫu' }; Store.state.plans.push(plan); Store.state.activePlanId = plan.id; newId = plan.id; fit(plan); });
+  } else {
+    const P = buildPlan(d.rows);
+    Store.commit('Tạo lịch từ Work Request', () => {
+      const plan = makePlan({ name, start, targetHours: target }); plan.wr = { ...meta, fileName: d.fileName, lists: d.lists };
+      const tmp = { tasks: [] }, idOf = {}; let order = 0, prio = 0;
+      for (const o of P) {
+        const r = d.rows[o.i], hrs = r.dur > 0 ? r.dur : 1, ev = evidenceFor(r);
+        const t = normalizeTask({ id: nextTaskId(tmp), order: ++order, branch: r.branch || 'Chung', process: r.process || 'Chung', taskName: r.name,
+          durationHours: hrs, standardHours: hrs, quantity: 1, peopleRequired: Math.max(1, r.people || 1), assignee: '', owner: '',
+          executionMode: 'parallel', lagHours: 0, notes: r.desc, method: '', progress: 0, evidence: ev });
+        t.wr = { kind: r.kind, sub: r.sub, phase: ph(r), par: r.par, equip: r.equip, desc: r.desc, line: r.line, photos: { ...(r.photos || {}) }, safety: { ...(r.safety || {}) },
+          points: parsePts((r.safety || {}).lotoPts), ppeItems: ppeItems(r.safety, d.lists), issues: issuesOf(r), seqSet: true, prio: r.kind === 'extra' ? ++prio : null };
+        t.evidence = ev; if (t.wr.ppeItems.length && 'ppe' in t) t.ppe = t.wr.ppeItems.slice();
+        idOf[o.i] = t.id; tmp.tasks.push(t);
+      }
+      P.forEach((o, k) => { const t = tmp.tasks[k], deps = o.deps.map(i => idOf[i]).filter(Boolean);
+        if (deps.length) { t.executionMode = 'after_dependency'; t.dependencyIds = deps; } else { t.executionMode = 'parallel'; t.dependencyIds = []; } });
+      plan.tasks = tmp.tasks; Store.state.plans.push(plan); Store.state.activePlanId = plan.id; newId = plan.id; fit(plan);
+    });
+  }
+  const plan = Store.state.plans.find(p => p.id === newId); if (!plan) return;
+  let assigned = 0;
+  if (hasLDC() && (S.mode === 'auto' || S.cfg.assign === 'ldc')) {
+    try { const dk = LDC.dayKey(U.parseLocalISO(plan.start)); LDC.planDay = dk; if (LDC.autoPick) LDC.autoPick(dk);
+      const sug = LDC.suggest(plan, { overwrite: false, allowHC: S.mode === 'custom' && S.cfg.hc === 'yes', anyTeam: false }).filter(x => !x.keep && x.names.length);
+      if (sug.length) Store.commit('Tự gán người theo LDC', p => { for (const x of sug) { const t = p.tasks.find(k => k.id === x.t.id); if (t) { t.assignee = x.names.join(' + '); assigned++; } } });
+    } catch (e) { console.warn('[WR v5] gán người LDC lỗi:', e); }
+  }
+  WR.data = null; WR.form = { name: '', start: '', target: 48 }; WR.planId = newId; S.mode = null; S.useTpl = false;
+  WR.close(); App.openPlan(newId);
+  toast(`Đã tạo "${name}" · ${plan.tasks.length} task${assigned ? ` · đã gán người ${assigned} task` : ''}`, 'ok');
+}
+
+/* ---------- sự kiện ---------- */
+const v = $('#wrView');
+v.addEventListener('click', async e => {
+  const b = e.target.closest('[data-w5]'); if (!b) return;
+  const k = b.dataset.w5;
+  if (k === 'mode') { S.mode = b.dataset.v; return render(); }
+  if (k === 'edit') return editRow(+b.dataset.i);
+  if (k === 'go') return createNow();
+  if (k === 'ldc') { await LDC.askUpload('Upload lịch đi ca (LDC)'); return render(); }
+});
+v.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.c5) { S.cfg[t.dataset.c5] = t.value; return render(); }
+  if (t.dataset.ph5 !== undefined) { WR.data.rows[+t.dataset.ph5].phase = +t.value || 0; return render(); }
+  if (t.dataset.par5 !== undefined) { WR.data.rows[+t.dataset.par5].par = t.value === '1'; return render(); }
+  if (t.id === 'w5Tpl') { S.useTpl = t.checked; return render(); }
+});
+WR.render = render;
+WR._t5 = { buildPlan, enrich };
+if (document.body.classList.contains('wr-mode')) render();
+console.log('[WR v5] đã nạp – xếp theo Giai đoạn / Song song / Bổ sung A-B');
+} catch (err) { console.error('[WR v5] lỗi:', err); }
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 150));
+})();
+</script>
+<!-- ===================== HẾT WORK REQUEST v5 ===================== -->
+
+  
 </body>
 </html>
 
