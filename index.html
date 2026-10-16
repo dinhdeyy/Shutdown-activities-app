@@ -5916,6 +5916,140 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 300));
 })();
 </script>
 <!-- ===================== HẾT v7 ===================== -->
+<!-- =====================================================================
+     v8 – MỐC THỜI GIAN THEO PLAN: cột "Bắt đầu sau Shutdown (giờ)"
+          Tạo lịch đúng giờ bắt đầu + thời lượng như file plan; đổi giờ Shutdown → tự dời theo
+     ===================================================================== -->
+<style id="v8-style">
+.v8-tl{margin-top:4px}
+.v8-axis{position:relative;height:22px;margin-left:var(--lw);border-bottom:1px solid var(--border);font-size:11px;color:var(--muted)}
+.v8-axis span{position:absolute;top:2px;transform:translateX(-50%);white-space:nowrap}
+.v8-axis i{position:absolute;top:14px;bottom:-1px;width:1px;background:var(--border)}
+.v8-proc{display:flex;align-items:center;gap:6px;margin:12px 0 4px;font-weight:600;font-size:13px}
+.v8-proc i{width:8px;height:8px;border-radius:50%;background:var(--c)}
+.v8-proc small{color:var(--muted);font-weight:400}
+.v8-row{display:grid;grid-template-columns:var(--lw) 1fr;align-items:center;min-height:30px;font-size:12.5px}
+.v8-name{padding-right:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.v8-name small{color:var(--muted)}
+.v8-track{position:relative;height:22px;border-radius:8px;background:repeating-linear-gradient(90deg,transparent 0,transparent calc(var(--dw) - 1px),rgba(120,120,128,.12) calc(var(--dw) - 1px),rgba(120,120,128,.12) var(--dw))}
+.v8-bar{position:absolute;top:3px;height:16px;border-radius:6px;background:var(--c);opacity:.88;min-width:4px;box-shadow:0 2px 6px color-mix(in srgb,var(--c) 35%,transparent);transition:transform .3s}
+.v8-bar:hover{transform:scaleY(1.2);opacity:1}
+.v8-row .v8-when{position:absolute;top:3px;font-size:11px;color:var(--muted);white-space:nowrap;padding-left:6px}
+.v8-ed{display:inline-flex;gap:4px;align-items:center;margin-left:6px}
+.v8-ed input{width:56px;padding:2px 6px!important;font-size:12px;border-radius:8px!important}
+.v8-sum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+@media (max-width:700px){.v8-tl{--lw:150px!important}.v8-row{font-size:11.5px}}
+</style>
+<script>
+(function () {
+'use strict';
+let lastWB = null;
+function wrapX() { if (!window.XLSX || XLSX.__v8) return; const r = XLSX.read; XLSX.read = function (...a) { const w = r.apply(this, a); lastWB = w; return w; }; XLSX.__v8 = true; }
+document.addEventListener('change', e => { if (e.target && e.target.id === 'wrFile') wrapX(); }, true);
+function boot() {
+try {
+const WR = window.WorkRequest; if (!WR || !WR._test) return;
+wrapX();
+const N = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+const esc = s => U.esc(s ?? '');
+let seen = null;
+/* ---------- đọc cột "Bắt đầu sau Shutdown (giờ)" ---------- */
+function readOffsets() {
+  const d = WR.data; if (!d || seen === d) return; seen = d; d.hasOff = false;
+  try {
+    const wb = lastWB; if (!wb) return;
+    const sn = wb.SheetNames.find(x => N(x) === 'work request') || wb.SheetNames[0];
+    const T = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' });
+    const hi = T.findIndex(r => (r || []).some(c => N(c).startsWith('ten cong viec'))); if (hi < 0) return;
+    const H = T[hi].map(c => N(String(c).split('\n')[0]));
+    const cO = H.findIndex(h => h.startsWith('bat dau sau')); if (cO < 0) return;
+    let cnt = 0;
+    d.rows.forEach(r => { const v = (T[r.line - 1] || [])[cO]; const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); if (isFinite(n) && String(v).trim() !== '') { r.off = n; cnt++; } else r.off = null; });
+    d.hasOff = cnt > 0;
+  } catch (e) { console.warn('[v8]', e); }
+}
+/* ---------- áp mốc giờ khi tạo kế hoạch ---------- */
+function applyOff(plan, rows) {
+  const byLine = new Map(rows.filter(r => r.off != null).map(r => [r.line, r]));
+  const ts = plan.tasks.filter(t => t.wr && byLine.has(t.wr.line));
+  if (!ts.length) return;
+  ts.forEach(t => { const r = byLine.get(t.wr.line); t._off = r.off; });
+  const byP = new Map(); ts.forEach(t => { if (!byP.has(t.process)) byP.set(t.process, []); byP.get(t.process).push(t); });
+  for (const list of byP.values()) {
+    list.sort((a, b) => a._off - b._off);
+    list.forEach((t, k) => {
+      let prev = null;
+      for (let j = 0; j < k; j++) { const p = list[j], end = p._off + p.durationHours; if (end <= t._off + 1e-6 && (!prev || end > prev._off + prev.durationHours)) prev = p; }
+      t.executionMode = prev ? 'after_dependency' : 'parallel'; t.dependencyIds = prev ? [prev.id] : [];
+      t.constraintType = 'SNET'; t.constraintOffsetHours = t._off;
+    });
+  }
+  plan.tasks.slice().sort((a, b) => (a._off ?? 1e9) - (b._off ?? 1e9) || a.order - b.order).forEach((t, i) => { t.order = i + 1; });
+  const end = Math.max(...ts.map(t => t._off + t.durationHours));
+  if (isFinite(end) && plan.targetHours < end) plan.targetHours = Math.ceil(end);
+  ts.forEach(t => delete t._off);
+  plan.wr = { ...plan.wr, timeline: true };
+}
+const _commit = Store.commit;
+Store.commit = function (label, fn, ...rest) {
+  if (label === 'Tạo lịch từ Work Request' && WR.data && WR.data.hasOff) {
+    const rows = WR.data.rows, before = new Set(Store.state.plans.map(p => p.id));
+    const f2 = function (...a) { const r = fn.apply(this, a); try { const p = Store.state.plans.find(x => !before.has(x.id)); if (p) applyOff(p, rows); } catch (e) { console.warn('[v8] applyOff', e); } return r; };
+    return _commit.call(this, label, f2, ...rest);
+  }
+  return _commit.call(this, label, fn, ...rest);
+};
+/* ---------- xem trước dạng Gantt mini ---------- */
+function timeline(d) {
+  const rows = d.rows.map((r, i) => ({ r, i })).filter(x => x.r.off != null);
+  const total = Math.max(24, ...rows.map(x => x.r.off + (x.r.dur || 0)));
+  const days = Math.ceil(total / 24), start = U.parseLocalISO((WR.form.start || '').slice(0, 16));
+  const edit = WR.setup && WR.setup.mode === 'custom';
+  const by = new Map(); rows.forEach(x => { const k = x.r.process || 'Chung'; if (!by.has(k)) by.set(k, []); by.get(k).push(x); });
+  const pct = h => (100 * h / total).toFixed(3) + '%';
+  const hm = h => isFinite(start) ? U.fmtDM(start + h * MS_H) : '+' + h + 'h';
+  const ticks = []; for (let h = 0; h <= total; h += 12) ticks.push(h);
+  const noOff = d.rows.length - rows.length;
+  return `<div class="v8-sum"><span class="wr-pill i">🕒 ${rows.length} task theo mốc giờ</span><span class="wr-pill">Tổng ${Math.round(total)} giờ · kết thúc ${esc(hm(total))}</span>
+      ${noOff ? `<span class="wr-pill w">⚠ ${noOff} task chưa có mốc giờ – xếp nối tiếp</span>` : ''}${edit ? '<span class="wr-pill ok">✏️ Sửa số giờ ngay trên thanh</span>' : ''}</div>
+    <div class="v8-tl" style="--lw:300px;--dw:${(100 * 24 / total).toFixed(3)}%">
+      <div class="v8-axis">${ticks.map(h => `<span style="left:${pct(h)}">${esc(hm(h).slice(0, isFinite(start) ? 11 : 9))}</span><i style="left:${pct(h)}"></i>`).join('')}</div>
+      ${[...by].map(([p, l]) => `<div class="v8-proc" style="--c:${processColor(null, p)}"><i></i>${esc(p)}<small>· ${l.length} task</small></div>
+        ${l.sort((a, b) => a.r.off - b.r.off).map(({ r, i }) => `<div class="v8-row"><div class="v8-name" title="${esc(r.name)}">${esc(r.name)}${edit ? `<span class="v8-ed"><input type="number" step="0.5" min="0" value="${r.off}" data-v8o="${i}" title="Bắt đầu sau (giờ)"><input type="number" step="0.5" min="0.1" value="${r.dur}" data-v8d="${i}" title="Thời lượng (giờ)"></span>` : ''}</div>
+          <div class="v8-track"><div class="v8-bar" style="left:${pct(r.off)};width:${pct(Math.max(.2, r.dur || 0))};--c:${processColor(null, p)}" title="${esc(r.name)}\n${esc(hm(r.off))} → ${esc(hm(r.off + (r.dur || 0)))} (${r.dur}h)"></div>
+            <span class="v8-when" style="left:${pct(r.off + (r.dur || 0))}">${esc(hm(r.off).slice(-5))} · ${r.dur}h</span></div></div>`).join('')}`).join('')}
+    </div>`;
+}
+function patch() {
+  const v = $('#wrView'); if (!v || !document.body.classList.contains('wr-mode')) return;
+  readOffsets();
+  const d = WR.data; if (!d || !d.hasOff) return;
+  $$('.w4-file p span', v).forEach(s => { if (/không có cột Giai đoạn/.test(s.textContent)) { s.style.color = '#15803d'; s.textContent = 'có mốc giờ theo plan ✓'; } });
+  const card = [...$$('.w4-card', v)].find(c => /Xem trước thứ tự|Chỉnh Giai đoạn/.test((c.querySelector('h4') || {}).textContent || ''));
+  if (!card || card.dataset.v8) return;
+  card.dataset.v8 = 1;
+  card.innerHTML = `<h4><span class="w4-n">3</span> Xem trước lịch theo mốc giờ <span class="muted small" style="font-weight:400">· giống “Plan Shutdown” – đổi giờ Shutdown thì cả lịch dời theo</span></h4>${timeline(d)}`;
+}
+const _r = WR.render;
+WR.render = function (...a) { const r = _r.apply(this, a); try { patch(); } catch (e) { console.warn('[v8]', e); } return r; };
+const v = $('#wrView');
+if (v) {
+  v.addEventListener('change', e => {
+    const o = e.target.dataset.v8o, du = e.target.dataset.v8d;
+    if (o !== undefined) { WR.data.rows[+o].off = Math.max(0, U.num(e.target.value, 0)); WR.render(); }
+    if (du !== undefined) { WR.data.rows[+du].dur = Math.max(.1, U.num(e.target.value, 1)); WR.render(); }
+  });
+  v.addEventListener('input', e => { if (e.target.id === 'wrStart') setTimeout(() => { const c = $('.w4-card[data-v8]', v); if (c) { delete c.dataset.v8; patch(); } }, 300); });
+}
+if (document.body.classList.contains('wr-mode')) WR.render();
+console.log('[v8] đã nạp – lịch theo mốc giờ');
+} catch (err) { console.error('[v8] lỗi:', err); }
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 360));
+})();
+</script>
+<!-- ===================== HẾT v8 ===================== -->
+
 
 
 </body>
