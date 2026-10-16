@@ -5338,6 +5338,318 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 150));
 <!-- ===================== HẾT WORK REQUEST v5 ===================== -->
 
   
+<!-- =====================================================================
+     v6 – REPORT CA (giao diện mới, tràn màn hình, tìm theo tên) + chữ dễ hiểu
+          + tab Tạo lịch: Tự động = task có sẵn trong hệ thống · Tinh chỉnh = theo file
+          + nút 🌙 Dark mode
+     ===================================================================== -->
+<style id="v6-style">
+:root{--rp-r:22px;--spring:cubic-bezier(.22,1.2,.36,1)}
+/* ---------- REPORT CA: tràn màn hình ---------- */
+#opView{max-width:none!important;width:100%!important;margin:0!important;padding:14px clamp(10px,2vw,28px) 90px!important}
+.rp-h{position:sticky;top:0;z-index:8;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;border-radius:var(--rp-r);
+  background:var(--glass);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-bd);box-shadow:var(--glass-sh);animation:rpDrop .5s var(--spring)}
+.rp-title{display:flex;align-items:center;gap:12px;margin-right:auto;min-width:0}
+.rp-logo{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;font-size:22px;color:#fff;
+  background:conic-gradient(from 210deg,#0a84ff,#5e5ce6,#bf5af2,#0a84ff);box-shadow:0 6px 18px rgba(10,132,255,.4),inset 0 1px 0 rgba(255,255,255,.5)}
+.rp-title b{display:block;font-size:20px;letter-spacing:-.4px}
+.rp-title small{display:block;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+.rp-pill,.rp-ico{border:1px solid var(--glass-bd);background:var(--glass-row);color:var(--text);border-radius:999px;padding:9px 15px;font-size:14px;font-weight:600;
+  transition:transform .35s var(--spring),box-shadow .2s;cursor:pointer}
+.rp-ico{width:42px;height:42px;padding:0;display:grid;place-items:center;font-size:18px}
+.rp-pill:hover,.rp-ico:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(31,45,90,.14)}
+.rp-pill:active,.rp-ico:active{transform:scale(.94)}
+.rp-ctrl{display:grid;grid-template-columns:minmax(260px,2.2fr) minmax(260px,1.4fr) 170px auto;gap:10px;margin:12px 0}
+.rp-search{display:flex;align-items:center;gap:8px;padding:0 6px 0 16px;border-radius:999px;background:var(--glass-row);border:1px solid var(--glass-bd);
+  box-shadow:0 4px 16px rgba(31,45,90,.07);transition:box-shadow .25s}
+.rp-search:focus-within{box-shadow:0 0 0 4px var(--accent-soft),0 8px 24px rgba(10,132,255,.15)}
+.rp-search span{font-size:17px;opacity:.7}
+.rp-search input{flex:1;border:0!important;background:transparent!important;box-shadow:none!important;font-size:16px;padding:13px 4px;min-width:0}
+.rp-search button{border:0;background:rgba(120,120,128,.18);color:var(--text);width:28px;height:28px;border-radius:50%;cursor:pointer}
+.rp-seg{position:relative;display:grid;grid-template-columns:repeat(3,1fr);padding:4px;border-radius:999px;background:rgba(118,118,128,.16)}
+.rp-seg i{position:absolute;top:4px;bottom:4px;left:4px;width:calc((100% - 8px)/3);border-radius:999px;background:var(--glass-row);
+  box-shadow:0 3px 12px rgba(0,0,0,.14);transform:translateX(calc(var(--i,0)*100%));transition:transform .5s var(--spring)}
+.rp-seg button{position:relative;z-index:1;border:0;background:transparent;color:var(--text);font-weight:700;font-size:15px;padding:8px 4px;border-radius:999px;cursor:pointer;line-height:1.15}
+.rp-seg button small{display:block;font-weight:500;font-size:11px;color:var(--muted)}
+.rp-ctrl input[type=date],.rp-ctrl select{border-radius:999px!important;padding:12px 16px!important;font-size:15px;background:var(--glass-row)!important;border:1px solid var(--glass-bd)!important;width:100%}
+.rp-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}
+.rp-k{position:relative;overflow:hidden;text-align:left;border:1px solid var(--glass-bd);background:var(--glass-row);border-radius:20px;padding:14px 16px;cursor:pointer;color:var(--text);
+  transition:transform .4s var(--spring),box-shadow .25s,border-color .2s}
+.rp-k::after{content:'';position:absolute;right:-18px;top:-18px;width:70px;height:70px;border-radius:50%;background:var(--kc);opacity:.13}
+.rp-k:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(31,45,90,.14)}
+.rp-k.on{border-color:var(--kc);box-shadow:0 0 0 2px var(--kc),0 12px 26px rgba(31,45,90,.14)}
+.rp-k span{font-size:12.5px;font-weight:600;color:var(--muted)}
+.rp-k b{display:block;font-size:30px;letter-spacing:-1px;color:var(--kc);line-height:1.1;margin-top:2px}
+.rp-qinfo{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;border-radius:18px;margin-bottom:12px;background:rgba(10,132,255,.09);border:1px solid rgba(10,132,255,.22);font-size:14px}
+.rp-person{border:0;border-radius:999px;padding:6px 12px;background:var(--glass-row);color:var(--text);font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.rp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
+.rp-card{position:relative;display:flex;flex-direction:column;gap:6px;text-align:left;width:100%;padding:16px 16px 14px 20px;border-radius:var(--rp-r);cursor:pointer;color:var(--text);
+  background:var(--glass-row);border:1px solid var(--glass-bd);box-shadow:0 6px 20px rgba(31,45,90,.08);overflow:hidden;
+  animation:rpIn .55s var(--spring) both;animation-delay:var(--d,0ms);transition:transform .4s var(--spring),box-shadow .25s}
+.rp-noanim .rp-card{animation:none}
+.rp-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--c)}
+.rp-card:hover{transform:translateY(-4px);box-shadow:0 16px 34px rgba(31,45,90,.16)}
+.rp-card:active{transform:scale(.98)}
+.rp-card.st-done{opacity:.72}
+.rp-card.st-late{box-shadow:0 0 0 2px rgba(255,59,48,.55),0 6px 20px rgba(255,59,48,.15)}
+.rp-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rp-time{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+.rp-when{font-size:12px;color:var(--muted)}
+.rp-tag{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;background:color-mix(in srgb,var(--c) 16%,transparent);color:var(--c)}
+.rp-st{margin-left:auto;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:700}
+.rp-st.todo{background:rgba(142,142,147,.2);color:var(--muted)}.rp-st.run{background:rgba(10,132,255,.15);color:#0a84ff}
+.rp-st.done{background:rgba(48,209,88,.17);color:#1f9d47}.rp-st.late{background:rgba(255,59,48,.15);color:#ff3b30}
+.rp-st.run::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:#0a84ff;margin-right:6px;vertical-align:1px;animation:rpPulse 1.6s infinite}
+.rp-name{font-size:16.5px;font-weight:700;line-height:1.3;letter-spacing:-.2px}
+.rp-meta{font-size:13.5px;color:var(--muted);line-height:1.45}
+.rp-meta mark{background:rgba(255,214,10,.55);color:inherit;border-radius:4px;padding:0 2px}
+body.dark .rp-meta mark{background:rgba(255,214,10,.35)}
+.rp-chips{display:flex;gap:6px;flex-wrap:wrap}
+.rp-chips span{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:rgba(255,159,10,.15);color:#c26a00}
+body.dark .rp-chips span{color:#ffb340}
+.rp-foot{display:flex;align-items:center;gap:10px;margin-top:4px;font-size:13px;font-weight:600}
+.rp-pb{flex:1;height:8px;border-radius:999px;background:rgba(120,120,128,.18);overflow:hidden}
+.rp-pb i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#30d158,#34c7ff);transition:width .8s var(--spring)}
+.rp-empty{grid-column:1/-1;text-align:center;padding:60px 16px;color:var(--muted);font-size:15px}
+.rp-empty b{display:block;font-size:44px;margin-bottom:6px}
+@keyframes rpIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes rpDrop{from{opacity:0;transform:translateY(-10px)}}
+@keyframes rpPulse{0%{box-shadow:0 0 0 0 rgba(10,132,255,.6)}70%{box-shadow:0 0 0 7px rgba(10,132,255,0)}100%{box-shadow:0 0 0 0 rgba(10,132,255,0)}}
+/* ---------- Màn hình chi tiết + chụp ảnh ---------- */
+.modal.op-sheet{width:min(860px,100vw)!important;border-radius:28px}
+.op-sheet .modal-h{padding:16px 20px}
+.op-sheet .modal-h h3{font-size:18px;letter-spacing:-.3px}
+.op-sheet .modal-b{padding:16px 20px}
+.rp-shead{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:22px;margin-bottom:14px;
+  background:linear-gradient(135deg,rgba(10,132,255,.13),rgba(94,92,230,.13));border:1px solid rgba(10,132,255,.2);animation:rpIn .5s var(--spring)}
+.rp-ring{flex:none;width:62px;height:62px;border-radius:50%;display:grid;place-items:center;
+  background:conic-gradient(#30d158 calc(var(--p)*1%),rgba(120,120,128,.22) 0);transition:background .6s}
+.rp-ring b{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:var(--glass-row);font-size:14px}
+.rp-shead div{line-height:1.45}.rp-shead strong{font-size:15.5px}.rp-shead small{display:block;color:var(--muted);font-size:13px}
+.op-info{background:var(--glass-row);border:1px solid var(--glass-bd);border-radius:18px;padding:12px 14px;font-size:14px!important;line-height:1.75!important}
+.op-req{border-radius:20px!important;padding:14px!important;transition:border-color .3s,background .3s;animation:rpIn .45s var(--spring) both}
+.op-req h5{font-size:15px!important}
+.op-thumbs>*{border-radius:14px!important;animation:rpIn .4s var(--spring) both}
+.op-btn{border-radius:16px!important;padding:16px 8px!important;font-size:16px!important;transition:transform .3s var(--spring)}
+.op-btn:active{transform:scale(.95)}
+.op-close{border-radius:18px!important;padding:17px!important;font-size:17px!important;transition:transform .3s var(--spring),filter .2s}
+.op-close:not(:disabled):active{transform:scale(.97)}
+.wr-opbox{border-radius:20px!important}
+.wr-ppe button{border-radius:999px!important;padding:9px 14px!important;transition:transform .3s var(--spring),background .2s}
+.wr-ppe button:active{transform:scale(.92)}
+/* ---------- Tab Tạo lịch: hộp bộ task có sẵn ---------- */
+.v6-built{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:rgba(48,209,88,.1);font-size:13.5px}
+.v6-built b{font-size:15px}
+#tbDark{font-size:15px}
+@media (max-width:1000px){.rp-ctrl{grid-template-columns:1fr 1fr}.rp-search{grid-column:1/-1}.rp-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}.rp-k{padding:10px}.rp-k b{font-size:22px}.rp-k span{font-size:11px}}
+@media (max-width:600px){.rp-title small{max-width:52vw}.rp-ctrl{grid-template-columns:1fr}.rp-grid{grid-template-columns:1fr}.rp-h{padding:10px 12px}.rp-pill{padding:8px 12px;font-size:13px}
+  .rp-kpis{grid-template-columns:repeat(5,1fr);gap:6px}.rp-k{padding:8px 6px;text-align:center;border-radius:16px}.rp-k b{font-size:20px}.rp-k span{font-size:10.5px}.rp-k::after{display:none}}
+@media (prefers-reduced-motion:reduce){.rp-card,.rp-h,.rp-shead,.op-req{animation:none!important}}
+</style>
+<script>
+(function () {
+'use strict';
+function boot() {
+try {
+const OP = window.OperatorView, WR = window.WorkRequest;
+const esc = s => U.esc(s ?? '');
+const plans = () => Store.state.plans;
+const myName = () => SafeStore.get('op.name') || '';
+const SHIFTS = [{ n: 1, s: 6, label: '06–14' }, { n: 2, s: 14, label: '14–22' }, { n: 3, s: 22, label: '22–06' }];
+const ST = { todo: 'Chưa làm', run: 'Đang làm', done: 'Xong', late: 'Trễ' };
+const KC = { all: '#0a84ff', todo: '#8e8e93', run: '#0a84ff', done: '#30d158', late: '#ff3b30' };
+
+/* ---------- Dark mode ---------- */
+function toggleDark() {
+  const on = document.body.classList.toggle('dark');
+  Store.ui().dark = on; Store.save();
+  $$('[data-dark]').forEach(b => b.textContent = on ? '☀️' : '🌙');
+}
+const darkIcon = () => document.body.classList.contains('dark') ? '☀️' : '🌙';
+const sp = $('.topbar .spacer');
+if (sp && !$('#tbDark')) { const b = document.createElement('button'); b.className = 'tb-btn'; b.id = 'tbDark'; b.setAttribute('data-dark', ''); b.title = 'Giao diện sáng / tối'; b.textContent = darkIcon(); b.onclick = toggleDark; sp.after(b); }
+
+/* ---------- Đổi tên "Ca trực" → "Report ca" ---------- */
+function renameOp(root) {
+  $$('button', root || document).forEach(b => {
+    if (b.closest('#opView') || b.children.length) return;
+    const t = b.textContent;
+    if (/Ca trực/.test(t)) b.textContent = t.replace('📱', '📋').replace('Ca trực', 'Report ca');
+  });
+}
+
+/* =====================================================================
+   1. REPORT CA
+   ===================================================================== */
+if (OP) {
+  const evOf = t => (Array.isArray(t.evidence) && t.evidence.length ? t.evidence : [{ id: 'done', label: 'Ảnh hoàn thành', min: 1 }]);
+  const pr = (t, id) => ((t.proofs || {})[id] || []);
+  const evStat = t => { let h = 0, n = 0; for (const e of evOf(t)) { const k = Math.max(1, e.min || 1); n += k; h += Math.min(k, pr(t, e.id).length); } return { h, n }; };
+  const statusOf = (t, r) => { if (t.progress >= 100) return 'done'; const now = Date.now(); if (now >= r.end) return 'late'; if (now >= r.start || t.startedAt || evStat(t).h) return 'run'; return 'todo'; };
+  const shiftWin = (date, ca) => { const s = U.parseLocalISO(date + 'T00:00') + SHIFTS[ca - 1].s * MS_H; return [s, s + 8 * MS_H]; };
+  const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const toks = q => U.norm(q).split(' ').filter(Boolean);
+  const wordHit = (hay, tk) => tk.every(k => new RegExp('(^|[^a-z0-9])' + reEsc(k)).test(hay));
+  const hayOf = t => U.norm([t.assignee, t.owner, t.taskName, t.process, t.wr && t.wr.equip, t.doneBy, t.startedBy,
+    ...Object.values(t.proofs || {}).flat().map(x => x && x.by)].filter(Boolean).join(' | '));
+  const hl = (txt, tk) => !tk.length ? esc(txt) : String(txt || '').split(/(\s+)/).map(w => tk.some(k => U.norm(w).startsWith(k)) ? `<mark>${esc(w)}</mark>` : esc(w)).join('');
+  OP.q = OP.q || ''; OP.st = OP.st || 'all';
+  let lastKey = '', lastCa = null;
+
+  OP.render = function () {
+    const v = $('#opView'); if (!v || !document.body.classList.contains('op-mode')) return;
+    let plan = plans().find(p => p.id === OP.planId);
+    if (!plan) { plan = plans().find(p => p.id === Store.state.activePlanId) || plans()[0]; OP.planId = plan.id; }
+    if (!OP.date) { const n = new Date(), h = n.getHours(), d = new Date(n.getFullYear(), n.getMonth(), n.getDate()); if (h < 6) d.setDate(d.getDate() - 1); OP.date = U.toLocalISO(d.getTime()).slice(0, 10); OP.ca = h >= 6 && h < 14 ? 1 : h >= 14 && h < 22 ? 2 : 3; }
+    const res = Scheduler.schedule(plan), [ws, we] = shiftWin(OP.date, OP.ca), tk = toks(OP.q);
+    const inShift = t => { const r = res.R.get(t.id); return r && (r.end > r.start ? r.start < we && r.end > ws : r.start >= ws && r.start < we); };
+    const base = (tk.length ? plan.tasks.filter(t => wordHit(hayOf(t), tk)) : plan.tasks.filter(inShift))
+      .sort((a, b) => res.R.get(a.id).start - res.R.get(b.id).start || a.order - b.order);
+    const stOf = new Map(base.map(t => [t.id, statusOf(t, res.R.get(t.id))]));
+    const cnt = k => k === 'all' ? base.length : base.filter(t => stOf.get(t.id) === k).length;
+    const list = OP.st === 'all' ? base : base.filter(t => stOf.get(t.id) === OP.st);
+    /* người khớp tên */
+    const people = tk.length ? [...new Map(plan.tasks.flatMap(t => U.splitOwners(t.assignee)).filter(n => wordHit(U.norm(n), tk)).map(n => [U.norm(n), n])).values()].slice(0, 8) : [];
+    const key = [plan.id, OP.date, OP.ca, OP.st, U.norm(OP.q)].join('|'), anim = key !== lastKey; lastKey = key;
+    const fid = document.activeElement && document.activeElement.id, caret = fid === 'opQ' ? document.activeElement.selectionStart : null;
+    const prevCa = lastCa == null ? OP.ca : lastCa; lastCa = OP.ca;
+    const dd = OP.date.split('-').reverse().join('/');
+    v.innerHTML = `
+      <header class="rp-h">
+        <div class="rp-title"><span class="rp-logo">📋</span><div><b>Report ca</b><small>${esc(plan.name)}</small></div></div>
+        <button class="rp-pill" id="opName">👤 ${esc(myName() || 'Nhập tên của bạn')}</button>
+        <button class="rp-ico" id="rpDark" data-dark title="Sáng / tối">${darkIcon()}</button>
+        <button class="rp-pill" id="opBack">Planner</button>
+      </header>
+      <section class="rp-ctrl">
+        <label class="rp-search"><span>🔍</span><input id="opQ" value="${esc(OP.q)}" placeholder="Tìm tên người hoặc tên việc… (vd: ky)" autocomplete="off">${OP.q ? '<button id="rpClr" title="Xóa">✕</button>' : ''}</label>
+        <div class="rp-seg" id="rpSeg" style="--i:${prevCa - 1}"><i></i>${SHIFTS.map(s => `<button data-ca="${s.n}">Ca ${s.n}<small>${s.label}</small></button>`).join('')}</div>
+        <input type="date" id="opDate" value="${OP.date}">
+        <button class="rp-pill" id="opNow">⟳ Ca hiện tại</button>
+        ${plans().length > 1 ? `<select id="opPlan" style="grid-column:1/-1">${plans().map(p => `<option value="${esc(p.id)}" ${p.id === plan.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : ''}
+      </section>
+      <section class="rp-kpis">${[['all', 'Tất cả'], ['todo', 'Chưa làm'], ['run', 'Đang làm'], ['done', 'Xong'], ['late', 'Trễ']].map(([k, l]) =>
+        `<button class="rp-k ${OP.st === k ? 'on' : ''}" data-rpst="${k}" style="--kc:${KC[k]}"><span>${l}</span><b>${cnt(k)}</b></button>`).join('')}</section>
+      ${tk.length ? `<div class="rp-qinfo">🔎 <b>${base.length}</b> việc khớp “${esc(OP.q)}” (mọi ca)${people.map(n => `<button class="rp-person" data-rpq="${esc(n)}">👤 ${hl(n, tk)}</button>`).join('')}</div>` : ''}
+      <div class="rp-grid ${anim ? '' : 'rp-noanim'}">
+        ${list.length ? list.map((t, i) => {
+          const r = res.R.get(t.id), st = stOf.get(t.id), s = evStat(t), c = processColor(plan, t.process), w = t.wr || {}, sf = w.safety || {};
+          const pct = t.progress >= 100 ? 100 : Math.round(100 * s.h / s.n);
+          const loto = (sf.wiLoto || sf.lotoPts) ? '<span>🔒 Khóa LOTO</span>' : '';
+          const ptw = sf.ptw && !/^kh[oô]ng$/i.test(sf.ptw) ? '<span>📄 Giấy phép</span>' : '';
+          const ppe = (w.ppeItems || t.ppe || []).length ? '<span>🦺 Đồ bảo hộ</span>' : '';
+          return `<button class="rp-card st-${st}" data-op-task="${esc(t.id)}" style="--c:${c};--d:${Math.min(i, 14) * 35}ms">
+            <div class="rp-top"><span class="rp-time">${U.fmtHM(r.start)} – ${U.fmtHM(r.end)}</span>
+              ${tk.length || new Date(r.start).toDateString() !== new Date(r.end).toDateString() ? `<span class="rp-when">${U.fmtDM(r.start).slice(0, 5)} · Ca ${U.shiftOf(r.start)}</span>` : ''}
+              <span class="rp-tag">${esc(t.process)}</span><span class="rp-st ${st}">${ST[st]}</span></div>
+            <div class="rp-name">${hl(t.taskName, tk)}</div>
+            <div class="rp-meta">👤 ${t.assignee ? hl(t.assignee, tk) : '<i>Chưa có người</i>'}${w.equip ? ` · 📍 ${hl(w.equip, tk)}` : ''}</div>
+            ${loto || ptw || ppe ? `<div class="rp-chips">${loto}${ptw}${ppe}</div>` : ''}
+            <div class="rp-foot"><span>📷 ${s.h}/${s.n} ảnh</span><div class="rp-pb"><i style="width:${pct}%"></i></div><span>${pct}%</span></div>
+          </button>`; }).join('')
+        : `<div class="rp-empty"><b>${tk.length ? '🔍' : '☕'}</b>${tk.length ? `Không tìm thấy việc nào khớp “${esc(OP.q)}”` : `Ca ${OP.ca} ngày ${dd} không có việc${OP.st !== 'all' ? ' ở mục “' + ({ todo: 'Chưa làm', run: 'Đang làm', done: 'Xong', late: 'Trễ' })[OP.st] + '”' : ''}.`}</div>`}
+      </div>`;
+    requestAnimationFrame(() => { const sg = $('#rpSeg'); if (sg) sg.style.setProperty('--i', OP.ca - 1); });
+    if (fid === 'opQ') { const q = $('#opQ'); if (q) { q.focus(); try { q.setSelectionRange(caret, caret); } catch (e) { } } }
+  };
+
+  const v = $('#opView');
+  let qT;
+  v.addEventListener('input', e => {
+    if (e.target.id !== 'opQ') return;
+    clearTimeout(qT); const val = e.target.value;
+    qT = setTimeout(() => { OP.q = val; OP.st = 'all'; OP.render(); }, 180);
+  });
+  v.addEventListener('click', e => {
+    if (e.target.closest('#rpDark')) { e.stopPropagation(); return toggleDark(); }
+    if (e.target.closest('#rpClr')) { e.preventDefault(); OP.q = ''; OP.render(); const q = $('#opQ'); if (q) q.focus(); return; }
+    const k = e.target.closest('[data-rpst]'); if (k) { OP.st = k.dataset.rpst; return OP.render(); }
+    const pq = e.target.closest('[data-rpq]'); if (pq) { OP.q = pq.dataset.rpq; return OP.render(); }
+  });
+
+  /* ---------- Màn hình chi tiết: thanh tiến độ + chữ dễ hiểu ---------- */
+  function polishSheet() {
+    const s = OP.sheet; if (!s || !document.body.contains(s.m)) return;
+    const b = $('#opSheetB', s.m); if (!b) return;
+    const p = plans().find(x => x.id === s.planId), t = p && p.tasks.find(x => x.id === s.taskId); if (!t) return;
+    const r = Scheduler.schedule(p).R.get(t.id), st = evStat(t), pct = t.progress >= 100 ? 100 : Math.round(100 * st.h / st.n), sts = statusOf(t, r);
+    let h = b.querySelector('.rp-shead');
+    const html = `<div class="rp-ring" style="--p:${pct}"><b>${pct}%</b></div><div><strong>${ST[sts]}${t.progress >= 100 ? ' ✅' : ''}</strong>
+      <small>📷 Ảnh đã chụp: <b>${st.h}/${st.n}</b>${t.progress >= 100 ? '' : st.h >= st.n ? ' · Đủ ảnh – bấm <b>Đóng task</b> ở dưới' : ` · Còn thiếu <b>${st.n - st.h}</b> ảnh`}</small></div>`;
+    if (!h) { h = document.createElement('div'); h.className = 'rp-shead'; b.prepend(h); }
+    if (h.innerHTML !== html) h.innerHTML = html;
+    $$('.wr-gate', b).forEach(g => { const m = /còn (\d+) mục/.exec(g.textContent); if (m && !g.querySelector('button')) g.textContent = `🔒 Còn ${m[1]} việc chuẩn bị (chụp ảnh 🟡 / tick đồ bảo hộ) – làm đủ mới bấm “Bắt đầu” được`; });
+    $$('.wr-sub b', b).forEach(x => { if (/tick khi đã mang đủ/.test(x.textContent)) x.textContent = '🦺 Đồ bảo hộ – chạm để tick khi đã mặc đủ'; });
+    $$('.op-warn', b).forEach(x => { if (/Chưa cấu hình nơi lưu ảnh/.test(x.textContent)) x.textContent = '⚠ Chưa cài nơi lưu ảnh – báo người lập kế hoạch.'; });
+  }
+  const _ot = OP.openTask;
+  OP.openTask = function (...a) {
+    _ot.apply(this, a);
+    const b = OP.sheet && $('#opSheetB', OP.sheet.m); if (!b) return;
+    new MutationObserver(() => polishSheet()).observe(b, { childList: true });
+    polishSheet();
+  };
+  const _ar = App.render;
+  App.render = function (...a) { _ar.apply(this, a); try { polishSheet(); renameOp($('.topbar')); } catch (e) { } };
+  if (document.body.classList.contains('op-mode')) OP.render();
+}
+
+/* =====================================================================
+   2. TAB TẠO LỊCH: Tự động = task có sẵn · Tinh chỉnh = theo file
+   ===================================================================== */
+if (WR && WR.setup) {
+  const S = WR.setup;
+  let loading = false;
+  async function loadBuiltin() {
+    if (loading) return; loading = true;
+    try {
+      if (!window.XLSX) throw new Error('no xlsx');
+      const r = await fetch('./Mau_Work_Request.xlsx', { cache: 'no-store' });
+      if (!r.ok) throw new Error('404');
+      const d = WR._test.parseWB(XLSX.read(await r.arrayBuffer(), { type: 'array' }), 'Bộ task có sẵn');
+      if (!d.rows.length) throw new Error('empty');
+      d.builtin = true;
+      if (S.mode === 'auto') { WR.data = d; S.useTpl = false; }
+    } catch (e) { S.useTpl = true; WR.builtinFail = true; }
+    loading = false; WR.render();
+  }
+  function patchWR() {
+    const v = $('#wrView'); if (!v || !document.body.classList.contains('wr-mode')) return;
+    renameOp(v);
+    const a = v.querySelector('.w4-opt[data-v="auto"]'), c = v.querySelector('.w4-opt[data-v="custom"]');
+    if (a && !a.dataset.v6) { a.dataset.v6 = 1; a.innerHTML = `<span class="ic">⚡</span><span><b>Tự động – dùng task có sẵn</b>
+      <small>Hệ thống tự tạo lịch từ <b>danh sách task Shutdown đã cài sẵn</b> (bộ task chuẩn, thứ tự & an toàn đã setup). Bạn chỉ cần chọn ngày giờ và tải <b>lịch đi ca</b> để gán người.</small></span>`; }
+    if (c && !c.dataset.v6) { c.dataset.v6 = 1; c.innerHTML = `<span class="ic">🛠</span><span><b>Tinh chỉnh – theo file của bạn</b>
+      <small>Lịch tạo theo <b>file Work Request bạn tải lên</b>: task, thứ tự, yêu cầu an toàn do bạn điền. Có thể chỉnh Giai đoạn / Song song ngay trên web.</small></span>`; }
+    const h = v.querySelector('.wr-h');
+    if (h && !h.querySelector('[data-dark]')) { const b = document.createElement('button'); b.className = 'btn sm'; b.setAttribute('data-dark', ''); b.textContent = darkIcon(); b.onclick = toggleDark; h.insertBefore(b, h.querySelector('[data-wr="back"]')); }
+    if (S.mode === 'auto') {
+      if (WR.data && !WR.data.builtin) { WR.data = null; return WR.render(); }
+      const files = $$('.w4-file', v), box = files[1];
+      if (box) box.innerHTML = `<h5>📦 Bộ task có sẵn<em>tự động</em></h5>
+        <div class="v6-built">${WR.data ? `✅ <span><b>${WR.data.rows.length} task</b> chuẩn từ hệ thống – không cần tải file</span>`
+          : loading ? '⏳ Đang lấy bộ task có sẵn…' : WR.builtinFail ? `ℹ️ <span>Dùng bộ task mẫu <b>14 task</b> (chưa có file task chuẩn trên hệ thống)</span>` : '⏳ Đang chuẩn bị…'}</div>`;
+      if (!WR.data && !loading && !WR.builtinFail) loadBuiltin();
+    } else if (S.mode === 'custom' && WR.data && WR.data.builtin) { WR.data = null; WR.render(); }
+  }
+  const _r = WR.render;
+  WR.render = function (...a) { const r = _r.apply(this, a); try { patchWR(); } catch (e) { console.warn(e); } return r; };
+  const wv = $('#wrView');
+  if (wv) new MutationObserver(() => { try { patchWR(); } catch (e) { } }).observe(wv, { childList: true });
+  patchWR();
+}
+
+/* ---------- Admin: đổi tên nút ---------- */
+if (window.AdminView) { const _a = AdminView.render; AdminView.render = function (...a) { const r = _a.apply(this, a); renameOp($('#adView')); return r; }; }
+renameOp();
+console.log('[v6] đã nạp – Report ca + Dark mode');
+} catch (err) { console.error('[v6] lỗi:', err); }
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 220));
+})();
+</script>
+<!-- ===================== HẾT v6 ===================== -->
+
 </body>
 </html>
 
