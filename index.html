@@ -6115,6 +6115,190 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 420));
 </script>
 <!-- ===================== HẾT v9 ===================== -->
 
+<!-- =====================================================================
+     v10 – PPE nhận diện chữ viết tắt (mũ → Mũ bảo hộ, kính → Kính bảo hộ…)
+           + Panel task: chỉ còn 2 lựa chọn  ⤷ Sau task cụ thể (chọn nhiều, mọi process)  |  ▶ Task độc lập
+     DÁN NGAY TRƯỚC dòng </body> (sau dòng "HẾT v9")
+     ===================================================================== -->
+<style id="v10-style">
+.v10 #x_seq,.v10 #x_afterBox{display:none!important}
+.v10-opts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.v10-opts button{display:flex;gap:10px;align-items:flex-start;text-align:left;padding:11px 12px;border-radius:14px;border:1.5px solid var(--border);background:var(--glass-row,#fff);color:var(--text);cursor:pointer;transition:all .3s cubic-bezier(.22,1.2,.36,1)}
+.v10-opts button b{display:block;font-size:14px}.v10-opts button small{display:block;font-size:11.5px;color:var(--muted);line-height:1.35}
+.v10-opts button span.ic{font-size:20px;line-height:1}
+.v10-opts button.on{border-color:var(--accent,#2563eb);background:var(--accent,#2563eb);color:#fff;box-shadow:0 8px 20px rgba(10,132,255,.3)}
+.v10-opts button.on small{color:rgba(255,255,255,.88)}
+.v10-pick{margin-top:10px;animation:rpIn .35s cubic-bezier(.22,1.2,.36,1)}
+.v10-sel{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:30px;align-items:center}
+.v10-sel span{display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 11px;border-radius:999px;background:rgba(10,132,255,.12);color:#0a84ff;font-size:12.5px;font-weight:600}
+.v10-sel span em{font-style:normal;font-weight:400;opacity:.75}
+.v10-sel span button{border:0;width:20px;height:20px;border-radius:50%;background:rgba(10,132,255,.2);color:#0a84ff;cursor:pointer;font-size:11px}
+.v10-sel .none{color:var(--muted);font-size:12.5px}
+.v10-q{width:100%;border-radius:999px!important;padding:9px 14px!important;margin-bottom:6px}
+.v10-list{max-height:260px;overflow:auto;border-radius:14px;border:1px solid var(--border);background:var(--glass-row,#fff)}
+.v10-g{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:6px;padding:6px 10px;font-size:11.5px;font-weight:700;color:var(--muted);background:var(--panel2,#f8fafc);text-transform:uppercase;letter-spacing:.4px}
+.v10-g i{width:8px;height:8px;border-radius:50%}
+.v10-g em{font-style:normal;font-weight:500;text-transform:none;letter-spacing:0;color:var(--accent)}
+.v10-it{display:flex;align-items:center;gap:9px;width:100%;padding:7px 10px;border:0;border-top:1px solid var(--border);background:transparent;color:var(--text);text-align:left;cursor:pointer;font-size:13px}
+.v10-it:hover{background:rgba(10,132,255,.06)}
+.v10-it .ck{flex:none;width:20px;height:20px;border-radius:7px;border:1.5px solid rgba(120,120,128,.45);display:grid;place-items:center;font-size:12px;color:#fff;transition:all .2s}
+.v10-it.on .ck{background:#0a84ff;border-color:#0a84ff}
+.v10-it small{margin-left:auto;color:var(--muted);font-size:11.5px;white-space:nowrap}
+.v10-it.dis{opacity:.4;cursor:not-allowed}
+.v10-hint{font-size:12px;color:var(--muted);margin-top:6px}
+.v10-ind{margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(48,209,88,.1);font-size:12.5px}
+@media (max-width:600px){.v10-opts{grid-template-columns:1fr}}
+</style>
+<script>
+(function () {
+'use strict';
+/* =====================================================================
+   1. PPE: nhận diện chữ người dùng ghi → đúng món bảo hộ chuẩn
+   ===================================================================== */
+const NV = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+const PPE_RULES = [            // thứ tự quan trọng: món cụ thể trước, món chung sau
+  ['harness', 'Dây an toàn trên cao', /(day|dai) an toan|toan than|harness|chong roi/],
+  ['heat',    'Bảo hộ chịu nhiệt',   /chiu nhiet|cach nhiet|nhiet|heat|ao dai tay/],
+  ['chem',    'Bảo hộ hóa chất',     /hoa chat|tap de|chemical|chong axit|apron/],
+  ['loto',    'Khóa LOTO cá nhân',   /loto|khoa ca nhan|o khoa|padlock/],
+  ['vest',    'Áo phản quang',       /phan quang|vest|ao pq/],
+  ['mask',    'Khẩu trang / mặt nạ', /mat na|khau trang|mask|ho hap|n95|phin loc/],
+  ['ear',     'Nút / chụp tai',      /\btai\b|nut tai|chup tai|ear|tieng on|chong on/],
+  ['glasses', 'Kính bảo hộ',         /\bkinh\b|goggle|glass|che mat|tam che/],
+  ['gloves',  'Găng tay',            /\bgang\b|gang tay|glove/],
+  ['boots',   'Giày bảo hộ',         /giay|\bung\b|boot|shoe/],
+  ['helmet',  'Mũ bảo hộ',           /\bmu\b|\bnon\b|helmet|hard ?hat/],
+];
+function ppeId(raw) {
+  const n = NV(raw); if (!n) return '';
+  if (PPE_RULES.some(r => r[0] === String(raw))) return String(raw);
+  for (const [id, , re] of PPE_RULES) if (re.test(n)) return id;
+  return String(raw).trim();
+}
+const ppeLabel = id => (PPE_RULES.find(r => r[0] === id) || [, id])[1];
+const normList = arr => [...new Set((Array.isArray(arr) ? arr : []).map(ppeId).filter(Boolean))];
+window.PPE_DETECT = { ppeId, ppeLabel, normList };
+
+/* sửa dữ liệu task: t.ppe (id chuẩn) + t.wr.ppeItems (tên chuẩn) + tick đã có */
+function fixTask(t) {
+  if (!t) return t;
+  if (Array.isArray(t.ppe)) t.ppe = normList(t.ppe);
+  if (t.wr && Array.isArray(t.wr.ppeItems) && t.wr.ppeItems.length) {
+    const ids = normList(t.wr.ppeItems), labels = ids.map(ppeLabel);
+    const old = t.wrChecks && t.wrChecks.ppe;
+    if (old) { const nw = {}; Object.keys(old).forEach(k => { nw[ppeLabel(ppeId(k))] = old[k]; }); t.wrChecks = { ...t.wrChecks, ppe: nw }; }
+    t.wr = { ...t.wr, ppeItems: labels };
+    if (!t.ppe || !t.ppe.length) t.ppe = ids;
+  }
+  return t;
+}
+
+function boot() {
+try {
+const _nt = normalizeTask;
+normalizeTask = function (t) { return fixTask(_nt(t)); };
+Store.state.plans.forEach(p => p.tasks.forEach(fixTask));
+
+/* =====================================================================
+   2. PANEL TASK: 2 lựa chọn – Sau task cụ thể (nhiều, mọi process) | Task độc lập
+   ===================================================================== */
+const esc = s => U.esc(s ?? '');
+let st = null;   // { mode:'after'|'free', sel:Set, q:'' }
+
+const _dr = Drawer.render;
+Drawer.render = function (t, isNew) {
+  _dr.apply(this, arguments);
+  try { inject(t, isNew); } catch (e) { console.warn('[v10]', e); }
+};
+function depInputs() { return $$('#d_deps input[type=checkbox], #d_deps input'); }
+function setMode(v) {
+  const md = $('#d_mode'); if (!md) return;
+  if (md.value === 'fixed') return;
+  md.value = v; md.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function syncToForm() {
+  depInputs().forEach(i => { const want = st.mode === 'after' && st.sel.has(i.value); if (i.checked !== want) { i.checked = want; i.dispatchEvent(new Event('change', { bubbles: true })); } });
+  setMode(st.mode === 'after' && st.sel.size ? 'after_dependency' : 'parallel');
+}
+function inject(t, isNew) {
+  const box = $('#drawer .xseq'); if (!box || box.querySelector('.v10-opts')) return;
+  const md = $('#d_mode'); if (md && md.value === 'fixed') return;   // task cố định giờ: giữ nguyên
+  box.classList.add('v10');
+  const p = Store.plan(), ro = !!(window.Auth && !Auth.ok);
+  const blocked = isNew ? new Set() : Scheduler.descendants(p, t.id);
+  const allowed = new Set(depInputs().map(i => i.value));
+  let deps = (t.dependencyIds || []).slice();
+  /* task "nối tiếp" cũ → hiển thị là "sau task trước cùng process" */
+  if (!deps.length && !isNew && t.executionMode === 'sequential') {
+    const prev = p.tasks.filter(x => x.process === t.process && x.order < t.order && x.id !== t.id).sort((a, b) => b.order - a.order)[0];
+    if (prev) deps = [prev.id];
+  }
+  st = { mode: deps.length ? 'after' : 'free', sel: new Set(deps), q: '', ro, blocked, allowed, self: t.id, proc: t.process };
+  const wrap = document.createElement('div'); wrap.id = 'v10Box';
+  const head = box.querySelector('.xs-h');
+  head ? head.after(wrap) : box.prepend(wrap);
+  draw();
+  if (!ro) syncToForm();
+}
+function draw() {
+  const w = $('#v10Box'); if (!w || !st) return;
+  const p = Store.plan(), res = App.res, procName = ($('#d_process') && $('#d_process').value) || st.proc;
+  const byId = new Map(p.tasks.map(x => [x.id, x]));
+  const q = NV(st.q);
+  const cand = p.tasks.filter(x => x.id !== st.self).sort((a, b) => (a.process === procName ? 0 : 1) - (b.process === procName ? 0 : 1) || a.process.localeCompare(b.process) || a.order - b.order);
+  const groups = new Map();
+  cand.forEach(x => { if (q && !NV(x.taskName + ' ' + x.process + ' #' + x.order).includes(q)) return; if (!groups.has(x.process)) groups.set(x.process, []); groups.get(x.process).push(x); });
+  const fmt = x => { const r = res && res.R.get(x.id); return r ? 'xong ' + U.fmtDM(r.end) : ''; };
+  w.innerHTML = `
+    <div class="v10-opts">
+      <button type="button" data-v10="after" class="${st.mode === 'after' ? 'on' : ''}" ${st.ro ? 'disabled' : ''}><span class="ic">⤷</span><span><b>Sau task cụ thể</b><small>Chờ 1 hoặc nhiều task xong mới làm (trong hoặc ngoài process)</small></span></button>
+      <button type="button" data-v10="free" class="${st.mode === 'free' ? 'on' : ''}" ${st.ro ? 'disabled' : ''}><span class="ic">▶</span><span><b>Task độc lập</b><small>Không chờ task nào – làm ngay từ đầu Shutdown (hoặc theo mốc giờ)</small></span></button>
+    </div>
+    ${st.mode === 'after' ? `<div class="v10-pick">
+      <div class="v10-sel">${st.sel.size ? [...st.sel].map(id => { const x = byId.get(id); return x ? `<span>#${x.order} ${esc(x.taskName.length > 38 ? x.taskName.slice(0, 38) + '…' : x.taskName)} <em>${esc(x.process)}</em>${st.ro ? '' : `<button type="button" data-v10rm="${esc(id)}">✕</button>`}</span>` : ''; }).join('') : '<span class="none">⚠ Chưa chọn task nào – chọn ở danh sách bên dưới</span>'}</div>
+      ${st.ro ? '' : `<input class="v10-q" id="v10Q" placeholder="🔍 Tìm task theo tên / process / số…" value="${esc(st.q)}" autocomplete="off">
+      <div class="v10-list">${[...groups].map(([g, l]) => `<div class="v10-g"><i style="background:${processColor(p, g)}"></i>${esc(g)}${g === procName ? ' <em>· cùng process</em>' : ''}</div>
+        ${l.map(x => { const dis = st.blocked.has(x.id) || !st.allowed.has(x.id), on = st.sel.has(x.id);
+          return `<button type="button" class="v10-it ${on ? 'on' : ''} ${dis && !on ? 'dis' : ''}" data-v10t="${esc(x.id)}" ${dis && !on ? 'disabled title="Không chọn được – task này đang chạy sau task hiện tại (sẽ tạo vòng lặp)"' : ''}>
+            <span class="ck">${on ? '✓' : ''}</span>#${x.order} ${esc(x.taskName)}<small>${esc(fmt(x))}</small></button>`; }).join('')}`).join('') || '<div class="v10-hint" style="padding:10px">Không tìm thấy task.</div>'}</div>
+      <div class="v10-hint">Chọn được nhiều task. Task này chỉ bắt đầu khi <b>tất cả</b> task đã chọn xong.</div>`}
+    </div>` : `<div class="v10-ind">▶ Task chạy độc lập – không phụ thuộc task nào.</div>`}`;
+  if (document.activeElement && document.activeElement.id === 'v10Q') { }
+}
+document.addEventListener('click', e => {
+  if (!st || !e.target.closest || !e.target.closest('#v10Box')) return;
+  const m = e.target.closest('[data-v10]'), it = e.target.closest('[data-v10t]'), rm = e.target.closest('[data-v10rm]');
+  if (m) { st.mode = m.dataset.v10; }
+  else if (it && !it.disabled) { const id = it.dataset.v10t; st.sel.has(id) ? st.sel.delete(id) : st.sel.add(id); }
+  else if (rm) { st.sel.delete(rm.dataset.v10rm); }
+  else return;
+  e.preventDefault(); syncToForm(); draw();
+  const q = $('#v10Q'); if (q && st.q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+});
+document.addEventListener('input', e => {
+  if (e.target.id !== 'v10Q' || !st) return;
+  st.q = e.target.value; draw();
+  const q = $('#v10Q'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+});
+document.addEventListener('change', e => { if (e.target.id === 'd_process' && st) draw(); });
+
+/* chặn lưu khi chọn "Sau task cụ thể" mà chưa chọn task nào */
+const _sv = Drawer.save;
+Drawer.save = function (...a) {
+  if (st && $('#v10Box') && st.mode === 'after' && !st.sel.size) { toast('Chọn ít nhất 1 task phải xong trước, hoặc chọn “Task độc lập”.', 'warn'); return; }
+  if (st && $('#v10Box')) syncToForm();
+  return _sv.apply(this, a);
+};
+if (App.res) App.render();
+console.log('[v10] đã nạp – PPE nhận diện + 2 lựa chọn bắt đầu');
+} catch (err) { console.error('[v10] lỗi:', err); }
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 480));
+})();
+</script>
+<!-- ===================== HẾT v10 ===================== -->
+
+  
 </body>
 </html>
 
