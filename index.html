@@ -3326,7 +3326,7 @@ function drawSheet() {
       ${t.notes ? `<br>📝 ${U.esc(t.notes)}` : ''}${t.method ? `<br>🔧 ${U.esc(t.method)}` : ''}
       ${t.proofFolder ? `<br>📁 <a href="${U.esc(t.proofFolder)}" target="_blank" rel="noopener">Mở thư mục ảnh trên Drive</a>` : ''}</div>
     ${wait.length ? `<div class="op-warn">⚠ Task trước chưa đóng: ${wait.map(x => '#' + x.order + ' ' + U.esc(x.taskName)).join(', ')}</div>` : ''}
-    ${!uploadUrl() ? '<div class="op-warn">⚠ Chưa cấu hình nơi lưu ảnh – báo planner vào ☰ → "Cấu hình upload ảnh".</div>' : ''}
+    ${!uploadUrl() ? '<div class="op-warn">⚠ Chưa cài nơi lưu ảnh nên chưa chụp / upload được. Người lập kế hoạch vào Planner → ☰ → <b>Cấu hình upload ảnh (Google Drive)</b> và dán link Apps Script dạng https://script.google.com/macros/s/…/exec</div>' : ''}
     ${evOf(t).map(e => {
       const pr = proofsOf(t, e.id), loc = (OP.local.get(t.id + '|' + e.id) || []), need = Math.max(1, e.min || 1), ok = pr.length >= need;
       return `<div class="op-req ${ok ? 'ok' : ''}"><h5>${ok ? '✅' : '📷'} ${U.esc(e.label)}<span>${Math.min(pr.length, need)}/${need}</span></h5>
@@ -4407,7 +4407,7 @@ const evOf = t => (Array.isArray(t.evidence) && t.evidence.length ? t.evidence :
 const proofs = (t, id) => ((t.proofs || {})[id] || []);
 const chk = (t, k, x) => { const c = t.wrChecks && t.wrChecks[k]; return x === undefined ? c || null : c && c[x] || null; };
 function gate(t) {
-  const pre = evOf(t).filter(e => String(e.id).startsWith('pre:')), ppe = (t.wr && t.wr.ppeItems) || [];
+  const pre = evOf(t).filter(e => String(e.id).startsWith('pre:')), ppe = [];
   let missing = 0;
   pre.forEach(e => missing += Math.max(0, Math.max(1, e.min || 1) - proofs(t, e.id).length));
   ppe.forEach(x => { if (!chk(t, 'ppe', x)) missing++; });
@@ -4422,9 +4422,9 @@ function decorate(s) {
     <div class="wr-tags">${tagsOf(rowOf(t))}</div>
     ${need && lotoOn(sf) ? `<div class="wr-sub">WI LOTO: <b>${esc(sf.wiLoto || '—')}</b></div>` : ''}
     ${pts.length ? `<table class="wr-pt"><tr><th>#</th><th>Năng lượng</th><th>Điểm khóa</th></tr>${pts.map(x => `<tr><td>${x.stt}</td><td>${esc(x.energy)}</td><td>${esc(x.point)}</td></tr>`).join('')}</table>` : ''}
-    ${(t.wr.ppeItems || []).length ? `<div class="wr-sub"><b>PPE (${esc(sf.ppe)}) – tick khi đã mang đủ</b></div><div class="wr-ppe">${t.wr.ppeItems.map(x => { const c = chk(t, 'ppe', x); return `<button type="button" class="${c ? 'on' : ''}" data-wrppe="${esc(x)}" ${t.progress >= 100 ? 'disabled' : ''}>${c ? '✅' : '⬜'} ${esc(x)}</button>`; }).join('')}</div>` : ''}
+    
     ${g.has ? `<div class="wr-gate ${g.started ? 'ok' : g.preOk ? 'ready' : ''}">${g.started ? `▶ Đã bắt đầu${t.startedAt ? ' lúc ' + U.fmtDM(t.startedAt) : ''}${t.startedBy ? ' – ' + esc(t.startedBy) : ''}`
-      : g.preOk ? '<button type="button" class="op-close" data-wrstart>▶ Bắt đầu công việc</button>' : `🔒 Bước chuẩn bị còn ${g.missing} mục (ảnh 🟡 / PPE). Đủ mới được bắt đầu.`}</div>` : ''}`;
+      : g.preOk ? '<button type="button" class="op-close" data-wrstart>▶ Bắt đầu công việc</button>' : `🔒 Còn ${g.missing} ảnh chuẩn bị 🟡 – chụp đủ mới bấm “Bắt đầu” được.`}</div>` : ''}`;
   const info = b.querySelector('.op-info'); if (info) info.after(box); else b.prepend(box);
   if (g.has && !g.started) {
     $$('.op-req', b).forEach(r => { const i = r.querySelector('input[data-req]'); if (i && !String(i.dataset.req).startsWith('pre:')) { r.classList.add('wr-locked'); $$('input', r).forEach(x => x.disabled = true); } });
@@ -5578,7 +5578,7 @@ if (OP) {
       <small>📷 Ảnh đã chụp: <b>${st.h}/${st.n}</b>${t.progress >= 100 ? '' : st.h >= st.n ? ' · Đủ ảnh – bấm <b>Đóng task</b> ở dưới' : ` · Còn thiếu <b>${st.n - st.h}</b> ảnh`}</small></div>`;
     if (!h) { h = document.createElement('div'); h.className = 'rp-shead'; b.prepend(h); }
     if (h.innerHTML !== html) h.innerHTML = html;
-    $$('.wr-gate', b).forEach(g => { const m = /còn (\d+) mục/.exec(g.textContent); if (m && !g.querySelector('button')) g.textContent = `🔒 Còn ${m[1]} việc chuẩn bị (chụp ảnh 🟡 / tick đồ bảo hộ) – làm đủ mới bấm “Bắt đầu” được`; });
+    $$('.wr-gate', b).forEach(g => { const m = /còn (\d+) mục/.exec(g.textContent); if (m && !g.querySelector('button')) g.textContent = `🔒 Còn ${m[1]} việc chuẩn bị (chụp ảnh 🟡) – làm đủ mới bấm “Bắt đầu” được`; });
     $$('.wr-sub b', b).forEach(x => { if (/tick khi đã mang đủ/.test(x.textContent)) x.textContent = '🦺 Đồ bảo hộ – chạm để tick khi đã mặc đủ'; });
     $$('.op-warn', b).forEach(x => { if (/Chưa cấu hình nơi lưu ảnh/.test(x.textContent)) x.textContent = '⚠ Chưa cài nơi lưu ảnh – báo người lập kế hoạch.'; });
   }
