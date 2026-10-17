@@ -7261,6 +7261,150 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 <!-- ===================== HẾT v16 ===================== -->
 
   
+<!-- =====================================================================
+     v17 – REPORT CA: (1) popup "Bạn là ai?" bật chắc chắn mỗi lần mở
+                      (2) nút 🖼 Ảnh đã upload – xem toàn bộ ảnh + mở thư mục Google Drive
+     ===================================================================== -->
+<style id="v17-style">
+#v17Gal{position:fixed;inset:0;z-index:9998;display:flex;align-items:center;justify-content:center;padding:14px;background:rgba(15,23,42,.5);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+html body.op-mode>#v17Gal#v17Gal#v17Gal#v17Gal{display:flex!important}
+#v17Box{width:min(1100px,100%);max-height:92vh;display:flex;flex-direction:column;border-radius:26px;background:var(--glass-2,#fff);border:1px solid var(--glass-bd,#e5e7eb);box-shadow:0 30px 70px rgba(15,23,42,.35);animation:v16p .4s cubic-bezier(.22,1.2,.36,1);overflow:hidden}
+.v17-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:16px 18px;border-bottom:1px solid var(--border,#e5e7eb)}
+.v17-h h3{margin:0;font-size:20px;margin-right:auto}
+.v17-h select,.v17-h input{border-radius:999px!important;padding:8px 14px!important}
+.v17-btn{border:0;border-radius:999px;padding:9px 15px;font-size:13.5px;font-weight:600;cursor:pointer;background:rgba(120,120,128,.15);color:var(--text,#111);text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.v17-btn.pri{background:linear-gradient(135deg,#0a84ff,#5e5ce6);color:#fff}
+.v17-b{overflow:auto;padding:12px 18px 18px}
+.v17-sum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:13px;color:var(--muted,#64748b)}
+.v17-task{margin:14px 0 6px;font-weight:600;font-size:14px;display:flex;gap:8px;align-items:center}
+.v17-task i{width:8px;height:8px;border-radius:50%;background:var(--c)}
+.v17-task small{color:var(--muted,#64748b);font-weight:400}
+.v17-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.v17-ph{position:relative;display:block;border-radius:16px;overflow:hidden;background:rgba(120,120,128,.12);aspect-ratio:1/1;transition:transform .3s cubic-bezier(.22,1.2,.36,1),box-shadow .2s}
+.v17-ph:hover{transform:translateY(-3px);box-shadow:0 12px 24px rgba(15,23,42,.18)}
+.v17-ph img{width:100%;height:100%;object-fit:cover;display:block}
+.v17-ph span{position:absolute;left:0;right:0;bottom:0;padding:16px 8px 6px;font-size:11px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.7));line-height:1.35}
+.v17-empty{text-align:center;color:var(--muted,#64748b);padding:50px 10px;font-size:14.5px}
+.v17-cfg{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:10px 12px;border-radius:14px;background:rgba(10,132,255,.08);font-size:13px}
+.v17-cfg input{flex:1;min-width:220px}
+</style>
+<script>
+(function () {
+'use strict';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const NV = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+function plan() {
+  const OP = window.OperatorView, st = Store.state;
+  return st.plans.find(p => OP && p.id === OP.planId) || st.plans.find(p => p.id === st.activePlanId) || st.plans[0];
+}
+const folderOf = p => (p && p.driveFolder) || (Store.state.plans.find(x => x.driveFolder) || {}).driveFolder || '';
+const isAdmin = () => !!(window.Auth && Auth.ok);
+const fmt = t => { const d = new Date(t); return isFinite(d) ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : ''; };
+
+/* ---------------- GALLERY ---------------- */
+let gf = { who: 'me', q: '' };
+function photos(p) {
+  const out = [];
+  p.tasks.forEach(t => Object.entries(t.proofs || {}).forEach(([rid, arr]) => (arr || []).forEach(x => {
+    if (!x || !x.fid) return;
+    const ev = (t.evidence || []).find(e => e.id === rid);
+    out.push({ t, label: ev ? ev.label.replace(/^.*?· /, '') : rid, ...x });
+  })));
+  return out.sort((a, b) => (b.at || 0) - (a.at || 0));
+}
+function openGallery() {
+  closeGallery();
+  const ov = document.createElement('div'); ov.id = 'v17Gal';
+  ov.innerHTML = '<div id="v17Box"></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', e => { if (e.target === ov) closeGallery(); });
+  drawGallery();
+}
+function closeGallery() { const o = document.getElementById('v17Gal'); if (o) o.remove(); }
+function drawGallery() {
+  const box = document.getElementById('v17Box'); if (!box) return;
+  const p = plan(), me = NV(SafeStore.get('op.name') || ''), folder = folderOf(p);
+  let list = photos(p);
+  const total = list.length;
+  if (gf.who === 'me' && me) list = list.filter(x => NV(x.by) === me || NV(x.t.assignee).includes(me));
+  if (gf.q) { const q = NV(gf.q); list = list.filter(x => NV(x.t.taskName + ' ' + x.t.process + ' ' + x.by + ' ' + x.label).includes(q)); }
+  const groups = new Map(); list.forEach(x => { if (!groups.has(x.t.id)) groups.set(x.t.id, []); groups.get(x.t.id).push(x); });
+  box.innerHTML = `
+    <div class="v17-h"><h3>🖼 Ảnh đã upload</h3>
+      <select id="v17Who"><option value="me" ${gf.who === 'me' ? 'selected' : ''}>Ảnh của tôi${me ? '' : ' (chưa chọn tên)'}</option><option value="all" ${gf.who === 'all' ? 'selected' : ''}>Ảnh của tất cả</option></select>
+      <input id="v17Q" placeholder="🔍 Tìm task / người…" value="${esc(gf.q)}">
+      ${folder ? `<a class="v17-btn pri" href="${esc(folder)}" target="_blank" rel="noopener">📁 Mở thư mục Google Drive ↗</a>` : ''}
+      <button class="v17-btn" id="v17X">✕ Đóng</button></div>
+    <div class="v17-b">
+      ${isAdmin() ? `<div class="v17-cfg">📁 Link thư mục Drive chứa ảnh: <input id="v17F" value="${esc(folder)}" placeholder="https://drive.google.com/drive/folders/…"><button class="v17-btn pri" id="v17Save">Lưu link</button></div>`
+        : (!folder ? '<div class="v17-cfg">ℹ️ Chưa có link thư mục Drive – nhờ người lập kế hoạch (đã đăng nhập) dán link vào đây.</div>' : '')}
+      <div class="v17-sum"><span>📷 ${list.length} ảnh đang hiện</span><span>· ${total} ảnh trong kế hoạch “${esc(p.name)}”</span><span>· bấm vào ảnh để xem bản gốc trên Drive</span></div>
+      ${list.length ? [...groups.values()].map(g => { const t = g[0].t;
+        return `<div class="v17-task" style="--c:${processColor(p, t.process)}"><i></i>#${t.order} ${esc(t.taskName)} <small>· ${esc(t.process)} · ${g.length} ảnh</small></div>
+        <div class="v17-grid">${g.map(x => `<a class="v17-ph" href="${esc(x.url || 'https://drive.google.com/file/d/' + x.fid + '/view')}" target="_blank" rel="noopener">
+          <img loading="lazy" src="https://drive.google.com/thumbnail?id=${encodeURIComponent(x.fid)}&sz=w400" alt="" onerror="this.style.opacity=.15">
+          <span>${esc(x.label)}<br>👤 ${esc(x.by || '—')} · ${esc(fmt(x.at))}${x.ca ? ' · Ca ' + x.ca : ''}</span></a>`).join('')}</div>`; }).join('')
+      : `<div class="v17-empty">📭 ${gf.who === 'me' ? 'Bạn chưa upload ảnh nào.' : 'Chưa có ảnh nào được upload.'}</div>`}
+    </div>`;
+  box.querySelector('#v17X').onclick = closeGallery;
+  box.querySelector('#v17Who').onchange = e => { gf.who = e.target.value; drawGallery(); };
+  const q = box.querySelector('#v17Q');
+  q.oninput = e => { gf.q = e.target.value; clearTimeout(q._t); q._t = setTimeout(() => { drawGallery(); const n = document.getElementById('v17Q'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 250); };
+  const sv = box.querySelector('#v17Save');
+  if (sv) sv.onclick = () => {
+    const v = box.querySelector('#v17F').value.trim();
+    if (v && !/^https:\/\/drive\.google\.com\//.test(v)) { toast('Link phải bắt đầu bằng https://drive.google.com/', 'warn'); return; }
+    Store.commit('Lưu link thư mục Drive', () => { Store.state.plans.forEach(x => x.driveFolder = v); });
+    toast('Đã lưu link thư mục Drive.', 'ok'); drawGallery();
+  };
+}
+/* nút trên đầu Report ca */
+function addBtn() {
+  const h = document.querySelector('#opView .rp-h'); if (!h || h.querySelector('#v17Open')) return;
+  const b = document.createElement('button'); b.id = 'v17Open'; b.className = 'rp-pill'; b.textContent = '🖼 Ảnh đã upload';
+  b.onclick = e => { e.stopPropagation(); openGallery(); };
+  const back = h.querySelector('#opBack'); back ? h.insertBefore(b, back) : h.appendChild(b);
+}
+
+/* ---------------- POPUP NHẬP TÊN: bật chắc chắn ---------------- */
+let wasOn = false;
+function opOn() {
+  const v = document.getElementById('opView');
+  return document.body.classList.contains('op-mode') || !!(v && !v.classList.contains('hidden') && getComputedStyle(v).display !== 'none' && v.offsetHeight > 0);
+}
+function askName() {
+  if (document.getElementById('v16Ov')) return;
+  const n = document.getElementById('opName');
+  if (n) n.click();                     // v16 mở popup khi bấm nút tên
+  setTimeout(() => {
+    if (!document.getElementById('v16Ov') && opOn()) {   // dự phòng: hỏi bằng hộp đơn giản
+      const v = prompt('👋 Nhập đầy đủ họ tên của bạn:', SafeStore.get('op.name') || '');
+      if (v && v.trim()) { SafeStore.set('op.name', v.trim()); const OP = window.OperatorView; if (OP) { OP.person = U.norm(v.trim()); OP.st = 'all'; OP.render(); } }
+    }
+  }, 700);
+}
+function tick() {
+  const on = opOn();
+  if (on && !wasOn) setTimeout(askName, 250);
+  if (!on) closeGallery();
+  wasOn = on;
+  if (on) addBtn();
+}
+function boot() {
+  const OP = window.OperatorView;
+  if (OP) {
+    const _o = OP.open; OP.open = function (...a) { const r = _o.apply(this, a); wasOn = false; setTimeout(tick, 60); return r; };
+    const _r = OP.render; OP.render = function (...a) { const r = _r.apply(this, a); try { addBtn(); } catch (e) { } return r; };
+  }
+  setInterval(tick, 400);
+  tick();
+  console.log('[v17] đã nạp – popup tên chắc chắn + xem ảnh đã upload');
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 600)); else setTimeout(boot, 600);
+})();
+</script>
+<!-- ===================== HẾT v17 ===================== -->
+
 </body>
 </html>
 
