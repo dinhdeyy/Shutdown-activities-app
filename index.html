@@ -7142,6 +7142,122 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 1200));
 </script>
 <!-- ===================== HẾT v15 ===================== -->
 
+<!-- =====================================================================
+     v16 – REPORT CA: VỪA MỞ LÀ HIỆN POPUP NHẬP TÊN (chạy độc lập, không phụ thuộc v14/v15)
+     Cách nhận biết: theo dõi khi màn hình Report ca hiện lên (#opView / body.op-mode)
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v16-style">
+#v16Ov{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:rgba(15,23,42,.45);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);animation:v16f .25s ease}
+#v16Box{width:min(640px,100%);max-height:88vh;display:flex;flex-direction:column;border-radius:26px;padding:20px;
+  background:var(--glass-2,#fff);border:1px solid var(--glass-bd,#e5e7eb);box-shadow:0 30px 70px rgba(15,23,42,.35);animation:v16p .45s cubic-bezier(.22,1.2,.36,1)}
+#v16Box h3{margin:0 0 4px;font-size:22px;letter-spacing:-.4px}
+#v16Box p{margin:0 0 14px;color:var(--muted,#64748b);font-size:14px}
+#v16Q{width:100%;font-size:17px;padding:14px 18px;border-radius:999px;border:1.5px solid var(--border,#e2e8f0);background:var(--glass-row,#fff);color:var(--text,#111);outline:none}
+#v16Q:focus{border-color:#0a84ff;box-shadow:0 0 0 4px rgba(10,132,255,.18)}
+#v16L{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin:12px 0;overflow:auto;padding:2px}
+.v16-p{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:16px;border:1px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff);
+  color:var(--text,#111);text-align:left;cursor:pointer;font-size:14.5px;transition:transform .3s cubic-bezier(.22,1.2,.36,1),box-shadow .2s}
+.v16-p:hover,.v16-p.act{transform:translateY(-2px);box-shadow:0 10px 22px rgba(15,23,42,.12);border-color:#0a84ff}
+.v16-p .av{flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:12.5px;font-weight:700;color:#fff;background:linear-gradient(135deg,#0a84ff,#5e5ce6)}
+.v16-p small{display:block;color:var(--muted,#64748b);font-size:12px}
+.v16-none{grid-column:1/-1;color:var(--muted,#64748b);padding:10px;font-size:14px}
+.v16-f{display:flex;gap:8px;justify-content:space-between;align-items:center}
+.v16-f button{border:0;border-radius:999px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;background:rgba(120,120,128,.15);color:var(--text,#111)}
+@keyframes v16f{from{opacity:0}}
+@keyframes v16p{from{opacity:0;transform:translateY(20px) scale(.96)}}
+</style>
+<script>
+(function () {
+'use strict';
+const NV = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ini = n => String(n || '').trim().split(/\s+/).slice(-2).map(w => w[0] || '').join('').toUpperCase();
+const split = s => String(s || '').split(/\s*(?:\+|,|;|&|\/)\s*/).map(x => x.trim()).filter(Boolean);
+const OP = () => window.OperatorView;
+const getName = () => { try { return SafeStore.get('op.name') || ''; } catch (e) { return localStorage.getItem('op.name') || ''; } };
+const setName = v => { try { SafeStore.set('op.name', v); } catch (e) { localStorage.setItem('op.name', v); } };
+
+function people() {
+  const st = window.Store && Store.state; if (!st) return [];
+  const p = (st.plans || []).find(x => OP() && x.id === OP().planId) || (st.plans || []).find(x => x.id === st.activePlanId) || (st.plans || [])[0];
+  const m = new Map();
+  (p ? p.tasks : []).forEach(t => split(t.assignee).forEach(n => { const k = NV(n); if (!m.has(k)) m.set(k, { name: n, n: 0 }); m.get(k).n++; }));
+  return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+}
+let open = false, idx = 0;
+function close() { const o = document.getElementById('v16Ov'); if (o) o.remove(); open = false; }
+function apply(name) {
+  setName(name); close();
+  const op = OP(); if (!op) return;
+  op.person = (window.U && U.norm) ? U.norm(name) : NV(name); op.st = 'all';
+  try { op.render(); } catch (e) { }
+}
+function show() {
+  if (open) return; open = true; idx = 0;
+  try { if (typeof closeModal === 'function') closeModal(); } catch (e) { }
+  const all = people(), saved = NV(getName());
+  const ov = document.createElement('div'); ov.id = 'v16Ov';
+  ov.innerHTML = `<div id="v16Box" role="dialog" aria-modal="true">
+    <h3>👋 Bạn là ai?</h3><p>Chọn tên của bạn để xem tất cả việc được giao.</p>
+    <input id="v16Q" placeholder="🔍 Gõ vài chữ của tên (vd: ky, loc)…" autocomplete="off" value="">
+    <div id="v16L"></div>
+    <div class="v16-f"><button type="button" id="v16All">Xem tất cả việc theo ca</button>${saved ? `<button type="button" id="v16Keep">Giữ: ${esc(getName())}</button>` : ''}</div></div>`;
+  document.body.appendChild(ov);
+  const q = ov.querySelector('#v16Q'), L = ov.querySelector('#v16L');
+  const draw = () => {
+    const tk = NV(q.value).split(' ').filter(Boolean);
+    const list = all.filter(p => tk.every(k => new RegExp('(^| )' + k).test(NV(p.name))));
+    if (idx >= list.length) idx = 0;
+    L.innerHTML = list.map((p, i) => `<button type="button" class="v16-p ${i === idx && tk.length ? 'act' : ''}" data-n="${esc(p.name)}"><span class="av">${esc(ini(p.name))}</span><span>${esc(p.name)}${NV(p.name) === saved ? ' ✓' : ''}<small>${p.n} việc</small></span></button>`).join('')
+      || `<div class="v16-none">${all.length ? `Không có ai tên “${esc(q.value)}” trong kế hoạch.` : 'Kế hoạch chưa gán người cho task nào.'}</div>`;
+  };
+  q.addEventListener('input', () => { idx = 0; draw(); });
+  q.addEventListener('keydown', e => {
+    const b = [...L.querySelectorAll('[data-n]')];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); idx = (idx + (e.key === 'ArrowDown' ? 1 : -1) + b.length) % Math.max(1, b.length); draw(); }
+    if (e.key === 'Enter' && b[idx]) apply(b[idx].dataset.n);
+  });
+  ov.addEventListener('click', e => {
+    const b = e.target.closest('[data-n]'); if (b) return apply(b.dataset.n);
+    if (e.target.id === 'v16All') { close(); const op = OP(); if (op) { op.person = ''; try { op.render(); } catch (x) { } } }
+    if (e.target.id === 'v16Keep') apply(getName());
+  });
+  draw(); setTimeout(() => q.focus(), 60);
+}
+/* tắt popup cũ của v14/v15 nếu chúng cũng bật lên */
+function killOld() {
+  const mr = document.getElementById('modalRoot');
+  if (open && mr && /Bạn là ai/.test(mr.textContent) && typeof closeModal === 'function') closeModal();
+}
+/* phát hiện màn hình Report ca vừa mở */
+let wasOn = false;
+function check() {
+  const v = document.getElementById('opView');
+  const on = document.body.classList.contains('op-mode') || !!(v && !v.classList.contains('hidden') && v.offsetParent !== null);
+  if (on && !wasOn) setTimeout(show, 150);
+  if (!on && wasOn) close();
+  wasOn = on; killOld();
+}
+function boot() {
+  new MutationObserver(check).observe(document.body, { attributes: true, attributeFilter: ['class'], childList: true, subtree: false });
+  const v = document.getElementById('opView');
+  if (v) new MutationObserver(check).observe(v, { attributes: true, attributeFilter: ['class', 'style'] });
+  const mr = document.getElementById('modalRoot');
+  if (mr) new MutationObserver(killOld).observe(mr, { childList: true });
+  /* bấm nút tên ở đầu Report ca → mở lại popup */
+  window.addEventListener('click', e => {
+    if (e.target.closest && e.target.closest('#opView #opName')) { e.stopImmediatePropagation(); e.preventDefault(); show(); }
+  }, true);
+  check();
+  console.log('[v16] đã nạp – popup nhập tên Report ca');
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 300)); else setTimeout(boot, 300);
+})();
+</script>
+<!-- ===================== HẾT v16 ===================== -->
+
   
 </body>
 </html>
