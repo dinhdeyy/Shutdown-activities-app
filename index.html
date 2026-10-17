@@ -6586,6 +6586,371 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 800));
 </script>
 <!-- ===================== HẾT v13 ===================== -->
   
+<!-- =====================================================================
+     v14 – GÓI SỬA THEO YÊU CẦU 17/10
+       1. Tab Tạo lịch: bỏ "Yêu cầu setup riêng" + "Mục tiêu (giờ)", dấu * bắt buộc, link tải LDC
+       2. Planner: bỏ nút "Tự động sắp lịch"
+       3. Sửa task: bỏ "Task ưu tiên", PPE: Khẩu trang + Áo tạp dề hóa chất (icon mới),
+          "Sau task cụ thể" chọn được cả task CÙNG process, ô "Đổi thứ tự (STT)"
+       4. PPE: mọi task đang diễn ra trước khi ADS xong → tự thêm "Nút / chụp tai"
+       5. File Excel mới (bỏ cột "Cần yêu cầu an toàn?" và "Số ảnh hoàn thành") – app vẫn đọc đúng
+       6. Report ca: nhập họ tên → hiện mọi việc của người đó; đóng trước được, quá giờ thì khóa;
+          luôn dùng kế hoạch đang mở bên Planner; thẻ hiện tên người đã đóng
+       7. Đăng nhập: chỉ cần mật khẩu (123456)
+       8. Upload ảnh Drive: kiểm tra link, tự thử lại, báo lỗi rõ
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối v… khác)
+     ===================================================================== -->
+<style id="v14-style">
+#btnAuto{display:none!important}
+.w4-cfg{display:none!important}
+.v14-req{color:#ff3b30;font-weight:700;margin-left:2px}
+.v14-ldc{margin:6px 0 8px;padding:10px 12px;border-radius:12px;background:rgba(10,132,255,.08);font-size:12.5px;line-height:1.55}
+.v14-ldc ol{margin:4px 0 0;padding-left:18px}
+.v14-ldc a{font-weight:700;color:#0a84ff}
+#auU,label[for=auU]{display:none!important}
+.v14-ord{display:flex;align-items:center;gap:10px;margin:10px 0 0;padding:10px 12px;border-radius:14px;background:rgba(120,120,128,.08);font-size:13px}
+.v14-ord select{flex:1;max-width:340px}
+.v14-ico{display:inline-block;width:26px;height:26px}
+.v14-done{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#1f9d47;font-weight:600}
+.v14-lock{margin-top:10px;padding:11px 13px;border-radius:14px;background:rgba(255,59,48,.10);color:#d70015;font-weight:600;font-size:13.5px}
+.v14-early{margin-top:10px;padding:9px 12px;border-radius:12px;background:rgba(48,209,88,.10);color:#1f9d47;font-size:13px}
+</style>
+<script>
+(function () {
+'use strict';
+const LDC_LINK = 'https://nestle.sharepoint.com/:x:/r/teams/TAF_SCHEDULE_DATA/_layouts/15/Doc.aspx?sourcedoc=%7BB01C8F64-EB26-490C-83BE-5F493A25B47E%7D&file=LDC.xlsx&action=default&mobileredirect=true&DefaultItemOpen=1';
+const PASS_HASH = '2a5ba88771725d671b484dbda5d08dac1adc1092f9b942864babf40f2e068150';   // sha256('decaf-planner|123456')
+const OLD_AUTH_HASH = 'e710f3cafdaede8961a9e626bbbcf6a0e6435ac8e63691b7629774ba7039ba07';
+const NV = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+const esc = s => (window.U ? U.esc(s ?? '') : String(s ?? ''));
+const SVG = {
+  mask: '<svg class="v14-ico" viewBox="0 0 48 48"><path d="M8 18c6-4 26-4 32 0v8c0 7-8 12-16 12S8 33 8 26z" fill="#e8f1ff" stroke="#3b82f6" stroke-width="2.5"/><path d="M14 23h20M15 29h18" stroke="#93c5fd" stroke-width="2.2" stroke-linecap="round"/><path d="M8 19C4 19 3 23 4 26s4 4 4 4M40 19c4 0 5 4 4 7s-4 4-4 4" fill="none" stroke="#3b82f6" stroke-width="2.2"/></svg>',
+  apron: '<svg class="v14-ico" viewBox="0 0 48 48"><path d="M17 6h14v8l7 4v24H10V18l7-4z" fill="#fde68a" stroke="#d97706" stroke-width="2.4" stroke-linejoin="round"/><path d="M17 6c-4 0-6 4-6 7M31 6c4 0 6 4 6 7" fill="none" stroke="#d97706" stroke-width="2"/><rect x="18" y="24" width="12" height="8" rx="2" fill="#fff" stroke="#d97706" stroke-width="2"/><path d="M21 28h6" stroke="#16a34a" stroke-width="2.4" stroke-linecap="round"/></svg>',
+};
+
+async function sha256(s) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
+
+function boot() {
+try {
+/* =====================================================================
+   7. ĐĂNG NHẬP CHỈ BẰNG MẬT KHẨU
+   ===================================================================== */
+if (window.Auth) {
+  Auth.login = async function (u, p) {
+    if (p === undefined) p = u;
+    if (await sha256('decaf-planner|' + String(p || '')) !== PASS_HASH) return false;
+    this.ok = true; this.user = 'Decaf_support';
+    try { localStorage.setItem('sp.auth.v1', JSON.stringify({ u: this.user, h: OLD_AUTH_HASH, at: Date.now() })); } catch (e) { }
+    document.body.classList.remove('ro');
+    if (typeof App !== 'undefined' && App.res) App.render();
+    const b = document.getElementById('auBadge'); if (b) { b.className = 'au-badge rw'; b.textContent = '✓ Đã đăng nhập'; }
+    return true;
+  };
+  new MutationObserver(() => {
+    const p = document.getElementById('auP'); if (!p || p.dataset.v14) return;
+    p.dataset.v14 = 1; p.placeholder = 'Nhập mật khẩu'; p.inputMode = 'numeric';
+    const e = document.getElementById('auE'); if (e) e.textContent = '';
+    setTimeout(() => p.focus(), 60);
+  }).observe(document.getElementById('modalRoot') || document.body, { childList: true, subtree: true });
+}
+
+/* =====================================================================
+   4. PPE: icon & tên mới + tự thêm chụp tai khi ADS chưa xong
+   ===================================================================== */
+const D = window.PPE_DETECT;
+if (D) {
+  const oldLabel = D.ppeLabel;
+  D.ppeLabel = id => id === 'mask' ? 'Khẩu trang' : id === 'chem' ? 'Áo tạp dề hóa chất' : oldLabel(id);
+}
+function polishPPE(root) {
+  (root || document).querySelectorAll('#drawer .ppe, #drawer [data-ppe], .wr-ppe button, .ppe-btn').forEach(b => {
+    const t = NV(b.textContent);
+    if (/khau trang|mat na/.test(t) && !b.dataset.v14) { b.dataset.v14 = 1; swap(b, SVG.mask, 'Khẩu trang'); }
+    else if (/hoa chat/.test(t) && !b.dataset.v14) { b.dataset.v14 = 1; swap(b, SVG.apron, b.closest('.wr-ppe') ? b.textContent.replace(/Bảo hộ hóa chất|Găng hóa chất|Tạp dề/i, 'Áo tạp dề hóa chất') : 'Áo tạp dề hóa chất'); }
+  });
+}
+function swap(b, svg, label) {
+  const tick = /^[✅⬜]/.test(b.textContent.trim()) ? b.textContent.trim().slice(0, 1) + ' ' : '';
+  if (tick) { b.innerHTML = `${tick}${label}`; return; }
+  b.innerHTML = `<span style="display:block;line-height:0;margin-bottom:4px">${svg}</span>${label}`;
+}
+let adsBusy = false;
+function ensureEar() {
+  if (adsBusy || typeof Store === 'undefined' || !Store.plan) return;
+  const p = Store.plan(); if (!p || !p.tasks.length) return;
+  let res; try { res = App.res && App.res.R ? App.res : Scheduler.schedule(p); } catch (e) { return; }
+  const ads = p.tasks.filter(t => NV(t.process) === 'ads'); if (!ads.length) return;
+  const adsEnd = Math.max(...ads.map(t => (res.R.get(t.id) || {}).end || 0));
+  let changed = false;
+  p.tasks.forEach(t => {
+    const r = res.R.get(t.id); if (!r || r.start >= adsEnd) return;
+    t.ppe = Array.isArray(t.ppe) ? t.ppe : [];
+    if (!t.ppe.includes('ear')) { t.ppe.push('ear'); changed = true; }
+    if (t.wr) { const it = t.wr.ppeItems || []; if (!it.some(x => /tai/i.test(x))) { t.wr.ppeItems = [...it, 'Nút / chụp tai']; changed = true; } }
+  });
+  if (changed) { adsBusy = true; try { Store.save && Store.save(); } catch (e) { } adsBusy = false; }
+}
+
+/* =====================================================================
+   5. FILE EXCEL MỚI: bỏ cột "Cần YC an toàn?" & "Số ảnh hoàn thành"
+   ===================================================================== */
+const WR = window.WorkRequest;
+let fixedSrc = null;
+function fixData() {
+  const d = WR && WR.data; if (!d || fixedSrc === d) return; fixedSrc = d;
+  d.missingCols = (d.missingCols || []).filter(c => !/an toan|anh hoan thanh/.test(NV(c)));
+  d.rows.forEach(r => {
+    const s = r.safety = r.safety || {};
+    if (!s.need) s.need = [s.mode, s.wiLoto, s.lotoPts, s.ptw && !/^khong$/i.test(NV(s.ptw)) ? s.ptw : '', s.ppe].some(x => String(x || '').trim() && x !== '—') ? 'Có' : 'Không';
+    if (YES(s.need)) { if (!s.mode) s.mode = 'Mode 0'; if (!s.ptw) s.ptw = 'Không'; if (!s.risk) s.risk = 'Không'; if (!s.ppe) s.ppe = 'Cơ bản'; }
+    r.photos = r.photos || {}; if (!r.photos.done) r.photos.done = '1';
+  });
+}
+const YES = v => ['co', 'yes', 'x', 'true', '1'].includes(NV(v));
+
+/* =====================================================================
+   1. TAB TẠO LỊCH: gọn lại
+   ===================================================================== */
+function patchWR() {
+  const v = document.getElementById('wrView'); if (!v || !document.body.classList.contains('wr-mode')) return;
+  const t = v.querySelector('#wrTarget'); if (t) { const l = t.closest('label'); if (l) l.style.display = 'none'; }
+  const info = v.querySelector('.w4-info'); if (info) info.style.gridTemplateColumns = '2fr 1.4fr';
+  [['#wrName', 'Tên kế hoạch'], ['#wrStart', 'Bắt đầu Shutdown']].forEach(([s, txt]) => {
+    const i = v.querySelector(s); if (!i) return; const l = i.closest('label');
+    if (l && !l.querySelector('.v14-req')) { l.firstChild.nodeValue = txt; l.insertBefore(Object.assign(document.createElement('span'), { className: 'v14-req', textContent: '*' }), l.childNodes[1]); }
+    i.required = true;
+  });
+  const ldcBox = [...v.querySelectorAll('.w4-file')].find(b => /lich di ca/.test(NV(b.textContent)));
+  if (ldcBox && !ldcBox.querySelector('.v14-ldc')) {
+    const p = ldcBox.querySelector('p');
+    const box = document.createElement('div'); box.className = 'v14-ldc';
+    box.innerHTML = `<b>Cách lấy file lịch đi ca:</b><ol>
+      <li>Mở <a href="${LDC_LINK}" target="_blank" rel="noopener">file LDC trên SharePoint ↗</a></li>
+      <li>Chọn <b>File → Tạo bản sao → Tải xuống bản sao</b></li>
+      <li>Bấm <b>📤 Upload LDC.xlsx</b> bên dưới và chọn file vừa tải</li></ol>`;
+    if (p && !/✅/.test(p.textContent)) p.replaceWith(box); else if (p) p.after(box);
+  }
+  /* nút Tạo ngay: bắt buộc tên + ngày */
+  const go = v.querySelector('[data-w5="go"],[data-w4="go"]');
+  if (go) {
+    const name = (v.querySelector('#wrName') || {}).value || '', start = (v.querySelector('#wrStart') || {}).value || '';
+    const miss = [!name.trim() && 'Tên kế hoạch', !start && 'Ngày bắt đầu'].filter(Boolean);
+    if (miss.length) { go.disabled = true; go.title = 'Thiếu: ' + miss.join(', '); }
+  }
+}
+if (WR) {
+  const _r = WR.render;
+  WR.render = function (...a) { fixData(); const out = _r.apply(this, a); try { patchWR(); } catch (e) { console.warn('[v14]', e); } return out; };
+  document.addEventListener('input', e => { if (e.target && (e.target.id === 'wrName' || e.target.id === 'wrStart')) { WR.form[e.target.id === 'wrName' ? 'name' : 'start'] = e.target.value; const go = document.querySelector('#wrView [data-w5="go"]'); if (go) { const ok = (document.getElementById('wrName').value || '').trim() && document.getElementById('wrStart').value; go.disabled = !ok; } } }, true);
+  document.addEventListener('click', e => {
+    const go = e.target.closest && e.target.closest('#wrView [data-w5="go"],#wrView [data-w4="go"]'); if (!go) return;
+    const n = (document.getElementById('wrName') || {}).value || '';
+    if (!n.trim()) { e.stopImmediatePropagation(); e.preventDefault(); toast('Nhập Tên kế hoạch (*) trước khi tạo.', 'warn'); document.getElementById('wrName').focus(); }
+  }, true);
+  if (document.body.classList.contains('wr-mode')) WR.render();
+}
+
+/* =====================================================================
+   3. PANEL SỬA TASK
+   ===================================================================== */
+function patchDrawer(t) {
+  const d = document.getElementById('drawer'); if (!d) return;
+  /* bỏ "Task ưu tiên" */
+  d.querySelectorAll('label, .row, .fl, div').forEach(el => {
+    if (el.children.length > 6) return;
+    const tx = NV(el.textContent);
+    if (/^⚑?\s*task uu tien/.test(tx.replace(/^[^a-z⚑]+/, '')) || (/task uu tien/.test(tx) && /doi task nay/.test(tx) && tx.length < 120)) el.style.display = 'none';
+  });
+  polishPPE(d);
+  /* "Sau task cụ thể": mở khóa task cùng process */
+  d.querySelectorAll('.v10-it.dis').forEach(b => {
+    if (/vong lap/.test(NV(b.title))) return;
+    b.classList.remove('dis'); b.disabled = false; b.removeAttribute('title');
+  });
+  /* Đổi thứ tự */
+  if (!t || !t.id || App.drawerIsNew || d.querySelector('.v14-ord')) return;
+  const p = Store.plan(), list = p.tasks.slice().sort((a, b) => a.order - b.order);
+  const box = document.createElement('div'); box.className = 'v14-ord';
+  box.innerHTML = `<span>🔢 <b>Đổi thứ tự</b></span><select id="v14Ord">${list.map(x => `<option value="${x.order}" ${x.id === t.id ? 'selected' : ''}>#${x.order}${x.id === t.id ? ' (hiện tại)' : ' – ' + esc(x.taskName.slice(0, 40))}</option>`).join('')}</select>`;
+  const anchor = d.querySelector('.v13-hero') || d.querySelector('.drawer-b > *');
+  if (anchor) anchor.after(box);
+  box.querySelector('select').onchange = e => {
+    const to = +e.target.value, id = t.id;
+    if (window.Auth && !Auth.ok) { toast('Cần đăng nhập để đổi thứ tự.', 'warn'); return; }
+    Store.commit('Đổi thứ tự task', pl => {
+      const arr = pl.tasks.slice().sort((a, b) => a.order - b.order), i = arr.findIndex(x => x.id === id); if (i < 0) return false;
+      const [m] = arr.splice(i, 1); arr.splice(Math.max(0, Math.min(arr.length, to - 1)), 0, m);
+      arr.forEach((x, k) => { x.order = k + 1; });
+    });
+    toast(`Đã chuyển task sang vị trí #${to}`, 'ok');
+    setTimeout(() => Drawer.open(id), 50);
+  };
+}
+/* lưu phụ thuộc cùng process (form gốc có thể không có ô cho các task này) */
+let pendDeps = null;
+document.addEventListener('click', e => {
+  if (!e.target.closest || !e.target.closest('#v10Box')) return;
+  setTimeout(() => {
+    const sel = [...document.querySelectorAll('#v10Box .v10-it.on')].map(b => b.dataset.v10t);
+    const after = !!document.querySelector('#v10Box [data-v10="after"].on');
+    pendDeps = { id: App.drawerTaskId, deps: after ? sel : [] };
+  }, 0);
+}, true);
+if (typeof Drawer !== 'undefined') {
+  const _dr = Drawer.render;
+  Drawer.render = function (t) { const o = _dr.apply(this, arguments); try { patchDrawer(t); } catch (e) { console.warn('[v14]', e); } return o; };
+  const _sv = Drawer.save;
+  Drawer.save = function (...a) {
+    const pd = pendDeps && pendDeps.id === App.drawerTaskId ? pendDeps : null;
+    const out = _sv.apply(this, a);
+    if (pd && pd.id) {
+      Store.commit('Gán task phải xong trước', pl => {
+        const t = pl.tasks.find(x => x.id === pd.id); if (!t) return false;
+        const desc = Scheduler.descendants(pl, t.id);
+        const deps = pd.deps.filter(id => id !== t.id && !desc.has(id) && pl.tasks.some(x => x.id === id));
+        t.dependencyIds = deps; t.executionMode = deps.length ? 'after_dependency' : 'parallel';
+      });
+    }
+    pendDeps = null; return out;
+  };
+  new MutationObserver(() => polishPPE(document.getElementById('drawer'))).observe(document.body, { childList: true, subtree: false });
+}
+
+/* =====================================================================
+   6. REPORT CA: theo người, luôn link kế hoạch đang mở, khóa đóng trễ
+   ===================================================================== */
+const OP = window.OperatorView;
+if (OP) {
+  const _open = OP.open;
+  OP.open = function (...a) {
+    OP.planId = Store.state.activePlanId;             // luôn dùng kế hoạch đang mở bên Planner
+    const r = _open.apply(this, a);
+    setTimeout(() => {
+      const nm = SafeStore.get('op.name') || '';
+      if (!nm) askFullName(); else selectPerson(nm);
+    }, 80);
+    return r;
+  };
+  function people() {
+    const p = Store.state.plans.find(x => x.id === OP.planId) || Store.plan(), m = new Map();
+    p.tasks.forEach(t => U.splitOwners(t.assignee).forEach(n => m.set(U.norm(n), n)));
+    return m;
+  }
+  function selectPerson(nm) {
+    const key = U.norm(nm), m = people();
+    if (m.has(key)) { OP.person = key; OP.st = 'all'; }
+    OP.render();
+  }
+  function askFullName() {
+    const names = [...people().values()].sort((a, b) => a.localeCompare(b, 'vi'));
+    const md = openModal(`<div class="modal-h"><h3>👋 Bạn là ai?</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b"><p class="muted" style="margin-top:0">Nhập <b>đầy đủ họ tên</b> – hệ thống sẽ hiện tất cả việc của bạn.</p>
+        <input id="v14Nm" list="v14Nms" style="width:100%;font-size:17px;padding:13px" placeholder="VD: Chu Văn Kỳ" autocomplete="off">
+        <datalist id="v14Nms">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+        <div id="v14NmE" style="color:#d70015;font-size:13px;min-height:18px;margin-top:6px"></div></div>
+      <div class="modal-f"><button class="btn primary lg" id="v14NmOk" style="width:100%">Xem việc của tôi</button></div>`, 'sm');
+    const ok = () => {
+      const v = md.querySelector('#v14Nm').value.trim().replace(/\s+/g, ' ');
+      if (v.split(' ').length < 2) { md.querySelector('#v14NmE').textContent = 'Nhập đầy đủ họ và tên.'; return; }
+      SafeStore.set('op.name', v); closeModal(); selectPerson(v);
+      if (!people().has(U.norm(v))) toast('Chưa có việc nào gán cho tên này – hiện việc theo ca.', 'warn');
+    };
+    md.querySelector('#v14NmOk').onclick = ok;
+    md.addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
+    setTimeout(() => md.querySelector('#v14Nm').focus(), 80);
+  }
+  document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#opView #opName')) { e.stopImmediatePropagation(); askFullName(); } }, true);
+  /* đồng bộ khi đổi kế hoạch bên Planner */
+  const _ar = App.render;
+  App.render = function (...a) {
+    const o = _ar.apply(this, a);
+    try {
+      if (!document.body.classList.contains('op-mode') && OP.planId !== Store.state.activePlanId) OP.planId = Store.state.activePlanId;
+      ensureEar(); polishPPE();
+    } catch (e) { }
+    return o;
+  };
+  /* thẻ việc: hiện người đã đóng */
+  const _rr = OP.render;
+  OP.render = function (...a) {
+    const o = _rr.apply(this, a);
+    try {
+      const p = Store.state.plans.find(x => x.id === OP.planId); if (!p) return o;
+      document.querySelectorAll('#opView .rp-card').forEach(c => {
+        const t = p.tasks.find(x => x.id === c.dataset.opTask); if (!t || t.progress < 100 || c.querySelector('.v14-done')) return;
+        const f = c.querySelector('.r7-foot') || c.lastElementChild;
+        f.insertAdjacentHTML('beforebegin', `<div class="v14-done">✅ Đóng bởi ${esc(t.doneBy || '—')}${t.doneAt ? ' · ' + U.fmtDM(t.doneAt) : ''}</div>`);
+      });
+    } catch (e) { }
+    return o;
+  };
+  /* khóa đóng trễ – cho phép đóng trước giờ */
+  function guardSheet() {
+    const s = OP.sheet; if (!s || !document.body.contains(s.m)) return;
+    const p = Store.state.plans.find(x => x.id === s.planId), t = p && p.tasks.find(x => x.id === s.taskId); if (!t || t.progress >= 100) return;
+    const r = Scheduler.schedule(p).R.get(t.id), now = Date.now(), f = s.m.querySelector('#opSheetF'); if (!r || !f) return;
+    const admin = window.Auth && Auth.ok;
+    f.querySelectorAll('.v14-lock,.v14-early').forEach(x => x.remove());
+    const btn = f.querySelector('#opDone');
+    if (now > r.end && !admin) {
+      if (btn) { btn.disabled = true; btn.textContent = '🔒 Đã quá giờ kết thúc'; }
+      f.insertAdjacentHTML('afterbegin', `<div class="v14-lock">⏰ Việc này kết thúc lúc ${U.fmtDM(r.end)} – không thể tự đóng trễ. Báo trưởng ca để xác nhận.</div>`);
+    } else if (now < r.start) {
+      f.insertAdjacentHTML('afterbegin', `<div class="v14-early">⏩ Bạn đang làm trước kế hoạch (bắt đầu ${U.fmtDM(r.start)}) – vẫn được đóng khi đủ ảnh.</div>`);
+    }
+  }
+  const _ot = OP.openTask;
+  OP.openTask = function (...a) {
+    const o = _ot.apply(this, a);
+    const f = OP.sheet && OP.sheet.m.querySelector('#opSheetF');
+    if (f) new MutationObserver(() => { if (!f.querySelector('.v14-lock,.v14-early')) guardSheet(); }).observe(f, { childList: true });
+    const b = OP.sheet && OP.sheet.m.querySelector('#opSheetB');
+    if (b) new MutationObserver(() => polishPPE(b)).observe(b, { childList: true, subtree: true });
+    guardSheet(); polishPPE(OP.sheet && OP.sheet.m);
+    return o;
+  };
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('#opDone'); if (!b || !OP.sheet) return;
+    const p = Store.state.plans.find(x => x.id === OP.sheet.planId), t = p && p.tasks.find(x => x.id === OP.sheet.taskId);
+    const r = t && Scheduler.schedule(p).R.get(t.id);
+    if (r && Date.now() > r.end && !(window.Auth && Auth.ok)) { e.stopImmediatePropagation(); e.preventDefault(); toast('Đã quá giờ kết thúc – không thể đóng trễ.', 'err'); }
+  }, true);
+}
+
+/* =====================================================================
+   8. UPLOAD ẢNH GOOGLE DRIVE: kiểm tra link + tự thử lại
+   ===================================================================== */
+const _fetch = window.fetch.bind(window);
+window.fetch = async function (input, init) {
+  const url = typeof input === 'string' ? input : (input && input.url) || '';
+  if (/drive\.google\.com\/drive\/folders/.test(url)) {
+    throw new Error('Link sai: đang dùng link THƯ MỤC Drive. Cần link Web App Apps Script dạng https://script.google.com/macros/s/…/exec');
+  }
+  if (!/script\.google(usercontent)?\.com\/macros\//.test(url) || !init || String(init.method || 'GET').toUpperCase() !== 'POST') return _fetch(input, init);
+  if (!/\/exec(\?|$)/.test(url)) throw new Error('Link Apps Script phải kết thúc bằng /exec (không dùng link /dev hoặc link trang soạn code).');
+  const opt = { ...init, redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' } };
+  let last;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const r = await _fetch(url, opt);
+      const txt = await r.clone().text();
+      if (/<html|accounts\.google\.com|ServiceLogin/i.test(txt)) throw new Error('Apps Script yêu cầu đăng nhập Google → Deploy lại với "Who has access: Anyone".');
+      return r;
+    } catch (e) { last = e; if (/Anyone|exec|Link sai/.test(e.message)) break; await new Promise(z => setTimeout(z, 1200 * (i + 1))); }
+  }
+  throw new Error(last && /Failed to fetch/i.test(last.message) ? 'Không gửi được ảnh: mạng công ty chặn script.google.com hoặc link sai. Thử bằng 4G.' : (last ? last.message : 'Upload lỗi'));
+};
+
+ensureEar();
+if (typeof App !== 'undefined' && App.res) App.render();
+console.log('[v14] đã nạp – gói sửa 17/10');
+} catch (err) { console.error('[v14] lỗi:', err); }
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 1000));
+})();
+</script>
+<!-- ===================== HẾT v14 ===================== -->
+
   
 </body>
 </html>
