@@ -6951,6 +6951,197 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 1000));
 </script>
 <!-- ===================== HẾT v14 ===================== -->
 
+<!-- =====================================================================
+     v15 – SỬA 17/10 (lần 2)
+       1. "Sau task cụ thể": chọn được NHIỀU task, kể cả task CÙNG process
+          (nếu task chọn đang nằm phía sau → tự dời task hiện tại ra sau nó, không bị vòng lặp)
+       2. Ẩn khung cũ "Chạy sau task (chỉ bắt đầu khi…)" trong phần Chi tiết
+       3. PPE: gộp các món trùng (Mũ = Mũ bảo hộ, Kính = Kính bảo hộ, Ủng = Giày bảo hộ…)
+       4. Report ca: vừa mở là hiện ngay bảng chọn tên
+     DÁN NGAY TRƯỚC dòng </body> (sau khối v14)
+     ===================================================================== -->
+<style id="v15-style">
+.v15-hide{display:none!important}
+.v10-it.v15-move small::after{content:' · sẽ dời task này ra sau';color:#ff9f0a}
+.v15-pick .modal-b{padding-top:6px}
+.v15-q{width:100%;font-size:16px;padding:12px 16px!important;border-radius:999px!important;margin-bottom:10px}
+.v15-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;max-height:52vh;overflow:auto;padding:2px}
+.v15-p{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:16px;border:1px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff);
+  color:var(--text);text-align:left;cursor:pointer;font-size:14.5px;transition:transform .3s cubic-bezier(.22,1.2,.36,1),box-shadow .2s,border-color .2s}
+.v15-p:hover{transform:translateY(-2px);box-shadow:0 10px 22px rgba(15,23,42,.12)}
+.v15-p.on{border-color:#0a84ff;box-shadow:0 0 0 2px #0a84ff}
+.v15-p .av{flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:12.5px;font-weight:700;color:#fff;background:linear-gradient(135deg,#0a84ff,#5e5ce6)}
+.v15-p small{display:block;color:var(--muted);font-size:12px}
+.v15-none{grid-column:1/-1;color:var(--muted);font-size:13.5px;padding:10px}
+</style>
+<script>
+(function () {
+'use strict';
+const NV = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+const esc = s => U.esc(s ?? '');
+const ini = n => String(n || '').trim().split(/\s+/).slice(-2).map(w => w[0] || '').join('').toUpperCase();
+
+/* ===================== PPE: gộp món trùng ===================== */
+const RULES = [
+  ['harness', 'Dây an toàn trên cao', /(day|dai) an toan|toan than|harness/],
+  ['heat', 'Bảo hộ chịu nhiệt', /chiu nhiet|cach nhiet|ao dai tay|heat/],
+  ['chem', 'Áo tạp dề hóa chất', /hoa chat|tap de|chemical|apron/],
+  ['loto', 'Khóa LOTO cá nhân', /loto|khoa ca nhan|padlock/],
+  ['vest', 'Áo phản quang', /phan quang|vest/],
+  ['mask', 'Khẩu trang', /mat na|khau trang|mask|ho hap|n95/],
+  ['ear', 'Nút / chụp tai', /\btai\b|chup tai|nut tai|ear|chong on|tieng on/],
+  ['glasses', 'Kính bảo hộ', /\bkinh\b|goggle|glass/],
+  ['gloves', 'Găng tay', /\bgang\b|glove/],
+  ['boots', 'Giày bảo hộ', /giay|\bung\b|boot|shoe/],
+  ['helmet', 'Mũ bảo hộ', /\bmu\b|\bnon\b|helmet|hard ?hat/],
+];
+const IDS = RULES.map(r => r[0]);
+function pid(raw) {
+  const s = String(raw ?? '').trim(); if (!s) return '';
+  if (IDS.includes(s)) return s;
+  const n = NV(s); for (const [id, , re] of RULES) if (re.test(n)) return id;
+  return s;
+}
+const plabel = id => (RULES.find(r => r[0] === id) || [, id])[1];
+function fixPPE(t) {
+  if (!t) return;
+  if (Array.isArray(t.ppe)) { const v = [...new Set(t.ppe.map(pid).filter(Boolean))]; if (v.join() !== t.ppe.join()) t.ppe = v; }
+  if (t.wr && Array.isArray(t.wr.ppeItems)) {
+    const v = [...new Set(t.wr.ppeItems.map(x => plabel(pid(x))))];
+    if (v.join() !== t.wr.ppeItems.join()) {
+      const old = t.wrChecks && t.wrChecks.ppe;
+      if (old) { const nw = {}; Object.keys(old).forEach(k => nw[plabel(pid(k))] = old[k]); t.wrChecks = { ...t.wrChecks, ppe: nw }; }
+      t.wr = { ...t.wr, ppeItems: v };
+    }
+  }
+}
+const fixAll = () => { try { Store.state.plans.forEach(p => p.tasks.forEach(fixPPE)); } catch (e) { } };
+
+/* ===================== Phụ thuộc: chọn nhiều + phá vòng lặp ===================== */
+function unlock(root) {
+  (root || document).querySelectorAll('#v10Box .v10-it[disabled], #v10Box .v10-it.dis').forEach(b => {
+    b.disabled = false; b.classList.remove('dis'); b.classList.add('v15-move');
+    b.title = 'Chọn task này → task hiện tại sẽ được dời ra sau nó';
+  });
+  (root || document).querySelectorAll('#v10Box .v10-hint').forEach(h => { if (!h.dataset.v15) { h.dataset.v15 = 1; h.innerHTML = 'Chọn được <b>nhiều task</b>, cả trong và ngoài process. Task này chỉ bắt đầu khi <b>tất cả</b> task đã chọn xong.'; } });
+}
+function hideOldDeps() {
+  const dd = document.querySelector('#drawer #d_deps'); if (!dd) return;
+  const box = dd.closest('.fl') || dd.closest('label') || dd.parentElement;
+  if (box && !box.querySelector('#v10Box')) box.classList.add('v15-hide');
+}
+function selectedDeps() {
+  const b = document.getElementById('v10Box'); if (!b) return null;
+  const after = !!b.querySelector('[data-v10="after"].on');
+  return { after, ids: after ? [...b.querySelectorAll('[data-v10rm]')].map(x => x.dataset.v10rm) : [] };
+}
+function applyDeps(pl, tid, sel, oldDeps) {
+  const T = pl.tasks.find(x => x.id === tid); if (!T) return 0;
+  const byId = new Map(pl.tasks.map(x => [x.id, x]));
+  sel = sel.filter(id => id !== tid && byId.has(id));
+  let moved = 0;
+  for (let guard = 0; guard < 60; guard++) {
+    const desc = Scheduler.descendants(pl, tid);
+    const bad = sel.filter(s => desc.has(s)); if (!bad.length) break;
+    const reach = c => bad.includes(c.id) || bad.some(b => Scheduler.descendants(pl, c.id).has(b));
+    const sameProc = pl.tasks.filter(x => x.process === T.process).sort((a, b) => a.order - b.order);
+    const nextSeq = sameProc[sameProc.findIndex(x => x.id === tid) + 1];
+    let progress = false;
+    pl.tasks.forEach(c => {
+      if (c.id === tid) return;
+      const explicit = (c.dependencyIds || []).includes(tid);
+      const implicit = !explicit && c === nextSeq && c.executionMode === 'sequential';
+      if (!(explicit || implicit) || !reach(c)) return;
+      const nd = [...new Set([...(c.dependencyIds || []).filter(x => x !== tid), ...oldDeps.filter(x => x !== c.id)])];
+      c.dependencyIds = nd; c.executionMode = nd.length ? 'after_dependency' : 'parallel';
+      if (implicit) T.executionMode = 'after_dependency';
+      progress = true; moved++;
+    });
+    T.dependencyIds = []; T.executionMode = 'parallel';   // tạm tách để tính lại
+    if (!progress) break;
+  }
+  const desc = Scheduler.descendants(pl, tid);
+  T.dependencyIds = sel.filter(s => !desc.has(s));
+  T.executionMode = T.dependencyIds.length ? 'after_dependency' : 'parallel';
+  return moved;
+}
+
+function boot() {
+try {
+fixAll();
+/* ---- Drawer ---- */
+const _dr = Drawer.render;
+Drawer.render = function (t) {
+  fixPPE(t);
+  const o = _dr.apply(this, arguments);
+  try { hideOldDeps(); unlock(); } catch (e) { console.warn('[v15]', e); }
+  return o;
+};
+new MutationObserver(() => { const d = document.getElementById('drawer'); if (d) { unlock(d); hideOldDeps(); } })
+  .observe(document.body, { childList: true, subtree: true });
+const _sv = Drawer.save;
+Drawer.save = function (...a) {
+  const tid = App.drawerTaskId, sd = selectedDeps();
+  const cur = tid && Store.plan().tasks.find(x => x.id === tid);
+  const oldDeps = cur ? (cur.dependencyIds || []).slice() : [];
+  const out = _sv.apply(this, a);
+  if (sd && tid && !App.drawerIsNew && Store.plan().tasks.some(x => x.id === tid)) {
+    let moved = 0;
+    Store.commit('Gán task phải xong trước', pl => { moved = applyDeps(pl, tid, sd.ids, oldDeps); });
+    if (moved) toast('Đã dời task ra sau các task đã chọn – các task phía sau tự nối lại.', 'ok');
+  }
+  return out;
+};
+const _ar = App.render;
+App.render = function (...a) { fixAll(); return _ar.apply(this, a); };
+
+/* ---- Report ca: hiện bảng chọn tên ngay khi mở ---- */
+const OP = window.OperatorView;
+if (OP) {
+  const people = () => {
+    const p = Store.state.plans.find(x => x.id === OP.planId) || Store.plan(), m = new Map();
+    p.tasks.forEach(t => U.splitOwners(t.assignee).forEach(n => { const k = U.norm(n); if (!m.has(k)) m.set(k, { name: n, n: 0 }); m.get(k).n++; }));
+    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+  };
+  const choose = name => {
+    SafeStore.set('op.name', name); OP.person = U.norm(name); OP.st = 'all';
+    closeModal(); OP.render();
+  };
+  function pick() {
+    if (!document.body.classList.contains('op-mode')) return;
+    closeModal();
+    const all = people(), saved = U.norm(SafeStore.get('op.name') || '');
+    const m = openModal(`<div class="modal-h"><h3>👋 Bạn là ai?</h3><button class="x" data-close>×</button></div>
+      <div class="modal-b"><input class="v15-q" id="v15Q" placeholder="🔍 Gõ tên của bạn (vd: ky, loc)…" autocomplete="off"><div class="v15-list" id="v15L"></div></div>
+      <div class="modal-f"><button class="btn" id="v15All">Xem tất cả việc theo ca</button></div>`, 'v15-pick');
+    const draw = () => {
+      const q = NV(m.querySelector('#v15Q').value), tk = q.split(' ').filter(Boolean);
+      const list = all.filter(p => tk.every(k => new RegExp('(^| )' + k).test(NV(p.name))));
+      m.querySelector('#v15L').innerHTML = list.map(p => `<button class="v15-p ${U.norm(p.name) === saved ? 'on' : ''}" data-v15n="${esc(p.name)}"><span class="av">${esc(ini(p.name))}</span><span>${esc(p.name)}<small>${p.n} việc</small></span></button>`).join('')
+        || `<div class="v15-none">Không có ai tên “${esc(m.querySelector('#v15Q').value)}” trong kế hoạch.</div>`;
+    };
+    m.querySelector('#v15Q').addEventListener('input', draw);
+    m.querySelector('#v15Q').addEventListener('keydown', e => { if (e.key === 'Enter') { const f = m.querySelector('[data-v15n]'); if (f) choose(f.dataset.v15n); } });
+    m.addEventListener('click', e => { const b = e.target.closest('[data-v15n]'); if (b) choose(b.dataset.v15n); });
+    m.querySelector('#v15All').onclick = () => { OP.person = ''; closeModal(); OP.render(); };
+    draw(); setTimeout(() => m.querySelector('#v15Q').focus(), 80);
+  }
+  const _o = OP.open;
+  OP.open = function (...a) { const r = _o.apply(this, a); setTimeout(pick, 260); return r; };
+  window.addEventListener('click', e => {
+    if (e.target.closest && e.target.closest('#opView #opName')) { e.stopImmediatePropagation(); e.preventDefault(); pick(); }
+  }, true);
+  if (document.body.classList.contains('op-mode')) setTimeout(pick, 100);
+}
+if (App.res) App.render();
+console.log('[v15] đã nạp – phụ thuộc nhiều task, PPE gộp, chọn tên Report ca');
+} catch (err) { console.error('[v15] lỗi:', err); }
+}
+document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 1200));
+})();
+</script>
+<!-- ===================== HẾT v15 ===================== -->
+
   
 </body>
 </html>
