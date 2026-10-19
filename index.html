@@ -7405,6 +7405,242 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v17 ===================== -->
 
+<!-- =====================================================================
+     v19 – UPLOAD ẢNH ỔN ĐỊNH + XÓA ẢNH TRƯỚC KHI ĐÓNG TASK
+       - Nén ảnh nhỏ hơn (1280px) → gửi nhanh gấp 2–4 lần
+       - Hàng đợi: tối đa 2 ảnh gửi cùng lúc, mỗi ảnh tối đa 60 giây, tự thử lại 2 lần
+       - Ảnh hiện ngay trên máy, không phải chờ Drive
+       - ✕ trên ảnh đang gửi = hủy gửi · ✕ trên ảnh đã gửi = xóa (khi task chưa đóng)
+       - Ảnh bị xóa được chuyển vào Thùng rác Drive (cần cập nhật Apps Script mới)
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v19-style">
+.op-thumbs>*{position:relative}
+.v19-x{position:absolute;top:4px;right:4px;z-index:3;width:26px;height:26px;border:0;border-radius:50%;cursor:pointer;
+  background:rgba(0,0,0,.62);color:#fff;font-size:13px;line-height:26px;text-align:center;font-style:normal;
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:transform .25s cubic-bezier(.22,1.2,.36,1),background .2s}
+.v19-x:hover{transform:scale(1.15);background:#ff3b30}
+.op-thumbs .up small{font-weight:600}
+.op-thumbs .up::before{content:'';position:absolute;left:0;bottom:0;height:3px;width:var(--v19p,10%);background:#30d158;transition:width .4s;z-index:2}
+.v19-bar{display:flex;align-items:center;gap:8px;margin:8px 0;padding:8px 12px;border-radius:12px;font-size:12.5px;background:rgba(10,132,255,.1);color:#0a84ff;font-weight:600}
+.v19-bar i{width:9px;height:9px;border-radius:50%;background:#0a84ff;animation:v19p 1.2s infinite}
+@keyframes v19p{50%{opacity:.3}}
+</style>
+<script>
+(function () {
+'use strict';
+/* Có thể dán link Apps Script (/exec) vào đây nếu muốn cố định riêng cho khối này */
+const V19_UPLOAD_URL = 'https://script.google.com/macros/s/AKfycbwBBRYjbZDwdDTpNLSsjTgJzElSd8NGgXjmqxIq97rGCL0-Cxtk-mYu0oNi7oQP-qJ0/exec';
+const MAX_SIDE = 1280, QUALITY = 0.72, PARALLEL = 2, TIMEOUT = 60000, RETRY = 2;
+
+const pad = n => String(n).padStart(2, '0');
+const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; };
+const uid = () => Math.random().toString(36).slice(2, 10);
+const OP = () => window.OperatorView;
+const myName = () => { try { return SafeStore.get('op.name') || ''; } catch (e) { return ''; } };
+
+/* ---------- lấy link Apps Script ---------- */
+function uploadUrl() {
+  if (/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(V19_UPLOAD_URL)) return V19_UPLOAD_URL;
+  for (const s of document.scripts) {                    // đọc link đã gắn cứng trong code (const UPLOAD_URL = '...')
+    const m = /const\s+UPLOAD_URL\s*=\s*'(https:\/\/script\.google\.com\/macros\/s\/[^']+\/exec)'/.exec(s.textContent || '');
+    if (m) return m[1];
+  }
+  const p = (Store.state.plans || []).find(x => x.uploadUrl);
+  return p ? p.uploadUrl : '';
+}
+
+/* ---------- nén ảnh ---------- */
+async function loadBitmap(file) {
+  if (window.createImageBitmap) { try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { } }
+  const url = URL.createObjectURL(file);
+  try { return await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('Không đọc được ảnh')); i.src = url; }); }
+  finally { setTimeout(() => URL.revokeObjectURL(url), 3000); }
+}
+function draw(img, max, q) {
+  const w = img.width || img.naturalWidth, h = img.height || img.naturalHeight, s = Math.min(1, max / Math.max(w, h));
+  const c = document.createElement('canvas'); c.width = Math.round(w * s); c.height = Math.round(h * s);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', q);
+}
+
+/* ---------- hàng đợi upload ---------- */
+const queue = [], running = new Set();
+function key(taskId, reqId) { return taskId + '|' + reqId; }
+function rerender() { try { App.render(); } catch (e) { } }
+function setItem(it, patch) { Object.assign(it, patch); rerender(); }
+
+function enqueue(planId, taskId, reqId, file) {
+  const op = OP(); if (!op) return;
+  if (!myName()) { toast('Hãy nhập tên trước khi chụp ảnh (nút tên ở góc trên).', 'warn'); return; }
+  if (!uploadUrl()) { toast('Chưa cài link lưu ảnh (Apps Script /exec). Báo người lập kế hoạch.', 'err'); return; }
+  const k = key(taskId, reqId), it = { k: uid(), prev: '', state: 'up', err: '', pct: 5, file, planId, taskId, reqId, ctrl: null, tries: 0, ca: op.ca };
+  if (!op.local.has(k)) op.local.set(k, []);
+  op.local.get(k).push(it); rerender();
+  queue.push(it); pump();
+}
+function pump() {
+  while (running.size < PARALLEL && queue.length) {
+    const it = queue.shift(); if (it.cancel) continue;
+    running.add(it);
+    run(it).finally(() => { running.delete(it); pump(); });
+  }
+}
+async function run(it) {
+  const op = OP();
+  try {
+    if (!it.data) {
+      const img = await loadBitmap(it.file);
+      it.data = draw(img, MAX_SIDE, QUALITY);
+      it.prev = draw(img, 300, 0.65);
+      if (img.close) img.close();
+      setItem(it, { pct: 25 });
+    }
+    const p = Store.state.plans.find(x => x.id === it.planId), t = p && p.tasks.find(x => x.id === it.taskId);
+    if (!t) throw new Error('Task không còn tồn tại');
+    const ev = (t.evidence || []).find(e => e.id === it.reqId) || { label: 'Anh' };
+    const dd = pad(new Date().getDate()) + '-' + pad(new Date().getMonth() + 1);
+    const body = JSON.stringify({ plan: p.name, folder: `${pad(t.order)} ${t.taskName} – Ca ${it.ca} (${dd})`,
+      name: `${String(ev.label).replace(/^.*?· /, '')}_${myName()}_${stamp()}_${it.k.slice(0, 4)}.jpg`, mime: 'image/jpeg', data: it.data.split(',')[1] });
+    let j = null, last = null;
+    for (it.tries = 0; it.tries <= RETRY && !it.cancel; it.tries++) {
+      it.ctrl = new AbortController();
+      const tm = setTimeout(() => it.ctrl.abort(), TIMEOUT);
+      setItem(it, { pct: 35 + it.tries * 15, err: it.tries ? `thử lại lần ${it.tries}` : '' });
+      try {
+        const r = await fetch(uploadUrl(), { method: 'POST', body, signal: it.ctrl.signal, redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
+        const txt = await r.text();
+        try { j = JSON.parse(txt); } catch (e) { throw new Error(/accounts\.google|ServiceLogin|<html/i.test(txt) ? 'Apps Script chưa để "Anyone"' : 'Apps Script trả lỗi'); }
+        if (!j.ok) throw new Error(j.error || 'Upload lỗi');
+        clearTimeout(tm); break;
+      } catch (e) {
+        clearTimeout(tm); j = null;
+        last = it.cancel ? new Error('Đã hủy') : e.name === 'AbortError' ? new Error('Mạng chậm – quá 60 giây') : e;
+        if (it.cancel || /Anyone/.test(last.message)) break;
+        await new Promise(z => setTimeout(z, 1500 * (it.tries + 1)));
+      }
+    }
+    if (it.cancel) return;
+    if (!j) throw last || new Error('Upload lỗi');
+    setItem(it, { pct: 95 });
+    op.prev.set(j.id, it.prev);
+    Store.commit('Upload ảnh: ' + t.taskName, pl => {
+      const p2 = pl && pl.tasks ? pl : Store.state.plans.find(x => x.id === it.planId);
+      const tk = (p2 && p2.tasks || []).find(x => x.id === it.taskId) || Store.state.plans.find(x => x.id === it.planId).tasks.find(x => x.id === it.taskId);
+      if (!tk) return false;
+      tk.proofs = tk.proofs || {};
+      (tk.proofs[it.reqId] = tk.proofs[it.reqId] || []).push({ fid: j.id, url: j.url, by: myName(), at: Date.now(), ca: it.ca });
+      if (j.folder) tk.proofFolder = j.folder;
+      if ((tk.progress || 0) < 100) tk.progress = Math.max(tk.progress || 0, progressOf(tk));
+    });
+    removeLocal(it);
+    toast('✓ Đã lưu ảnh', 'ok');
+  } catch (e) {
+    if (it.cancel) return;
+    setItem(it, { state: 'fail', err: (e && e.message) || 'Lỗi', pct: 0 });
+  }
+}
+function progressOf(t) {
+  const ev = (t.evidence && t.evidence.length) ? t.evidence : [{ id: 'done', min: 1 }];
+  let h = 0, n = 0; ev.forEach(e => { const k = Math.max(1, e.min || 1); n += k; h += Math.min(k, ((t.proofs || {})[e.id] || []).length); });
+  return Math.round(90 * h / Math.max(1, n));
+}
+function removeLocal(it) {
+  const op = OP(), k = key(it.taskId, it.reqId), arr = op.local.get(k) || [];
+  op.local.set(k, arr.filter(x => x !== it)); rerender();
+}
+function cancel(itK) {
+  const op = OP();
+  for (const arr of op.local.values()) {
+    const it = arr.find(x => x.k === itK); if (!it) continue;
+    it.cancel = true; try { it.ctrl && it.ctrl.abort(); } catch (e) { }
+    const i = queue.indexOf(it); if (i >= 0) queue.splice(i, 1);
+    removeLocal(it); toast('Đã hủy ảnh đang gửi', 'ok'); return;
+  }
+}
+
+/* ---------- xóa ảnh đã gửi (khi task chưa đóng) ---------- */
+async function deleteProof(planId, taskId, reqId, fid) {
+  const p = Store.state.plans.find(x => x.id === planId), t = p && p.tasks.find(x => x.id === taskId); if (!t) return;
+  if ((t.progress || 0) >= 100) { toast('Task đã đóng – không xóa ảnh được.', 'warn'); return; }
+  if (!confirm('Xóa ảnh này để chụp tấm khác?')) return;
+  Store.commit('Xóa ảnh', pl => {
+    const tk = Store.state.plans.find(x => x.id === planId).tasks.find(x => x.id === taskId); if (!tk || !tk.proofs) return false;
+    tk.proofs[reqId] = (tk.proofs[reqId] || []).filter(x => x.fid !== fid);
+    if ((tk.progress || 0) < 100) tk.progress = progressOf(tk);
+  });
+  toast('Đã xóa ảnh', 'ok');
+  const u = uploadUrl();   // chuyển file trên Drive vào thùng rác (Apps Script v2 mới hỗ trợ; bản cũ bỏ qua, không lỗi)
+  if (u) fetch(u, { method: 'POST', body: JSON.stringify({ action: 'delete', id: fid }), headers: { 'Content-Type': 'text/plain;charset=utf-8' } }).catch(() => { });
+}
+
+/* ---------- gắn nút ✕ + thanh tiến độ vào màn hình ảnh ---------- */
+function decorate() {
+  const op = OP(), s = op && op.sheet; if (!s || !document.body.contains(s.m)) return;
+  const p = Store.state.plans.find(x => x.id === s.planId), t = p && p.tasks.find(x => x.id === s.taskId); if (!t) return;
+  const done = (t.progress || 0) >= 100;
+  s.m.querySelectorAll('.op-req').forEach(req => {
+    const inp = req.querySelector('input[data-req]'); const reqId = inp ? inp.dataset.req : (req.querySelector('[data-req]') || {}).dataset?.req;
+    if (!reqId) return;
+    const proofs = (t.proofs || {})[reqId] || [], locs = op.local.get(key(t.id, reqId)) || [];
+    const anchors = [...req.querySelectorAll('.op-thumbs > a')], pend = [...req.querySelectorAll('.op-thumbs > .up, .op-thumbs > .fail')];
+    anchors.forEach((a, i) => {
+      a.querySelectorAll('i[data-rm]').forEach(x => x.remove());
+      const pr = proofs[i]; if (!pr || done || a.querySelector('.v19-x')) return;
+      a.insertAdjacentHTML('beforeend', `<button type="button" class="v19-x" title="Xóa ảnh này" data-v19rm="${pr.fid}" data-req="${reqId}">✕</button>`);
+    });
+    pend.forEach((d, i) => {
+      const it = locs[i]; if (!it) return;
+      if (d.classList.contains('up')) {
+        d.style.setProperty('--v19p', (it.pct || 10) + '%');
+        const sm = d.querySelector('small'); if (sm) sm.textContent = it.err ? `Đang gửi… (${it.err})` : (it.pct < 30 ? 'Đang nén ảnh…' : 'Đang gửi lên Drive…');
+      } else if (d.classList.contains('fail')) {
+        const sm = d.querySelector('small'); if (sm) sm.textContent = 'Lỗi: ' + it.err + ' – chụp lại';
+      }
+      if (!d.querySelector('.v19-x')) d.insertAdjacentHTML('beforeend', `<button type="button" class="v19-x" title="${d.classList.contains('up') ? 'Hủy gửi' : 'Bỏ ảnh lỗi'}" data-v19c="${it.k}">✕</button>`);
+    });
+  });
+  const n = running.size + queue.length, f = s.m.querySelector('#opSheetF');
+  let bar = s.m.querySelector('.v19-bar');
+  if (n && f) { if (!bar) { bar = document.createElement('div'); bar.className = 'v19-bar'; f.prepend(bar); } bar.innerHTML = `<i></i>Đang gửi ${n} ảnh – có thể tiếp tục chụp, không cần chờ`; }
+  else if (bar) bar.remove();
+}
+
+/* ---------- chặn luồng upload cũ, dùng luồng mới ---------- */
+document.addEventListener('change', e => {
+  const inp = e.target; if (!inp || inp.type !== 'file' || !inp.dataset || !inp.dataset.req) return;
+  const op = OP(); if (!op || !op.sheet || !op.sheet.m.contains(inp)) return;
+  e.stopImmediatePropagation();
+  const files = [...inp.files]; inp.value = '';
+  files.forEach(f => enqueue(op.sheet.planId, op.sheet.taskId, inp.dataset.req, f));
+}, true);
+document.addEventListener('click', e => {
+  const c = e.target.closest && e.target.closest('[data-v19c]');
+  if (c) { e.preventDefault(); e.stopImmediatePropagation(); return cancel(c.dataset.v19c); }
+  const r = e.target.closest && e.target.closest('[data-v19rm]');
+  if (r) { e.preventDefault(); e.stopImmediatePropagation(); const s = OP().sheet; return deleteProof(s.planId, s.taskId, r.dataset.req, r.dataset.v19rm); }
+  const f = e.target.closest && e.target.closest('.op-thumbs [data-fail]');
+  if (f && !e.target.closest('.v19-x')) { e.preventDefault(); e.stopImmediatePropagation(); }   // chạm ảnh lỗi không tự xóa nữa
+}, true);
+
+function boot() {
+  const op = OP(); if (!op) { console.warn('[v19] Chưa có Report ca'); return; }
+  const _o = op.openTask;
+  op.openTask = function (...a) {
+    const r = _o.apply(this, a);
+    const b = op.sheet && op.sheet.m;
+    if (b) new MutationObserver(() => { clearTimeout(b._v19); b._v19 = setTimeout(decorate, 30); }).observe(b, { childList: true, subtree: true });
+    decorate(); return r;
+  };
+  window.addEventListener('beforeunload', e => { if (running.size || queue.length) { e.preventDefault(); e.returnValue = 'Còn ảnh đang gửi'; } });
+  console.log('[v19] đã nạp – upload ảnh ổn định + xóa ảnh');
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 900)); else setTimeout(boot, 900);
+})();
+</script>
+<!-- ===================== HẾT v19 ===================== -->
+  
+  
 </body>
 </html>
 
