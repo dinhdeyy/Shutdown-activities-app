@@ -7967,6 +7967,38 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v20 ===================== -->
 
+<!-- =====================================================================
+     v22 – NORMAL RUN TỰ ĐỘNG (không cần bấm nút)
+       Mỗi process: từ giờ bắt đầu Shutdown → tới task đầu tiên của process đó
+       = khoảng "Normal run" (process đang chạy bình thường). App tự nhận ra và tự vẽ,
+       tự cập nhật khi dời / thêm / xóa / tách / hold task hoặc đổi giờ Shutdown.
+     Cần có khối v21 phía trên. DÁN NGAY TRƯỚC dòng </body> (sau khối v21)
+     ===================================================================== -->
+<style id="v22-style">
+#v20NR{display:none!important}
+</style>
+<script>
+(function () {
+'use strict';
+function on(p) { if (p && p.autoNR !== true) p.autoNR = true; }   // luôn bật, không cần nút
+function boot() {
+  try {
+    const b = document.getElementById('v20NR'); if (b) b.remove();
+    /* mọi kế hoạch đều tự có Normal run */
+    (Store.state.plans || []).forEach(on);
+    const _ar = App.render;
+    App.render = function (...a) { try { on(Store.plan()); } catch (e) { } return _ar.apply(this, a); };
+    /* kế hoạch mới tạo / mở cũng bật luôn */
+    if (App.openPlan) { const _op = App.openPlan; App.openPlan = function (...a) { const o = _op.apply(this, a); try { on(Store.plan()); App.render(); } catch (e) { } return o; }; }
+    if (App.res) App.render();
+    console.log('[v22] đã nạp – Normal run tự động');
+  } catch (e) { console.error('[v22] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 1900)); else setTimeout(boot, 1900);
+})();
+</script>
+<!-- ===================== HẾT v22 ===================== -->
+
   
 </body>
 </html>
