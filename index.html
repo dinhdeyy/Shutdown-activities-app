@@ -8347,6 +8347,75 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v24 ===================== -->
 
+<!-- =====================================================================
+     v25 – TẢI FORM WORK REQUEST: tự điền giờ "Bắt đầu Shutdown" + tên kế hoạch
+           đang chọn trên app vào file Excel → cột "Giờ bắt đầu dự kiến" và
+           "Kết thúc dự kiến" ra đúng giờ ngay khi mở file
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<script>
+(function () {
+'use strict';
+const TEMPLATE = './Mau_Work_Request.xlsx';
+const JSZIP_CDN = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+const xmlEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function loadZip() {
+  if (window.JSZip) return Promise.resolve(window.JSZip);
+  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = JSZIP_CDN; s.onload = () => ok(window.JSZip); s.onerror = () => no(new Error('Không tải được JSZip')); document.head.appendChild(s); });
+}
+const serial = isoLocal => { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(isoLocal || ''); if (!m) return null;
+  return (Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) - Date.UTC(1899, 11, 30)) / 864e5; };
+function setCell(xml, ref, inner, type) {
+  const re = new RegExp('<c r="' + ref + '"([^>]*?)(?:/>|>[\\s\\S]*?</c>)');
+  return xml.replace(re, (m, attrs) => { const s = (/\ss="(\d+)"/.exec(attrs) || [])[1]; return `<c r="${ref}"${s ? ` s="${s}"` : ''}${type ? ` t="${type}"` : ''}>${inner}</c>`; });
+}
+function cellNum(xml, ref) { const m = new RegExp('<c r="' + ref + '"[^>]*>(?:<f[^>]*>[\\s\\S]*?</f>)?<v>([^<]*)</v>').exec(xml); return m ? parseFloat(m[1]) : NaN; }
+async function build(startIso, name) {
+  const [Z, buf] = await Promise.all([loadZip(), fetch(TEMPLATE, { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('Chưa có file Mau_Work_Request.xlsx trên GitHub'); return r.arrayBuffer(); })]);
+  const zip = await Z.loadAsync(buf), path = 'xl/worksheets/sheet1.xml';
+  let xml = await zip.file(path).async('string');
+  const F2 = serial(startIso);
+  if (F2 != null) {
+    xml = setCell(xml, 'F2', `<v>${F2}</v>`, 'n');
+    for (let r = 7; r <= 206; r++) {
+      const g = cellNum(xml, 'G' + r), i = cellNum(xml, 'I' + r);
+      if (!isFinite(g)) continue;
+      xml = xml.replace(new RegExp('(<c r="H' + r + '"[^>]*>(?:<f[^>]*>[\\s\\S]*?</f>))(?:<v>[^<]*</v>)?'), `$1<v>${F2 + g / 24}</v>`);
+      if (isFinite(i)) xml = xml.replace(new RegExp('(<c r="J' + r + '"[^>]*>(?:<f[^>]*>[\\s\\S]*?</f>))(?:<v>[^<]*</v>)?'), `$1<v>${F2 + (g + i) / 24}</v>`);
+    }
+  }
+  if (name) xml = setCell(xml, 'B2', `<is><t>${xmlEsc(name)}</t></is>`, 'inlineStr');
+  zip.file(path, xml);
+  let wb = await zip.file('xl/workbook.xml').async('string');
+  wb = /<calcPr/.test(wb) ? wb.replace(/<calcPr([^>]*?)\/?>/, (m, a) => `<calcPr${a.replace(/\sfullCalcOnLoad="[^"]*"/, '')} fullCalcOnLoad="1"/>`) : wb.replace('</workbook>', '<calcPr fullCalcOnLoad="1"/></workbook>');
+  zip.file('xl/workbook.xml', wb);
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+document.addEventListener('click', async e => {
+  const a = e.target.closest && e.target.closest('#wrView a[href*="Mau_Work_Request"]'); if (!a) return;
+  const st = (document.getElementById('wrStart') || {}).value || (window.WorkRequest && WorkRequest.form && WorkRequest.form.start) || '';
+  const nm = ((document.getElementById('wrName') || {}).value || '').trim();
+  if (!st && !nm) return;                                  // chưa chọn gì → tải file gốc
+  e.preventDefault(); e.stopImmediatePropagation();
+  const old = a.textContent; a.textContent = '⏳ Đang chuẩn bị…';
+  try {
+    const blob = await build(st, nm), d = document.createElement('a');
+    const tag = st ? st.slice(0, 10).split('-').reverse().join('.') : '';
+    d.href = URL.createObjectURL(blob); d.download = `Work_Request${tag ? '_' + tag : ''}.xlsx`;
+    document.body.appendChild(d); d.click(); setTimeout(() => { URL.revokeObjectURL(d.href); d.remove(); }, 2000);
+    if (window.WorkRequest) WorkRequest.dlDone = true;
+    toast(`Đã tải form – giờ dự kiến tính từ ${st ? st.replace('T', ' ') : 'mốc trong file'}.`, 'ok');
+  } catch (err) {
+    console.warn('[v25]', err); toast('Không điền tự động được (' + err.message + ') – tải file gốc.', 'warn');
+    const d = document.createElement('a'); d.href = TEMPLATE; d.download = 'Mau_Work_Request.xlsx'; d.click();
+  } finally { a.textContent = old; }
+}, true);
+console.log('[v25] đã nạp – form tải về tự điền giờ Shutdown');
+})();
+</script>
+<!-- ===================== HẾT v25 ===================== -->
+
+  
 </body>
 </html>
 
