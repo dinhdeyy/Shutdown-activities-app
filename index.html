@@ -6926,7 +6926,7 @@ window.fetch = async function (input, init) {
   if (/drive\.google\.com\/drive\/folders/.test(url)) {
     throw new Error('Link sai: đang dùng link THƯ MỤC Drive. Cần link Web App Apps Script dạng https://script.google.com/macros/s/…/exec');
   }
-  if (!/script\.google(usercontent)?\.com\/macros\//.test(url) || !init || String(init.method || 'GET').toUpperCase() !== 'POST') return _fetch(input, init);
+  if (!/script\.google(usercontent)?\.com\/macros\//.test(url) || !init || init.signal || String(init.method || 'GET').toUpperCase() !== 'POST') return _fetch(input, init);
   if (!/\/exec(\?|$)/.test(url)) throw new Error('Link Apps Script phải kết thúc bằng /exec (không dùng link /dev hoặc link trang soạn code).');
   const opt = { ...init, redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' } };
   let last;
@@ -7431,7 +7431,7 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 'use strict';
 /* Có thể dán link Apps Script (/exec) vào đây nếu muốn cố định riêng cho khối này */
 const V19_UPLOAD_URL = 'https://script.google.com/macros/s/AKfycbwBBRYjbZDwdDTpNLSsjTgJzElSd8NGgXjmqxIq97rGCL0-Cxtk-mYu0oNi7oQP-qJ0/exec';
-const MAX_SIDE = 1280, QUALITY = 0.72, PARALLEL = 2, TIMEOUT = 60000, RETRY = 2;
+const MAX_SIDE = 1280, QUALITY = 0.72, PARALLEL = 2, TIMEOUT = 45000, RETRY = 1;
 
 const pad = n => String(n).padStart(2, '0');
 const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; };
@@ -7468,7 +7468,7 @@ function draw(img, max, q) {
 const queue = [], running = new Set();
 function key(taskId, reqId) { return taskId + '|' + reqId; }
 function rerender() { try { App.render(); } catch (e) { } }
-function setItem(it, patch) { Object.assign(it, patch); rerender(); }
+function setItem(it, patch) { const full = patch.state && patch.state !== it.state; Object.assign(it, patch); if (full) rerender(); else decorate(); }
 
 function enqueue(planId, taskId, reqId, file) {
   const op = OP(); if (!op) return;
@@ -7508,6 +7508,7 @@ async function run(it) {
       const tm = setTimeout(() => it.ctrl.abort(), TIMEOUT);
       setItem(it, { pct: 35 + it.tries * 15, err: it.tries ? `thử lại lần ${it.tries}` : '' });
       try {
+        it.t0 = Date.now();
         const r = await fetch(uploadUrl(), { method: 'POST', body, signal: it.ctrl.signal, redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
         const txt = await r.text();
         try { j = JSON.parse(txt); } catch (e) { throw new Error(/accounts\.google|ServiceLogin|<html/i.test(txt) ? 'Apps Script chưa để "Anyone"' : 'Apps Script trả lỗi'); }
@@ -7593,16 +7594,18 @@ function decorate() {
       const it = locs[i]; if (!it) return;
       if (d.classList.contains('up')) {
         d.style.setProperty('--v19p', (it.pct || 10) + '%');
-        const sm = d.querySelector('small'); if (sm) sm.textContent = it.err ? `Đang gửi… (${it.err})` : (it.pct < 30 ? 'Đang nén ảnh…' : 'Đang gửi lên Drive…');
+        const sec = it.t0 ? Math.round((Date.now() - it.t0) / 1000) : 0;
+        const txt = it.err ? `Đang gửi… (${it.err})` : (it.pct < 30 ? 'Đang nén ảnh…' : `Đang gửi lên Drive… ${sec}s`);
+        const sm = d.querySelector('small'); if (sm && sm.textContent !== txt) sm.textContent = txt;
       } else if (d.classList.contains('fail')) {
-        const sm = d.querySelector('small'); if (sm) sm.textContent = 'Lỗi: ' + it.err + ' – chụp lại';
+        const txt = '⚠ ' + it.err + ' – chạm để gửi lại'; const sm = d.querySelector('small'); if (sm && sm.textContent !== txt) sm.textContent = txt; d.dataset.v19retry = it.k;
       }
       if (!d.querySelector('.v19-x')) d.insertAdjacentHTML('beforeend', `<button type="button" class="v19-x" title="${d.classList.contains('up') ? 'Hủy gửi' : 'Bỏ ảnh lỗi'}" data-v19c="${it.k}">✕</button>`);
     });
   });
   const n = running.size + queue.length, f = s.m.querySelector('#opSheetF');
   let bar = s.m.querySelector('.v19-bar');
-  if (n && f) { if (!bar) { bar = document.createElement('div'); bar.className = 'v19-bar'; f.prepend(bar); } bar.innerHTML = `<i></i>Đang gửi ${n} ảnh – có thể tiếp tục chụp, không cần chờ`; }
+  if (n && f) { if (!bar) { bar = document.createElement('div'); bar.className = 'v19-bar'; f.prepend(bar); } const h = `<i></i>Đang gửi ${n} ảnh – có thể tiếp tục chụp, không cần chờ`; if (bar.innerHTML !== h) bar.innerHTML = h; }
   else if (bar) bar.remove();
 }
 
@@ -7620,7 +7623,11 @@ document.addEventListener('click', e => {
   const r = e.target.closest && e.target.closest('[data-v19rm]');
   if (r) { e.preventDefault(); e.stopImmediatePropagation(); const s = OP().sheet; return deleteProof(s.planId, s.taskId, r.dataset.req, r.dataset.v19rm); }
   const f = e.target.closest && e.target.closest('.op-thumbs [data-fail]');
-  if (f && !e.target.closest('.v19-x')) { e.preventDefault(); e.stopImmediatePropagation(); }   // chạm ảnh lỗi không tự xóa nữa
+  if (f && !e.target.closest('.v19-x')) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    const k = f.dataset.v19retry; if (!k) return;
+    for (const arr of OP().local.values()) { const it = arr.find(x => x.k === k); if (it) { Object.assign(it, { state: 'up', err: '', pct: 30, cancel: false }); rerender(); queue.push(it); pump(); break; } }
+  }
 }, true);
 
 function boot() {
@@ -7632,6 +7639,7 @@ function boot() {
     if (b) new MutationObserver(() => { clearTimeout(b._v19); b._v19 = setTimeout(decorate, 30); }).observe(b, { childList: true, subtree: true });
     decorate(); return r;
   };
+  setInterval(() => { if (running.size) decorate(); }, 1000);
   window.addEventListener('beforeunload', e => { if (running.size || queue.length) { e.preventDefault(); e.returnValue = 'Còn ảnh đang gửi'; } });
   console.log('[v19] đã nạp – upload ảnh ổn định + xóa ảnh');
 }
