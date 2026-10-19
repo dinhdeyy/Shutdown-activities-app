@@ -8415,6 +8415,232 @@ console.log('[v25] đã nạp – form tải về tự điền giờ Shutdown');
 </script>
 <!-- ===================== HẾT v25 ===================== -->
 
+<!-- =====================================================================
+     v26 – THUẬT TOÁN XẾP NGƯỜI THEO CA (thay LDC.suggest)
+       Lỗi cũ: chỉ xét người có ca lúc task BẮT ĐẦU → task 05:00–12:00 gán người ca 3 (hết ca 06:00).
+       Mới:
+         1. Ưu tiên người có ca (kể cả OT như M+4, 4+N) PHỦ TRỌN task.
+         2. Không ai phủ trọn → chia task theo mốc ca 06/14/22, mỗi đoạn 1 người đúng ca
+            = BÀN GIAO CA (vd: Phú 05–06 → Kỳ 06–12). Người cũ còn ca thì giữ tiếp.
+         3. Đúng team, không trùng giờ với việc khác, ưu tiên ca chính hơn OT, chia đều giờ.
+       + Nút "⚠ x task lệch ca" → xếp lại người cho các task đang gán sai ca.
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v26-style">
+#v26Btn.has{background:rgba(255,159,10,.18)!important;color:#b45309!important;border-color:rgba(255,159,10,.5)!important}
+.v26-crew{color:var(--muted)}
+.v26-crew b{font-weight:600;color:var(--text)}
+.v26-crew em{font-style:normal;font-size:11px;color:var(--muted)}
+.v26-crew i.ar{font-style:normal;margin:0 4px;color:#ff9f0a;font-weight:700}
+.v26-list{display:grid;gap:6px;max-height:55vh;overflow:auto;margin:8px 0}
+.v26-it{padding:9px 12px;border-radius:12px;border:1px solid var(--border);background:var(--glass-row,#fff);font-size:13px}
+.v26-it small{display:block;color:var(--muted)}
+.v26-it .nw{color:#15803d;font-weight:600}
+</style>
+<script>
+(function () {
+'use strict';
+const SH = [6, 14, 22];
+const NV = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+const esc = s => U.esc(s ?? '');
+const hm = ms => U.fmtHM(ms);
+const isNT = n => /nha thau|^\d*\s*nt$/.test(NV(n));
+const hasLDC = () => typeof LDC !== 'undefined' && LDC.data && Array.isArray(LDC.data.people);
+
+/* ---------- mốc ca ---------- */
+function cuts(s, e) {
+  const out = [s], d = new Date(s); d.setHours(0, 0, 0, 0);
+  for (let t = d.getTime(); t < e; t += MS_DAY) SH.forEach(h => { const c = t + h * MS_H; if (c > s && c < e) out.push(c); });
+  out.push(e); return [...new Set(out)].sort((a, b) => a - b);
+}
+/* ---------- cửa sổ làm việc của 1 người tại thời điểm t (có cả OT) ---------- */
+function win(p, t) {
+  for (const off of [0, -1]) {
+    const day = LDC.dayStart(t) + off * MS_DAY, raw = p.codes.get(LDC.dayKey(day)), w = LDC.parseCode(raw);
+    if (!w) continue;
+    const ws = day + w.s * MS_H, we = day + w.e * MS_H;
+    if (ws <= t && t < we) {
+      const L = String(raw).toUpperCase().replace(/[^A-Z]/g, ''), b = LDC.SHIFT[L] || [w.s, w.e];
+      return { s: ws, e: we, code: String(raw).trim(), bs: day + b[0] * MS_H, be: day + b[1] * MS_H };
+    }
+  }
+  return null;
+}
+const otIn = (w, s, e) => Math.max(0, Math.min(e, w.bs) - Math.max(s, w.s)) + Math.max(0, Math.min(e, w.e) - Math.max(s, w.be));
+function teamScore(person, process, opt) {
+  const kws = LDC.keywordsFor ? LDC.keywordsFor(process) : '*';
+  const hc = (LDC.teamTokens ? LDC.teamTokens(person.team) : [String(person.team).toUpperCase()]).includes('HC');
+  if (kws === '*') return hc ? (opt.allowHC ? .5 : 0) : 1;
+  if (LDC.teamMatches && LDC.teamMatches(person.team, kws)) return 2;
+  if (opt.allowHC && hc) return .5;
+  if (opt.anyTeam) return .3;
+  return 0;
+}
+
+/* ---------- THUẬT TOÁN ---------- */
+function suggest(plan, opt = {}) {
+  const res = Scheduler.schedule(plan), people = LDC.data.people.filter(p => !(LDC.EXCLUDE_POS && LDC.EXCLUDE_POS.test(p.position || '')));
+  const byName = new Map(people.map(p => [NV(p.name), p]));
+  const busy = new Map(), load = new Map();
+  const addBusy = (k, s, e) => { if (!busy.has(k)) busy.set(k, []); busy.get(k).push([s, e]); load.set(k, (load.get(k) || 0) + (e - s) / MS_H); };
+  const free = (k, s, e) => !(busy.get(k) || []).some(([a, b]) => a < e && s < b);
+  const only = opt.onlyIds ? new Set(opt.onlyIds) : null;
+  const tasks = plan.tasks.filter(t => !t.hold && (t.durationHours || 0) > 0).slice().sort((a, b) => res.R.get(a.id).start - res.R.get(b.id).start || a.order - b.order);
+  const keepOf = t => !!t.assignee && (only ? !only.has(t.id) : !opt.overwrite);
+  /* người đã gán giữ nguyên → tính là bận */
+  tasks.forEach(t => {
+    if (!keepOf(t)) return; const r = res.R.get(t.id);
+    if (Array.isArray(t.crew) && t.crew.length) t.crew.forEach(c => c.names.forEach(n => addBusy(NV(n), c.s, c.e)));
+    else U.splitOwners(t.assignee).forEach(n => addBusy(NV(n), r.start, r.end));
+  });
+  const pick = (t, s, e, need, prefer) => {
+    const c = [];
+    for (const p of people) {
+      const k = NV(p.name), w = win(p, s); if (!w || w.e < e) continue;          // phải phủ TRỌN đoạn [s,e]
+      const ts = teamScore(p, t.process, opt); if (!ts) continue;
+      if (!free(k, s, e)) continue;
+      const ot = otIn(w, s, e) > MS_MIN;
+      c.push({ p, k, w, ot, score: ts * 100 + (prefer.has(k) ? 60 : 0) - (ot ? 25 : 0) - (load.get(k) || 0) });
+    }
+    c.sort((a, b) => b.score - a.score || a.p.name.localeCompare(b.p.name));
+    return c.slice(0, need);
+  };
+  return tasks.map(t => {
+    const r = res.R.get(t.id), s = r.start, e = Math.max(r.end, s + MS_MIN);
+    const row = { t, s, e, shift: U.shiftOf(s), keep: keepOf(t), names: [], codes: [], crew: [], note: '' };
+    if (row.keep) { row.names = U.splitOwners(t.assignee); row.note = 'Giữ người đã nhập'; return row; }
+    const ntN = U.splitOwners(t.assignee).filter(isNT);                       // giữ "Nhà thầu"
+    const need = Math.max(1, Math.round(t.peopleRequired || 1) - ntN.reduce((x, n) => x + (+(/^(\d+)/.exec(NV(n)) || [0, 1])[1]), 0));
+    /* 1. phủ trọn */
+    const full = pick(t, s, e, need, new Set());
+    if (full.length >= need) {
+      full.forEach(x => addBusy(x.k, s, e));
+      row.crew = [{ s, e, names: full.map(x => x.p.name), ot: full.filter(x => x.ot).map(x => x.p.name) }];
+    } else {
+      /* 2. bàn giao theo ca */
+      const cs = cuts(s, e); let prev = new Set(), short = false;
+      for (let i = 0; i < cs.length - 1; i++) {
+        const a = cs[i], b = cs[i + 1], got = pick(t, a, b, need, prev);
+        if (got.length < need) short = true;
+        got.forEach(x => addBusy(x.k, a, b));
+        const names = got.map(x => x.p.name), last = row.crew[row.crew.length - 1];
+        if (last && last.names.join('|') === names.join('|')) { last.e = b; last.ot = [...new Set([...last.ot, ...got.filter(x => x.ot).map(x => x.p.name)])]; }
+        else row.crew.push({ s: a, e: b, names, ot: got.filter(x => x.ot).map(x => x.p.name) });
+        prev = new Set(got.map(x => x.k));
+      }
+      if (short) row.note = 'Thiếu người ở 1 số đoạn ca';
+    }
+    row.crew = row.crew.filter(c => c.names.length);
+    row.names = [...new Set(row.crew.flatMap(c => c.names))].concat(ntN);
+    row.codes = row.crew.flatMap(c => c.names.map(n => { const p = byName.get(NV(n)), w = p && win(p, c.s); return w ? w.code : ''; }));
+    if (row.crew.length > 1) row.note = (row.note ? row.note + ' · ' : '') + 'Bàn giao: ' + row.crew.map(c => `${c.names.join('+')} ${hm(c.s)}–${hm(c.e)}`).join(' → ');
+    if (!row.crew.length) row.note = 'Không có ai đúng ca, đúng team';
+    lastCrew.set(t.id, { crew: row.crew.map(c => ({ ...c })), names: row.names.join(' + ') });
+    return row;
+  });
+}
+const lastCrew = new Map();
+
+/* ---------- lưu "bàn giao ca" vào task khi tên đã được áp dụng ---------- */
+function syncCrew() {
+  if (!lastCrew.size || (window.Auth && !Auth.ok)) return;
+  const p = Store.plan(); if (!p) return;
+  const upd = [];
+  p.tasks.forEach(t => {
+    const c = lastCrew.get(t.id); if (!c) return;
+    if (NV(t.assignee) === NV(c.names)) upd.push([t.id, c.crew]);
+    else if (t.crew && NV(t.crew.flatMap(x => x.names).join(' + ')) !== NV(U.splitOwners(t.assignee).filter(n => !isNT(n)).join(' + '))) upd.push([t.id, null]);
+    lastCrew.delete(t.id);
+  });
+  if (!upd.length) return;
+  Store.commit('Lưu bàn giao ca', pl => upd.forEach(([id, crew]) => {
+    const t = pl.tasks.find(x => x.id === id); if (!t) return;
+    if (crew && crew.length > 1) { t.crew = crew; t.ot = [...new Set(crew.flatMap(c => c.ot || []).map(NV))]; }
+    else { delete t.crew; if (crew && crew[0]) t.ot = (crew[0].ot || []).map(NV); }
+  }));
+}
+
+/* ---------- phát hiện task gán lệch ca ---------- */
+function misfits() {
+  if (!hasLDC()) return [];
+  const p = Store.plan(), res = Scheduler.schedule(p), byName = new Map(LDC.data.people.map(x => [NV(x.name), x])), out = [];
+  p.tasks.forEach(t => {
+    if (t.hold || !t.assignee || (t.progress || 0) >= 100) return;
+    const r = res.R.get(t.id); if (!r) return;
+    const segs = Array.isArray(t.crew) && t.crew.length ? t.crew : [{ s: r.start, e: r.end, names: U.splitOwners(t.assignee) }];
+    const bad = [];
+    segs.forEach(c => c.names.forEach(n => { const pp = byName.get(NV(n)); if (!pp) return; const w = win(pp, c.s); if (!w || w.e < Math.max(c.e, c.s + MS_MIN) - MS_MIN) bad.push(n); }));
+    if (bad.length) out.push({ t, r, bad: [...new Set(bad)] });
+  });
+  return out;
+}
+function btn() {
+  const sp = document.querySelector('.topbar .spacer'); let b = document.getElementById('v26Btn');
+  if (!hasLDC()) { if (b) b.remove(); return; }
+  if (!b && sp) { b = document.createElement('button'); b.id = 'v26Btn'; b.className = 'tb-btn'; b.onclick = fixDialog; sp.parentNode.insertBefore(b, sp); }
+  if (!b) return;
+  const n = misfits().length; b.textContent = n ? `⚠ ${n} task lệch ca` : '✓ Người đúng ca'; b.classList.toggle('has', !!n);
+}
+function fixDialog() {
+  if (window.Auth && !Auth.ok) { const a = document.getElementById('auBadge'); if (a) a.click(); return; }
+  const mis = misfits(), p = Store.plan();
+  const prev = mis.length ? suggest(p, { onlyIds: mis.map(x => x.t.id) }).filter(x => mis.some(m => m.t.id === x.t.id)) : [];
+  const m = openModal(`<div class="modal-h"><h3>👥 Xếp lại người theo ca</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b">${mis.length ? `<p style="margin:0">Có <b>${mis.length} task</b> đang gán người <b>không có ca trọn thời gian task</b>. Đề xuất:</p>
+      <div class="v26-list">${prev.map(x => { const mm = mis.find(k => k.t.id === x.t.id);
+        return `<div class="v26-it"><b>#${x.t.order} ${esc(x.t.taskName)}</b><small>${esc(x.t.process)} · ${U.fmtDM(x.s)} → ${hm(x.e)} · lệch ca: ${esc(mm.bad.join(', '))}</small>
+          <span class="nw">→ ${x.crew.length ? x.crew.map(c => `${esc(c.names.join(' + '))} (${hm(c.s)}–${hm(c.e)})`).join(' <b>→</b> ') : '⚠ không tìm được người phù hợp'}</span></div>`; }).join('')}</div>`
+      : '<p>✅ Tất cả người được gán đều có ca trọn thời gian task.</p>'}
+      <label class="chk" style="margin-top:6px"><input type="checkbox" id="v26All"> Xếp lại <b>toàn bộ</b> task chưa xong (ghi đè cả tên đã nhập tay)</label></div>
+    <div class="modal-f"><button class="btn" data-close>Đóng</button><button class="btn primary" id="v26Ok">Áp dụng</button></div>`, 'sm');
+  m.querySelector('#v26Ok').onclick = () => {
+    const all = m.querySelector('#v26All').checked;
+    const ids = all ? p.tasks.filter(t => (t.progress || 0) < 100 && !t.hold).map(t => t.id) : mis.map(x => x.t.id);
+    if (!ids.length) { closeModal(); return; }
+    const rows = suggest(Store.plan(), { onlyIds: ids }).filter(x => ids.includes(x.t.id) && x.names.length);
+    Store.commit('Xếp lại người theo ca', pl => rows.forEach(x => {
+      const t = pl.tasks.find(k => k.id === x.t.id); if (!t) return;
+      t.assignee = x.names.join(' + ');
+      if (x.crew.length > 1) { t.crew = x.crew; } else delete t.crew;
+      t.ot = [...new Set(x.crew.flatMap(c => c.ot || []).map(NV))];
+    }));
+    lastCrew.clear(); closeModal(); toast(`Đã xếp lại người cho ${rows.length} task.`, 'ok');
+  };
+}
+
+/* ---------- hiển thị bàn giao ca trên Gantt ---------- */
+function crewHTML(t) {
+  const ot = new Set(t.ot || []);
+  const nm = n => `<b>${esc(n)}</b>${ot.has(NV(n)) ? '<i class="v24-ot">OT</i>' : ''}`;
+  return '<span class="v26-crew">· ' + t.crew.map(c => `${c.names.map(nm).join(' + ')} <em>${hm(c.s)}–${hm(c.e)}</em>`).join('<i class="ar">→</i>') + '</span>';
+}
+function patchGantt() {
+  const _tr = Gantt.taskRow;
+  Gantt.taskRow = function (t, g, p) {
+    let h = _tr.call(this, t, g, p);
+    if (!Array.isArray(t.crew) || t.crew.length < 2) return h;
+    const extra = U.splitOwners(t.assignee).filter(isNT);
+    return h.replace(/(<div class="outlbl v20"[^>]*>[\s\S]*?<b>[\s\S]*?<\/b>)(<span>·[\s\S]*?<\/span>)?/, (m, a) => a + crewHTML(t) + (extra.length ? `<span> + ${esc(extra.join(' + '))}<i class="v24-nt">NT</i></span>` : ''));
+  };
+}
+
+function boot() {
+  try {
+    if (typeof LDC === 'undefined') { console.warn('[v26] chưa có module LDC'); return; }
+    LDC.suggest = suggest;                       // thay thuật toán cũ cho mọi chỗ dùng (tạo lịch, Normal run, gợi ý)
+    patchGantt();
+    let tm;
+    const _ar = App.render;
+    App.render = function (...a) { const o = _ar.apply(this, a); clearTimeout(tm); tm = setTimeout(() => { try { syncCrew(); btn(); } catch (e) { console.warn('[v26]', e); } }, 500); return o; };
+    if (App.res) App.render();
+    console.log('[v26] đã nạp – xếp người theo ca (phủ trọn / bàn giao ca)');
+  } catch (e) { console.error('[v26] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 2300)); else setTimeout(boot, 2300);
+})();
+</script>
+<!-- ===================== HẾT v26 ===================== -->
+
   
 </body>
 </html>
