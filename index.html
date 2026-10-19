@@ -7648,6 +7648,325 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v19 ===================== -->
   
+<!-- =====================================================================
+     v20 – GÓI SỬA 19/10
+       1. Gantt: tên task hiện TRÀN RA BÊN PHẢI thanh (cạnh tên người), không nằm trong ô
+       2. Tab Tạo lịch: link SharePoint LDC hiện ngay từ đầu
+       3. Nút ＋ nổi trên Planner: thêm nhanh 1 task
+       4. ✂ Tách task: làm được 1 phần → chuyển phần còn lại sang process / ngày giờ khác
+       5. ⏸ Hold task: tạm ngưng task, chọn lại thứ tự cho các task đang chạy sau nó
+       6. ▶ Normal run: process chưa tới giờ shutdown → tạo đoạn "Normal run" theo ca + gán người theo LDC
+       7. Report ca: hiện rõ GIỜ KẾ HOẠCH + nhập GIỜ THỰC TẾ → Planner tự dời theo
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v20-style">
+/* 1. tên task bên phải thanh */
+.grow .bar .lbl{display:none!important}
+.outlbl.v20{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:12px;pointer-events:none}
+.outlbl.v20 b{font-weight:600;color:var(--text)}
+.outlbl.v20 span{color:var(--muted)}
+/* 3. nút + nổi */
+#v20Add{position:fixed;right:22px;bottom:22px;z-index:120;width:58px;height:58px;border:0;border-radius:50%;cursor:pointer;color:#fff;font-size:30px;line-height:58px;
+  background:linear-gradient(135deg,#0a84ff,#5e5ce6);box-shadow:0 12px 28px rgba(10,132,255,.45);transition:transform .35s cubic-bezier(.22,1.2,.36,1)}
+#v20Add:hover{transform:scale(1.1) rotate(90deg)}
+body.op-mode #v20Add,body.wr-mode #v20Add,body.admin-mode #v20Add,body.ro #v20Add{display:none}
+/* 4-5. nút trong panel task */
+.v20-acts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.v20-acts button{border:1px solid var(--border);background:var(--glass-row,#fff);color:var(--text);border-radius:12px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;transition:transform .25s}
+.v20-acts button:hover{transform:translateY(-2px)}
+.v20-acts .hold{color:#c26a00}.v20-acts .unhold{color:#1f9d47}
+.v20-f{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.v20-f label{font-size:12px;color:var(--muted);font-weight:600}
+.v20-f input,.v20-f select{display:block;width:100%;margin-top:4px}
+.v20-f .full{grid-column:1/-1}
+.v20-note{padding:9px 12px;border-radius:12px;background:rgba(10,132,255,.08);font-size:13px;margin-bottom:10px;line-height:1.5}
+.v20-dep{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;padding:8px 0;border-top:1px dashed var(--border);font-size:13px}
+.grow.v20-hold .gleft{opacity:.55;text-decoration:line-through}
+.grow.v20-hold .bar,.grow.v20-hold .ms{opacity:.35;background:repeating-linear-gradient(45deg,#94a3b8 0 6px,#cbd5e1 6px 12px)!important}
+.v20-tag{display:inline-block;margin-right:5px;padding:0 6px;border-radius:999px;font-size:10.5px;font-weight:700;background:rgba(255,159,10,.2);color:#b45309}
+.v20-tag.nr{background:rgba(48,209,88,.18);color:#15803d}
+.grow.v20-nr .bar{background:repeating-linear-gradient(90deg,#86efac 0 10px,#bbf7d0 10px 20px)!important}
+/* 7. giờ kế hoạch / thực tế trong Report ca */
+.v20-time{margin:0 0 14px;padding:14px;border-radius:20px;background:linear-gradient(135deg,rgba(255,159,10,.14),rgba(255,214,10,.10));border:1.5px solid rgba(255,159,10,.45)}
+.v20-time .plan{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.v20-time .plan small{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.v20-time .plan b{font-size:24px;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.v20-time .plan em{font-style:normal;font-size:13px;color:var(--muted)}
+.v20-time .act{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-top:10px}
+.v20-time label{font-size:12px;color:var(--muted);font-weight:600}
+.v20-time input{display:block;width:100%;margin-top:3px;font-size:15px;padding:9px 10px!important;border-radius:12px!important}
+.v20-time button{border:0;border-radius:12px;padding:11px 14px;font-weight:700;color:#fff;background:#ff9f0a;cursor:pointer}
+.v20-time .diff{margin-top:8px;font-size:13px;font-weight:600}
+.v20-time .diff.late{color:#d70015}.v20-time .diff.ok{color:#1f9d47}
+@media (max-width:600px){.v20-time .act{grid-template-columns:1fr}.v20-f{grid-template-columns:1fr}}
+</style>
+<script>
+(function () {
+'use strict';
+const LDC_LINK = 'https://nestle.sharepoint.com/:x:/r/teams/TAF_SCHEDULE_DATA/_layouts/15/Doc.aspx?sourcedoc=%7BB01C8F64-EB26-490C-83BE-5F493A25B47E%7D&file=LDC.xlsx&action=default&mobileredirect=true&DefaultItemOpen=1';
+const NV = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+const esc = s => U.esc(s ?? '');
+const canEdit = () => !(window.Auth && !Auth.ok);
+const needLogin = () => { if (canEdit()) return false; const b = document.getElementById('auBadge'); if (b) b.click(); else toast('Cần đăng nhập để thao tác.', 'warn'); return true; };
+const plan = () => Store.plan();
+const sched = p => Scheduler.schedule(p || plan());
+const iso = ms => U.toLocalISO(ms).slice(0, 16);
+
+/* ======================= 1. TÊN TASK BÊN PHẢI ======================= */
+function patchGantt() {
+  const _tr = Gantt.taskRow;
+  Gantt.taskRow = function (t, g, p) {
+    let h = _tr.call(this, t, g, p);
+    const who = t.assignee || t.owner || '';
+    const tags = (t.hold ? '<i class="v20-tag">⏸ HOLD</i>' : '') + (t.normalRun ? '<i class="v20-tag nr">▶ Normal run</i>' : '');
+    h = h.replace(/<div class="outlbl"([^>]*)>[\s\S]*?<\/div>/, `<div class="outlbl v20"$1>${tags}<b>${esc(t.taskName)}</b>${who ? `<span>· ${esc(who)}</span>` : ''}</div>`);
+    if (t.hold) h = h.replace('class="grow ', 'class="grow v20-hold ');
+    if (t.normalRun) h = h.replace('class="grow ', 'class="grow v20-nr ');
+    return h;
+  };
+}
+
+/* ======================= 2. LINK LDC HIỆN NGAY ======================= */
+function ldcLink() {
+  const v = document.getElementById('wrView'); if (!v) return;
+  const box = [...v.querySelectorAll('.w4-file')].find(b => /lich di ca/.test(NV(b.textContent)));
+  if (!box || box.querySelector('.v20-ldc')) return;
+  box.querySelectorAll('.v14-ldc').forEach(x => x.remove());
+  const d = document.createElement('div'); d.className = 'v14-ldc v20-ldc';
+  d.innerHTML = `<b>Cách lấy file lịch đi ca:</b><ol>
+    <li>Mở <a href="${LDC_LINK}" target="_blank" rel="noopener">file LDC trên SharePoint ↗</a></li>
+    <li>Chọn <b>File → Tạo bản sao → Tải xuống bản sao</b></li>
+    <li>Bấm <b>📤 Upload LDC.xlsx</b> bên dưới và chọn file vừa tải</li></ol>`;
+  const acts = box.querySelector('.w4-acts'); acts ? box.insertBefore(d, acts) : box.appendChild(d);
+}
+
+/* ======================= 3. NÚT + NỔI ======================= */
+function addFab() {
+  if (document.getElementById('v20Add')) return;
+  const b = document.createElement('button'); b.id = 'v20Add'; b.title = 'Thêm task'; b.textContent = '＋';
+  b.onclick = () => { if (needLogin()) return; if (App.view === 'home') { toast('Mở 1 kế hoạch trước.', 'warn'); return; } Drawer.openNew(); };
+  document.body.appendChild(b);
+}
+
+/* ======================= 4. TÁCH TASK ======================= */
+function splitTask(id) {
+  if (needLogin()) return;
+  const p = plan(), t = p.tasks.find(x => x.id === id); if (!t) return;
+  const r = sched(p).R.get(id), procs = [...new Set(p.tasks.map(x => x.process))];
+  const half = Math.round(t.durationHours * 50) / 100;
+  const m = openModal(`<div class="modal-h"><h3>✂ Tách task</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><div class="v20-note"><b>${esc(t.taskName)}</b><br>Kế hoạch: ${U.fmtDM(r.start)} → ${U.fmtDM(r.end)} · ${U.fmtDur(t.durationHours)}</div>
+      <div class="v20-f">
+        <label>Phần đã / sẽ làm ở đây (giờ)<input id="v20H" type="number" step="0.25" min="0.25" max="${t.durationHours - 0.25}" value="${half}"></label>
+        <label>Phần còn lại (giờ)<input id="v20R" type="number" disabled value="${(t.durationHours - half).toFixed(2)}"></label>
+        <label>Phần còn lại – Process<select id="v20P">${procs.map(x => `<option ${x === t.process ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+        <label>Phần còn lại – bắt đầu lúc<input id="v20S" type="datetime-local" value="${iso(r.start + half * MS_H)}"></label>
+        <label class="full">Người thực hiện phần còn lại<input id="v20W" value="${esc(t.assignee || '')}" placeholder="Để trống = gán sau"></label>
+      </div>
+      <p class="muted small">Các task đang chạy sau task này sẽ chờ <b>phần còn lại</b> xong mới bắt đầu.</p></div>
+    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="v20Ok">✂ Tách</button></div>`, 'sm');
+  m.querySelector('#v20H').oninput = e => { const h = U.num(e.target.value, 0); m.querySelector('#v20R').value = Math.max(0, t.durationHours - h).toFixed(2); m.querySelector('#v20S').value = iso(r.start + h * MS_H); };
+  m.querySelector('#v20Ok').onclick = () => {
+    const h = U.num(m.querySelector('#v20H').value, 0), rest = t.durationHours - h, st = U.parseLocalISO(m.querySelector('#v20S').value);
+    if (!(h > 0 && rest > 0)) { toast('Số giờ tách phải nhỏ hơn thời lượng task.', 'warn'); return; }
+    if (!isFinite(st)) { toast('Chọn giờ bắt đầu phần còn lại.', 'warn'); return; }
+    let newId = null;
+    Store.commit('Tách task: ' + t.taskName, pl => {
+      const a = pl.tasks.find(x => x.id === id); if (!a) return false;
+      const P = U.parseLocalISO(pl.start);
+      const b = normalizeTask(JSON.parse(JSON.stringify(a)));
+      b.id = nextTaskId(pl); newId = b.id;
+      b.taskName = a.taskName.replace(/\s*\(phần \d\)$/, '') + ' (phần 2)';
+      a.taskName = a.taskName.replace(/\s*\(phần \d\)$/, '') + ' (phần 1)';
+      b.process = m.querySelector('#v20P').value; b.assignee = m.querySelector('#v20W').value.trim();
+      b.durationHours = rest; b.standardHours = rest; a.durationHours = h; a.standardHours = h;
+      b.progress = 0; b.proofs = {}; b.startedAt = null; b.doneBy = null; b.doneAt = null;
+      b.dependencyIds = [a.id]; b.executionMode = 'after_dependency';
+      b.constraintType = 'SNET'; b.constraintOffsetHours = (st - P) / MS_H;
+      pl.tasks.forEach(x => { if (x.id !== b.id && (x.dependencyIds || []).includes(a.id)) x.dependencyIds = x.dependencyIds.map(d => d === a.id ? b.id : d); });
+      b.order = a.order + 0.5; pl.tasks.push(b);
+      pl.tasks.sort((x, y) => x.order - y.order).forEach((x, i) => x.order = i + 1);
+    });
+    closeModal(); toast('Đã tách task thành 2 phần.', 'ok');
+    if (newId) setTimeout(() => Drawer.open(newId), 80);
+  };
+}
+
+/* ======================= 5. HOLD TASK ======================= */
+function dependentsOf(p, id) {
+  const t = p.tasks.find(x => x.id === id), out = p.tasks.filter(x => (x.dependencyIds || []).includes(id));
+  const same = p.tasks.filter(x => x.process === t.process).sort((a, b) => a.order - b.order);
+  const nx = same[same.findIndex(x => x.id === id) + 1];
+  if (nx && nx.executionMode === 'sequential' && !(nx.dependencyIds || []).length && !out.includes(nx)) out.push(nx);
+  return out;
+}
+function holdTask(id) {
+  if (needLogin()) return;
+  const p = plan(), t = p.tasks.find(x => x.id === id); if (!t) return;
+  const deps = dependentsOf(p, id).filter(x => !x.hold), preds = (t.dependencyIds || []).slice();
+  const cand = p.tasks.filter(x => x.id !== id && !x.hold).sort((a, b) => a.order - b.order);
+  const opts = sel => `<option value="">▶ Chạy độc lập</option>${preds.length ? `<option value="__pred" ${sel === '__pred' ? 'selected' : ''}>↺ Chạy sau task trước của task bị hold</option>` : ''}
+    ${cand.map(c => `<option value="${esc(c.id)}">#${c.order} ${esc(c.taskName.slice(0, 45))} (${esc(c.process)})</option>`).join('')}`;
+  const m = openModal(`<div class="modal-h"><h3>⏸ Hold task</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><div class="v20-note"><b>${esc(t.taskName)}</b> sẽ <b>tạm ngưng</b> – không chạy, không tính thời gian, không hiện trong Report ca.</div>
+      ${deps.length ? `<p style="margin:0 0 6px"><b>${deps.length} task</b> đang chờ task này. Chọn lại để chúng chạy tiếp:</p>
+        ${deps.map(d => `<div class="v20-dep"><span>#${d.order} ${esc(d.taskName)} <small class="muted">· ${esc(d.process)}</small></span><select data-v20d="${esc(d.id)}">${opts(preds.length ? '__pred' : '')}</select></div>`).join('')}`
+        : '<p class="muted">Không có task nào đang chờ task này.</p>'}
+    </div>
+    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="v20Hold" style="background:#ff9f0a">⏸ Hold task</button></div>`, 'sm');
+  m.querySelector('#v20Hold').onclick = () => {
+    const choice = {}; m.querySelectorAll('[data-v20d]').forEach(s => choice[s.dataset.v20d] = s.value);
+    Store.commit('Hold task: ' + t.taskName, pl => {
+      const a = pl.tasks.find(x => x.id === id); if (!a) return false;
+      a.hold = true; a.holdDur = a.durationHours; a.holdDeps = (a.dependencyIds || []).slice(); a.holdMode = a.executionMode;
+      a.durationHours = 0;
+      Object.entries(choice).forEach(([did, v]) => {
+        const d = pl.tasks.find(x => x.id === did); if (!d) return;
+        let nd = (d.dependencyIds || []).filter(x => x !== id);
+        if (v === '__pred') nd = [...new Set([...nd, ...a.holdDeps])]; else if (v) nd = [...new Set([...nd, v])];
+        d.dependencyIds = nd; d.executionMode = nd.length ? 'after_dependency' : 'parallel';
+      });
+    });
+    closeModal(); Drawer.close(); toast('Đã hold task – các task sau đã được nối lại.', 'ok');
+  };
+}
+function unholdTask(id) {
+  if (needLogin()) return;
+  Store.commit('Bỏ hold task', pl => {
+    const a = pl.tasks.find(x => x.id === id); if (!a) return false;
+    a.hold = false; a.durationHours = a.holdDur || a.durationHours || 1; a.dependencyIds = a.holdDeps || a.dependencyIds; a.executionMode = a.holdMode || a.executionMode;
+    delete a.holdDur; delete a.holdDeps; delete a.holdMode;
+  });
+  toast('Task đã chạy lại. Kiểm tra lại thứ tự các task phía sau nếu cần.', 'ok');
+  setTimeout(() => Drawer.open(id), 80);
+}
+function drawerButtons(t) {
+  const d = document.getElementById('drawer'); if (!d || !t || !t.id || App.drawerIsNew || d.querySelector('.v20-acts')) return;
+  const host = d.querySelector('.v13-hero') || d.querySelector('.drawer-b'); if (!host) return;
+  const box = document.createElement('div'); box.className = 'v20-acts';
+  box.innerHTML = t.hold ? `<button type="button" class="unhold" data-v20a="unhold">▶ Bỏ hold – chạy lại</button>`
+    : `<button type="button" data-v20a="split">✂ Tách task</button><button type="button" class="hold" data-v20a="hold">⏸ Hold task</button>`;
+  host.appendChild(box);
+  box.onclick = e => { const b = e.target.closest('[data-v20a]'); if (!b) return; const k = b.dataset.v20a;
+    if (k === 'split') splitTask(t.id); if (k === 'hold') holdTask(t.id); if (k === 'unhold') unholdTask(t.id); };
+}
+
+/* ======================= 6. NORMAL RUN ======================= */
+function normalRun() {
+  if (needLogin()) return;
+  const p = plan(), res = sched(p), P = U.parseLocalISO(p.start);
+  const first = new Map();
+  p.tasks.filter(t => !t.normalRun && !t.hold).forEach(t => { const r = res.R.get(t.id); if (!r) return; const f = first.get(t.process); if (f == null || r.start < f) first.set(t.process, r.start); });
+  const plans = [...first].filter(([, s]) => s - P >= MS_H);
+  if (!plans.length) { toast('Mọi process đều bắt đầu ngay khi Shutdown – không cần Normal run.', 'ok'); return; }
+  let made = 0;
+  Store.commit('Tạo Normal run', pl => {
+    pl.tasks = pl.tasks.filter(t => !t.normalRun);
+    const tmp = { tasks: pl.tasks };
+    plans.forEach(([proc, end]) => {
+      const br = (pl.tasks.find(t => t.process === proc) || {}).branch || 'Chung';
+      let s = P;
+      while (s < end - 15 * MS_MIN) {
+        const d = new Date(s), h = d.getHours(), nb = [6, 14, 22, 30].find(x => x > h) ?? 30;
+        const cut = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0).getTime() + nb * MS_H;
+        const e = Math.min(end, cut);
+        const t = normalizeTask({ id: nextTaskId(tmp), order: 0, branch: br, process: proc, taskName: `Normal run – ${proc}`,
+          durationHours: (e - s) / MS_H, standardHours: (e - s) / MS_H, quantity: 1, peopleRequired: 1, assignee: '', owner: '',
+          executionMode: 'parallel', lagHours: 0, notes: 'Process vẫn chạy bình thường trước khi tới giờ shutdown', method: '', progress: 0 });
+        t.normalRun = true; t.constraintType = 'SNET'; t.constraintOffsetHours = (s - P) / MS_H; t.evidence = [{ id: 'done', label: 'Ảnh / xác nhận chạy bình thường', min: 1 }];
+        tmp.tasks.push(t); made++; s = e;
+      }
+    });
+    pl.tasks.sort((a, b) => (a.normalRun ? -1 : 0) - (b.normalRun ? -1 : 0) || a.order - b.order).forEach((t, i) => t.order = i + 1);
+  });
+  let assigned = 0;
+  if (typeof LDC !== 'undefined' && LDC.data) {
+    try {
+      const pl = plan(), dk = LDC.dayKey(U.parseLocalISO(pl.start)); LDC.planDay = dk; if (LDC.autoPick) LDC.autoPick(dk);
+      const sug = LDC.suggest(pl, { overwrite: false, allowHC: false, anyTeam: false }).filter(x => x.t.normalRun && !x.keep && x.names.length);
+      if (sug.length) Store.commit('Gán người Normal run theo LDC', q => sug.forEach(x => { const t = q.tasks.find(k => k.id === x.t.id); if (t) { t.assignee = x.names.join(' + '); assigned++; } }));
+    } catch (e) { console.warn('[v20] LDC', e); }
+  }
+  toast(`Đã tạo ${made} đoạn Normal run theo ca${assigned ? ` · gán người ${assigned} đoạn theo LDC` : (typeof LDC !== 'undefined' && LDC.data ? '' : ' · upload LDC để tự gán người')}.`, 'ok');
+}
+function addNRButton() {
+  const sp = document.querySelector('.topbar .spacer'); if (!sp || document.getElementById('v20NR')) return;
+  const b = document.createElement('button'); b.id = 'v20NR'; b.className = 'tb-btn'; b.textContent = '▶ Normal run'; b.title = 'Tạo đoạn chạy bình thường cho process chưa tới giờ shutdown';
+  b.onclick = normalRun; sp.parentNode.insertBefore(b, sp);
+}
+
+/* ======================= 7. REPORT CA: GIỜ KẾ HOẠCH / THỰC TẾ ======================= */
+function timeBox() {
+  const OP = window.OperatorView, s = OP && OP.sheet; if (!s || !document.body.contains(s.m)) return;
+  const b = s.m.querySelector('#opSheetB'); if (!b || b.querySelector('.v20-time')) return;
+  const p = Store.state.plans.find(x => x.id === s.planId), t = p && p.tasks.find(x => x.id === s.taskId); if (!t) return;
+  const r = Scheduler.schedule(p).R.get(t.id); if (!r) return;
+  const as = t.actualStart || '', ae = t.actualEnd || '';
+  const box = document.createElement('div'); box.className = 'v20-time';
+  const diffTxt = () => {
+    if (!as && !ae) return '';
+    const st = as ? U.parseLocalISO(as) : r.start, en = ae ? U.parseLocalISO(ae) : null;
+    const ds = Math.round((st - (t.planStart || r.start)) / MS_MIN);
+    const late = en && en > (t.planEnd || r.end);
+    return `<div class="diff ${late || ds > 0 ? 'late' : 'ok'}">${ds ? (ds > 0 ? `⏱ Bắt đầu trễ ${U.fmtDur(ds / 60)}` : `⏩ Bắt đầu sớm ${U.fmtDur(-ds / 60)}`) : '✓ Bắt đầu đúng giờ'}${en ? ` · kết thúc ${U.fmtDM(en)}${late ? ' (trễ kế hoạch)' : ''}` : ''}</div>`;
+  };
+  const ps = t.planStart || r.start, pe = t.planEnd || r.end;
+  box.innerHTML = `<div class="plan"><small>🕒 Giờ kế hoạch</small><b>${U.fmtHM(ps)} – ${U.fmtHM(pe)}</b><em>${U.fmtDM(ps).slice(0, 5)} · ${U.fmtDur(t.durationHours)}</em></div>
+    <div class="act"><label>Bắt đầu thực tế<input type="datetime-local" id="v20As" value="${esc(as)}"></label>
+      <label>Kết thúc thực tế<input type="datetime-local" id="v20Ae" value="${esc(ae)}"></label>
+      <button type="button" id="v20Save">Lưu giờ thực tế</button></div>${diffTxt()}`;
+  const head = b.querySelector('.rp-shead'); head ? head.after(box) : b.prepend(box);
+  box.querySelector('#v20Save').onclick = () => {
+    const sa = box.querySelector('#v20As').value, ea = box.querySelector('#v20Ae').value;
+    if (!sa) { toast('Nhập giờ bắt đầu thực tế.', 'warn'); return; }
+    const st = U.parseLocalISO(sa), en = ea ? U.parseLocalISO(ea) : null;
+    if (en && en <= st) { toast('Giờ kết thúc phải sau giờ bắt đầu.', 'warn'); return; }
+    Store.commit('Giờ thực tế: ' + t.taskName, pl => {
+      const q = (pl.tasks ? pl : Store.state.plans.find(x => x.id === s.planId));
+      const a = (q.tasks || Store.state.plans.find(x => x.id === s.planId).tasks).find(x => x.id === t.id); if (!a) return false;
+      const P = U.parseLocalISO((Store.state.plans.find(x => x.id === s.planId) || q).start);
+      if (!a.planStart) { a.planStart = r.start; a.planEnd = r.end; a.planDur = a.durationHours; }
+      a.actualStart = sa; a.actualEnd = ea || '';
+      if (a.executionMode === 'fixed') a.constraintOffsetHours = (st - P) / MS_H;
+      else { a.constraintType = 'SNET'; a.constraintOffsetHours = (st - P) / MS_H; }
+      if (en) { a.durationHours = (en - st) / MS_H; a.standardHours = a.durationHours; }
+    });
+    const nr = Scheduler.schedule(Store.state.plans.find(x => x.id === s.planId)).R.get(t.id);
+    toast(nr && Math.abs(nr.start - st) > MS_MIN ? `Đã lưu – task trước chưa xong nên chỉ bắt đầu được lúc ${U.fmtDM(nr.start)}.` : 'Đã lưu giờ thực tế – Planner đã dời theo.', 'ok');
+    box.remove(); timeBox();
+  };
+}
+
+/* ======================= Ẩn task HOLD khỏi Report ca ======================= */
+function hideHoldInReport() {
+  const OP = window.OperatorView; if (!OP || !document.body.classList.contains('op-mode')) return;
+  const p = Store.state.plans.find(x => x.id === OP.planId); if (!p) return;
+  document.querySelectorAll('#opView .rp-card').forEach(c => { const t = p.tasks.find(x => x.id === c.dataset.opTask); if (t && t.hold) c.style.display = 'none'; });
+}
+
+function boot() {
+  try {
+    patchGantt(); addFab(); addNRButton();
+    const _dr = Drawer.render;
+    Drawer.render = function (t) { const o = _dr.apply(this, arguments); try { drawerButtons(t); } catch (e) { console.warn('[v20]', e); } return o; };
+    if (window.WorkRequest) { const _w = WorkRequest.render; WorkRequest.render = function (...a) { const o = _w.apply(this, a); try { ldcLink(); } catch (e) { } return o; }; }
+    const wv = document.getElementById('wrView'); if (wv) new MutationObserver(() => ldcLink()).observe(wv, { childList: true, subtree: true });
+    const OP = window.OperatorView;
+    if (OP) {
+      const _ot = OP.openTask;
+      OP.openTask = function (...a) { const o = _ot.apply(this, a); const b = OP.sheet && OP.sheet.m.querySelector('#opSheetB');
+        if (b) new MutationObserver(() => { if (!b.querySelector('.v20-time')) timeBox(); }).observe(b, { childList: true }); timeBox(); return o; };
+      const _r = OP.render; OP.render = function (...a) { const o = _r.apply(this, a); hideHoldInReport(); return o; };
+    }
+    if (App.res) App.render();
+    console.log('[v20] đã nạp – tên task bên phải, + task, tách, hold, normal run, giờ thực tế');
+  } catch (e) { console.error('[v20] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 1300)); else setTimeout(boot, 1300);
+})();
+</script>
+<!-- ===================== HẾT v20 ===================== -->
+
   
 </body>
 </html>
