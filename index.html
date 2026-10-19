@@ -8162,6 +8162,191 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 
 
   
+<!-- =====================================================================
+     v24 – LỊCH ĐI CA: OT · NHÀ THẦU · ĐỦ NGƯỜI
+       - M / A / N / D = ca chính. Mã có số (4+N, M+4, M+3.5…) = có giờ OT.
+         Task rơi vào phần giờ OT → tên người hiện kèm nhãn OT (vd: Trần Văn Hiếu OT)
+       - Task có ghi "nhà thầu" (tên / mô tả / phân công) → tự thêm "Nhà thầu" vào người thực hiện
+       - Đếm người theo cột "Số người" của task: thiếu → cảnh báo đỏ để nhập thêm
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v24-style">
+.v24-ot{display:inline-block;margin-left:3px;padding:0 6px;border-radius:999px;font-size:10.5px;font-weight:800;font-style:normal;background:#ff9f0a;color:#fff;vertical-align:1px}
+.v24-nt{display:inline-block;margin-left:3px;padding:0 6px;border-radius:999px;font-size:10.5px;font-weight:700;font-style:normal;background:rgba(94,92,230,.15);color:#5e5ce6;vertical-align:1px}
+.v24-miss{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(255,59,48,.14);color:#d70015;pointer-events:auto;cursor:pointer}
+.outlbl .v24-ot,.outlbl .v24-nt,.outlbl .v24-miss,.rp-card .v24-ot,.rp-card .v24-nt,.rp-card .v24-miss{display:inline-block!important;width:auto!important;height:auto!important;line-height:16px!important;padding:0 7px!important;margin:0 0 0 4px!important;border-radius:999px!important;font-size:10.5px!important;font-style:normal!important;box-shadow:none!important;vertical-align:1px}
+.v24-box{margin-top:8px;padding:9px 12px;border-radius:12px;background:rgba(255,59,48,.10);color:#b91c1c;font-size:13px;font-weight:600}
+.v24-box.ok{background:rgba(48,209,88,.10);color:#15803d}
+#v24Btn.has{background:rgba(255,59,48,.14)!important;color:#d70015!important;border-color:rgba(255,59,48,.4)!important}
+.v24-list{display:grid;gap:6px;max-height:60vh;overflow:auto}
+.v24-it{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center;padding:9px 12px;border-radius:12px;border:1px solid var(--border);background:var(--glass-row,#fff);cursor:pointer;text-align:left;color:var(--text)}
+.v24-it:hover{border-color:#ff3b30}
+.v24-it small{display:block;color:var(--muted);font-size:12px}
+</style>
+<script>
+(function () {
+'use strict';
+const NV = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+const esc = s => U.esc(s ?? '');
+const canEdit = () => !(window.Auth && !Auth.ok);
+const hasLDC = () => typeof LDC !== 'undefined' && LDC.data && LDC.data.people;
+const skip = t => !t || t.normalRun || t.hold || (t.progress || 0) >= 100;
+const isNTName = n => /nha thau|^\d*\s*nt$/.test(NV(n));
+
+/* ---------- đếm người ---------- */
+function headcount(assignee) {
+  return U.splitOwners(assignee).reduce((s, n) => { const m = /^(\d+)\s*(nha thau|nt)/.exec(NV(n)); return s + (m ? +m[1] : 1); }, 0);
+}
+const need = t => Math.max(1, Math.round(t.peopleRequired || 1));
+const missing = t => skip(t) ? 0 : Math.max(0, need(t) - headcount(t.assignee));
+
+/* ---------- nhà thầu ---------- */
+function ntWanted(t) {
+  const txt = NV([t.taskName, t.notes, t.wr && t.wr.desc].filter(Boolean).join(' | '));
+  const m = /(\d+)\s*(nha thau|nt)\b/.exec(txt);
+  if (m) return +m[1];
+  return /nha thau|\bnt\b/.test(txt) ? 1 : 0;
+}
+
+/* ---------- OT theo LDC ---------- */
+function personOf(name) {
+  if (!hasLDC()) return null;
+  const k = NV(name); if (!k || isNTName(name)) return null;
+  return LDC.data.people.find(p => NV(p.name) === k) || null;
+}
+function isOT(p, s, e) {
+  for (const off of [0, -1]) {
+    const day = LDC.dayStart(s) + off * MS_DAY, raw = p.codes.get(LDC.dayKey(day)), w = LDC.parseCode(raw);
+    if (!w) continue;
+    const ws = day + w.s * MS_H, we = day + w.e * MS_H;
+    if (!(s < we && e > ws)) continue;
+    const L = String(raw).toUpperCase().replace(/[^A-Z]/g, ''), b = LDC.SHIFT[L]; if (!b) continue;
+    const bs = day + b[0] * MS_H, be = day + b[1] * MS_H;
+    const otPart = Math.max(0, Math.min(e, bs) - Math.max(s, ws)) + Math.max(0, Math.min(e, we) - Math.max(s, be));
+    return otPart > MS_MIN;
+  }
+  return false;
+}
+function otNames(t, r) {
+  if (!hasLDC() || !r) return null;
+  return U.splitOwners(t.assignee).filter(n => { const p = personOf(n); return p && isOT(p, r.start, Math.max(r.end, r.start + MS_MIN)); }).map(NV).sort();
+}
+
+/* ---------- đồng bộ dữ liệu (chỉ khi đã đăng nhập) ---------- */
+let busy = false;
+function sync() {
+  if (busy || !canEdit() || document.body.classList.contains('op-mode')) return;
+  const p = Store.plan(); if (!p || !p.tasks.length) return;
+  let res; try { res = Scheduler.schedule(p); } catch (e) { return; }
+  const upd = [];
+  p.tasks.forEach(t => {
+    if (t.normalRun) return;
+    const ch = {};
+    const nt = ntWanted(t);
+    if (nt && !t.ntDone && !/nha thau|\bnt\b/.test(NV(t.assignee))) ch.assignee = [t.assignee, nt > 1 ? `${nt} Nhà thầu` : 'Nhà thầu'].filter(Boolean).join(' + ');
+    if (nt && !t.ntDone) ch.ntDone = true;
+    const ot = otNames({ ...t, assignee: ch.assignee ?? t.assignee }, res.R.get(t.id));
+    if (ot && ot.join('|') !== (t.ot || []).join('|')) ch.ot = ot;
+    if (Object.keys(ch).length) upd.push([t.id, ch]);
+  });
+  if (!upd.length) return;
+  busy = true;
+  try { Store.commit('Cập nhật OT / nhà thầu', pl => { upd.forEach(([id, ch]) => { const t = pl.tasks.find(x => x.id === id); if (t) Object.assign(t, ch); }); }); }
+  finally { busy = false; }
+}
+
+/* ---------- hiển thị tên người: OT / Nhà thầu ---------- */
+function whoHTML(t) {
+  const ot = new Set(t.ot || []);
+  return U.splitOwners(t.assignee).map(n => {
+    if (isNTName(n)) return `${esc(n)}<i class="v24-nt">NT</i>`;
+    const manualOT = /\bot\b|\(\s*\d+\s*\+\s*[mand]|[mand]\s*\+\s*\d/i.test(n);
+    return esc(n) + (ot.has(NV(n)) && !manualOT ? '<i class="v24-ot">OT</i>' : '');
+  }).join(' + ');
+}
+function missHTML(t) { const m = missing(t); return m ? `<i class="v24-miss" data-v24t="${esc(t.id)}">⚠ Thiếu ${m}/${need(t)} người</i>` : ''; }
+
+function patchGantt() {
+  const _tr = Gantt.taskRow;
+  Gantt.taskRow = function (t, g, p) {
+    let h = _tr.call(this, t, g, p);
+    if (t.normalRun && !t.assignee) return h;
+    return h.replace(/(<div class="outlbl v20"[^>]*>[\s\S]*?<b>[\s\S]*?<\/b>)(<span>·[\s\S]*?<\/span>)?(<\/div>)/,
+      (m, a, b, c) => a + (t.assignee ? `<span>· ${whoHTML(t)}</span>` : '') + missHTML(t) + c);
+  };
+}
+function patchReport() {
+  const OP = window.OperatorView; if (!OP) return;
+  const _r = OP.render;
+  OP.render = function (...a) {
+    const o = _r.apply(this, a);
+    try {
+      const p = Store.state.plans.find(x => x.id === OP.planId) || Store.plan();
+      document.querySelectorAll('#opView .rp-card').forEach(c => {
+        const t = p.tasks.find(x => x.id === c.dataset.opTask); if (!t) return;
+        const sp = [...c.querySelectorAll('.r7-row span, .rp-meta')].find(s => s.textContent.includes('👤')); if (!sp || sp.dataset.v24) return;
+        sp.dataset.v24 = 1; sp.innerHTML = '👤 ' + (t.assignee ? whoHTML(t) : 'Chưa có người') + missHTML(t);
+      });
+    } catch (e) { }
+    return o;
+  };
+}
+function patchDrawer() {
+  const _dr = Drawer.render;
+  Drawer.render = function (t) {
+    const o = _dr.apply(this, arguments);
+    try {
+      const d = document.getElementById('drawer'); if (!d || !t || !t.id || t.normalRun) return o;
+      const host = d.querySelector('.v13-who') || d.querySelector('.v13-hero'); if (!host || d.querySelector('.v24-box')) return o;
+      const m = missing(t), box = document.createElement('div');
+      box.className = 'v24-box' + (m ? '' : ' ok');
+      box.innerHTML = m ? `⚠ Task cần <b>${need(t)} người</b> – mới có ${headcount(t.assignee)}. Nhập thêm ${m} người${hasLDC() ? '' : ' (hoặc upload LDC để gợi ý)'}.`
+        : `✓ Đủ ${need(t)} người${(t.ot || []).length ? ` · ${t.ot.length} người làm OT` : ''}`;
+      host.after(box);
+    } catch (e) { }
+    return o;
+  };
+}
+/* ---------- nút tổng: bao nhiêu task thiếu người ---------- */
+function btn() {
+  let b = document.getElementById('v24Btn');
+  const sp = document.querySelector('.topbar .spacer');
+  if (!b && sp) { b = document.createElement('button'); b.id = 'v24Btn'; b.className = 'tb-btn'; b.onclick = showList; sp.parentNode.insertBefore(b, sp); }
+  if (!b) return;
+  const p = Store.plan(), n = p ? p.tasks.filter(t => missing(t)).length : 0;
+  b.textContent = n ? `⚠ ${n} task thiếu người` : '👥 Đủ người';
+  b.classList.toggle('has', !!n);
+}
+function showList() {
+  const p = Store.plan(), res = Scheduler.schedule(p), list = p.tasks.filter(t => missing(t)).sort((a, b) => res.R.get(a.id).start - res.R.get(b.id).start);
+  const m = openModal(`<div class="modal-h"><h3>👥 Task thiếu người (${list.length})</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b">${list.length ? `<div class="v24-list">${list.map(t => { const r = res.R.get(t.id);
+      return `<button class="v24-it" data-v24o="${esc(t.id)}"><span>#${t.order} ${esc(t.taskName)}<small>${esc(t.process)} · ${U.fmtDM(r.start)} → ${U.fmtHM(r.end)} · đang có: ${t.assignee ? esc(t.assignee) : '—'}</small></span><b style="color:#d70015">${headcount(t.assignee)}/${need(t)}</b></button>`; }).join('')}</div>`
+      : '<p>✅ Tất cả task đã đủ người.</p>'}
+      <p class="muted small">${hasLDC() ? 'Có thể dùng ☰ → "Gợi ý người thực hiện từ LDC" để tự điền.' : 'Chưa có file LDC – upload ở tab Tạo lịch để tự gợi ý người theo ca.'}</p></div>`, 'sm');
+  m.addEventListener('click', e => { const b = e.target.closest('[data-v24o]'); if (b) { closeModal(); Drawer.open(b.dataset.v24o); } });
+}
+document.addEventListener('click', e => {
+  const c = e.target.closest && e.target.closest('[data-v24t]'); if (!c || document.body.classList.contains('op-mode')) return;
+  e.stopPropagation(); Drawer.open(c.dataset.v24t);
+}, true);
+
+function boot() {
+  try {
+    patchGantt(); patchReport(); patchDrawer();
+    let tmr;
+    const _ar = App.render;
+    App.render = function (...a) { const o = _ar.apply(this, a); try { btn(); } catch (e) { } if (!busy) { clearTimeout(tmr); tmr = setTimeout(sync, 450); } return o; };
+    if (window.Auth) { const _l = Auth.login; Auth.login = async function (...a) { const r = await _l.apply(this, a); if (r) setTimeout(sync, 300); return r; }; }
+    if (App.res) App.render();
+    console.log('[v24] đã nạp – OT / nhà thầu / đủ người');
+  } catch (e) { console.error('[v24] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 2100)); else setTimeout(boot, 2100);
+})();
+</script>
+<!-- ===================== HẾT v24 ===================== -->
+
 </body>
 </html>
 
