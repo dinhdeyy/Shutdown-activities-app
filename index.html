@@ -8696,252 +8696,338 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 <!-- ===================== HẾT v27 ===================== -->
 
 <!-- =====================================================================
-     v28 – TAB 🔁 ROUTINE: task định kỳ theo tần suất + nhắc việc tự động
-       - Kiểu nhắc: ⏱ Theo thời gian (1W·3M·6M·1Y·2Y) · 🛑 Theo đợt dừng (COM / Maintenance / >3 ngày / >7 ngày / mỗi n COM) · ▶ Trong đợt chạy
-       - Chọn kế hoạch Shutdown + loại đợt dừng → app báo task nào PHẢI LÀM đợt này
-       - ➕ Đưa task đến hạn vào kế hoạch · Task đóng xong → tự ghi "lần làm gần nhất" → tính lần tới
-       - Dữ liệu lưu cloud (Supabase planner_state id=2) + máy
-     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     v29 – TAB 🔁 ROUTINE (làm lại cho dễ dùng) – THAY THẾ khối v28
+       3 bước rõ ràng:  ① Chọn đợt dừng  →  ② Xem việc cần làm  →  ③ Đưa vào kế hoạch
+       - Mỗi task: Làm gì · Bao lâu làm 1 lần · Lần gần nhất · Vì sao phải làm đợt này
+       - Bấm vào task → xem LỊCH SỬ đã làm (ngày, đợt, người) + câu hỏi "Đưa vào kế hoạch?"
+       - Tick chọn → nút dưới cùng "Đưa X task vào kế hoạch" → màn hình xác nhận từng task
+     CÁCH DÁN: xóa khối v28 (từ "v28 – TAB 🔁 ROUTINE" tới "HẾT v28"), dán khối này vào đúng chỗ đó
      ===================================================================== -->
-<style id="v28-style">
+<style id="v29-style">
 body.rt-mode>*:not(#rtView):not(#toasts):not(#modalRoot):not(#tip){display:none!important}
-#rtView{flex:1;overflow:auto;padding:14px clamp(10px,2vw,28px) 70px;width:100%}
-.rt-h{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-radius:22px;background:var(--glass,#fff);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-bd,#e5e7eb);box-shadow:var(--glass-sh)}
-.rt-h b{font-size:20px;letter-spacing:-.4px;margin-right:auto;display:flex;align-items:center;gap:10px}
-.rt-h b i{font-style:normal;width:40px;height:40px;border-radius:13px;display:grid;place-items:center;color:#fff;background:conic-gradient(from 200deg,#30d158,#0a84ff,#5e5ce6,#30d158)}
-.rt-pill{border:1px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff);color:var(--text);border-radius:999px;padding:9px 15px;font-size:14px;font-weight:600;cursor:pointer}
-.rt-pill.pri{background:linear-gradient(135deg,#0a84ff,#5e5ce6);color:#fff;border:0}
-.rt-pill:disabled{opacity:.45;cursor:not-allowed}
-.rt-ctrl{display:grid;grid-template-columns:minmax(220px,2fr) 1.2fr 1fr 1fr;gap:10px;margin:12px 0}
-.rt-ctrl label{font-size:12px;color:var(--muted);font-weight:600}
-.rt-ctrl select,.rt-ctrl input{display:block;width:100%;margin-top:4px;border-radius:12px!important}
-.rt-seg{display:grid;grid-template-columns:1fr 1fr;padding:3px;border-radius:12px;background:rgba(118,118,128,.14);margin-top:4px}
-.rt-seg button{border:0;background:transparent;color:var(--text);padding:8px;border-radius:10px;font-weight:600;cursor:pointer}
-.rt-seg button.on{background:var(--glass-row,#fff);box-shadow:0 2px 8px rgba(0,0,0,.12);color:#0a84ff}
-.rt-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}
-.rt-k{text-align:left;border:1px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff);border-radius:18px;padding:12px 14px;cursor:pointer;color:var(--text);transition:transform .3s cubic-bezier(.22,1.2,.36,1)}
-.rt-k:hover{transform:translateY(-2px)}
-.rt-k.on{box-shadow:0 0 0 2px var(--kc)}
-.rt-k span{font-size:12.5px;color:var(--muted);font-weight:600}.rt-k b{display:block;font-size:26px;color:var(--kc);letter-spacing:-.5px}
-.rt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
-.rt-card{background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#e5e7eb);border-radius:22px;padding:14px 14px 8px;box-shadow:0 4px 16px rgba(15,23,42,.06)}
-.rt-card h4{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}
-.rt-card h4 i{width:10px;height:10px;border-radius:50%;background:var(--c)}
-.rt-card h4 small{margin-left:auto;font-weight:500;color:var(--muted);font-size:12px}
-.rt-row{display:grid;grid-template-columns:1fr auto;gap:4px 8px;padding:9px 4px;border-top:1px solid var(--border)}
-.rt-row:first-of-type{border-top:0}
-.rt-row .nm{font-weight:600;font-size:14px;cursor:pointer}
-.rt-row .nm:hover{color:#0a84ff}
-.rt-row .meta{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
-.rt-f{padding:2px 9px;border-radius:999px;font-weight:600;font-size:11.5px}
-.rt-f.time{background:rgba(94,92,230,.12);color:#5e5ce6}.rt-f.event{background:rgba(255,159,10,.15);color:#c26a00}.rt-f.run{background:rgba(10,132,255,.12);color:#0a84ff}
-.rt-st{align-self:start;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
-.rt-st.do{background:#30d158;color:#fff}.rt-st.over{background:#ff3b30;color:#fff}.rt-st.wait{background:rgba(255,159,10,.18);color:#b45309}
-.rt-st.ok{background:rgba(120,120,128,.12);color:var(--muted)}.rt-st.skip{background:transparent;color:var(--muted)}.rt-st.run{background:rgba(10,132,255,.12);color:#0a84ff}
-.rt-st.inplan{background:rgba(48,209,88,.15);color:#15803d}
-.rt-acts{display:flex;gap:6px}
-.rt-acts button{border:1px solid var(--border);background:transparent;color:var(--text);border-radius:10px;padding:3px 9px;font-size:12px;cursor:pointer}
-.rt-acts button:hover{border-color:#0a84ff;color:#0a84ff}
-.rt-f2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.rt-f2 label{font-size:12px;color:var(--muted);font-weight:600}
-.rt-f2 input,.rt-f2 select{display:block;width:100%;margin-top:4px}.rt-f2 .full{grid-column:1/-1}
+#rtView{flex:1;overflow:auto;padding:14px clamp(10px,2.4vw,32px) 120px;width:100%;--g:#30d158;--r:#ff3b30;--o:#ff9f0a;--b:#0a84ff}
+.r9-h{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-radius:22px;background:var(--glass,#fff);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-bd,#e5e7eb);box-shadow:var(--glass-sh)}
+.r9-h .t{display:flex;align-items:center;gap:12px;margin-right:auto}
+.r9-h .t i{font-style:normal;width:42px;height:42px;border-radius:14px;display:grid;place-items:center;font-size:20px;color:#fff;background:conic-gradient(from 200deg,#30d158,#0a84ff,#5e5ce6,#30d158)}
+.r9-h .t b{display:block;font-size:20px;letter-spacing:-.4px}.r9-h .t small{display:block;color:var(--muted);font-size:12.5px}
+.r9-btn{border:1px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff);color:var(--text);border-radius:999px;padding:9px 15px;font-size:14px;font-weight:600;cursor:pointer;transition:transform .3s cubic-bezier(.22,1.2,.36,1)}
+.r9-btn:hover{transform:translateY(-2px)}.r9-btn.pri{background:linear-gradient(135deg,#0a84ff,#5e5ce6);color:#fff;border:0}.r9-btn.ok{background:var(--g);color:#fff;border:0}
+.r9-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+/* stepper */
+.r9-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
+.r9-step{display:flex;gap:10px;align-items:center;padding:12px 14px;border-radius:18px;background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#e5e7eb)}
+.r9-step i{flex:none;font-style:normal;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:rgba(120,120,128,.15);color:var(--text)}
+.r9-step.done i{background:var(--g);color:#fff}.r9-step.cur{border-color:var(--b);box-shadow:0 0 0 3px rgba(10,132,255,.15)}.r9-step.cur i{background:var(--b);color:#fff}
+.r9-step b{display:block;font-size:14px}.r9-step small{display:block;font-size:12px;color:var(--muted)}
+/* bước 1 */
+.r9-card{background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#e5e7eb);border-radius:22px;padding:16px;margin-bottom:12px;box-shadow:0 4px 16px rgba(15,23,42,.05)}
+.r9-card>h3{margin:0 0 12px;font-size:16px;display:flex;align-items:center;gap:8px}
+.r9-card>h3 .n{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--b);color:#fff;font-size:13px}
+.r9-s1{display:grid;grid-template-columns:minmax(220px,2fr) 1.3fr .8fr;gap:12px;align-items:end}
+.r9-s1 label{font-size:12px;color:var(--muted);font-weight:600}.r9-s1 select,.r9-s1 input{display:block;width:100%;margin-top:4px;border-radius:12px!important}
+.r9-seg{display:grid;grid-template-columns:1fr 1fr;padding:4px;border-radius:14px;background:rgba(118,118,128,.14);margin-top:4px}
+.r9-seg button{border:0;background:transparent;color:var(--text);padding:9px;border-radius:11px;font-weight:700;cursor:pointer;font-size:14px}
+.r9-seg button.on{background:var(--glass-row,#fff);box-shadow:0 2px 10px rgba(0,0,0,.12);color:var(--b)}
+.r9-sum{margin-top:12px;padding:10px 14px;border-radius:14px;background:rgba(10,132,255,.08);font-size:14px;line-height:1.5}
+/* bước 2 */
+.r9-filter{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.r9-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff);color:var(--text);border-radius:999px;padding:7px 13px;font-size:13.5px;cursor:pointer}
+.r9-chip i{width:9px;height:9px;border-radius:50%;background:var(--kc)}.r9-chip em{font-style:normal;color:var(--muted)}
+.r9-chip.on{background:var(--text);color:var(--bg,#fff);border-color:transparent}.r9-chip.on em{color:inherit;opacity:.7}
+body.dark .r9-chip.on{background:#f2f4f8;color:#0b0f1a}
+.r9-sec{margin:16px 0 8px;display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+.r9-sec span{padding:3px 11px;border-radius:999px;color:#fff;background:var(--kc);font-size:12.5px}
+.r9-sec small{font-weight:500;color:var(--muted);font-size:13px}
+.r9-sec .all{margin-left:auto;font-size:13px;font-weight:600;color:var(--b);cursor:pointer;background:none;border:0}
+.r9-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:10px}
+.r9-task{position:relative;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:start;padding:14px;border-radius:18px;background:var(--glass-row,#fff);border:1.5px solid var(--glass-bd,#e5e7eb);cursor:pointer;transition:transform .3s cubic-bezier(.22,1.2,.36,1),box-shadow .2s,border-color .2s}
+.r9-task:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(15,23,42,.10)}
+.r9-task.sel{border-color:var(--b);box-shadow:0 0 0 3px rgba(10,132,255,.15)}
+.r9-ck{width:26px;height:26px;border-radius:9px;border:2px solid rgba(120,120,128,.45);display:grid;place-items:center;color:#fff;font-weight:800;font-size:14px;margin-top:2px;transition:all .2s;cursor:pointer;background:transparent}
+.r9-task.sel .r9-ck{background:var(--b);border-color:var(--b)}
+.r9-ck.na{visibility:hidden}
+.r9-task .nm{font-size:15.5px;font-weight:700;line-height:1.3}
+.r9-task .tg{display:flex;gap:6px;flex-wrap:wrap;margin:5px 0 7px}
+.r9-task .tg span{font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;background:rgba(120,120,128,.12);color:var(--muted)}
+.r9-task .tg .fq{background:rgba(94,92,230,.12);color:#5e5ce6}
+.r9-why{font-size:13px;line-height:1.5;color:var(--text)}
+.r9-why b{font-weight:700}
+.r9-last{font-size:12.5px;color:var(--muted);margin-top:4px}
+.r9-badge{align-self:start;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap;color:#fff;background:var(--kc)}
+.r9-badge.soft{background:rgba(120,120,128,.14);color:var(--muted)}
+/* thanh dưới */
+.r9-bar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:14px;padding:12px 14px 12px 20px;border-radius:999px;
+  background:rgba(20,24,36,.9);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);color:#fff;box-shadow:0 18px 40px rgba(0,0,0,.35);animation:r9up .4s cubic-bezier(.22,1.2,.36,1);max-width:calc(100vw - 24px)}
+.r9-bar b{font-size:15px}.r9-bar small{opacity:.7;font-size:12.5px}
+.r9-bar button{border:0;border-radius:999px;padding:11px 18px;font-weight:700;font-size:14.5px;cursor:pointer}
+.r9-bar .go{background:linear-gradient(135deg,#30d158,#0ea5e9);color:#fff}.r9-bar .x{background:rgba(255,255,255,.15);color:#fff}
+@keyframes r9up{from{opacity:0;transform:translate(-50%,20px)}}
+/* chi tiết */
+.r9-dt .hero{padding:14px;border-radius:18px;background:linear-gradient(135deg,rgba(10,132,255,.10),rgba(94,92,230,.10));margin-bottom:12px}
+.r9-dt .hero>b{font-size:18px}.r9-dt .hero p{margin:6px 0 0;font-size:13.5px;line-height:1.55}
+.r9-kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.r9-kv div{padding:10px 12px;border-radius:14px;background:rgba(120,120,128,.08)}.r9-kv span{display:block;font-size:11.5px;color:var(--muted);font-weight:600}.r9-kv b{font-size:15px}
+.r9-tl{position:relative;margin:4px 0 12px;padding-left:22px}
+.r9-tl::before{content:'';position:absolute;left:7px;top:6px;bottom:6px;width:2px;background:rgba(120,120,128,.25)}
+.r9-tl div{position:relative;padding:6px 0;font-size:13.5px}.r9-tl div::before{content:'';position:absolute;left:-20px;top:11px;width:12px;height:12px;border-radius:50%;background:var(--g);box-shadow:0 0 0 3px var(--glass-row,#fff)}
+.r9-tl div.next::before{background:var(--o)}.r9-tl small{color:var(--muted)}
+.r9-ask{padding:14px;border-radius:16px;background:rgba(48,209,88,.10);border:1px solid rgba(48,209,88,.35);font-size:14px}
+.r9-ask .q{font-weight:700;margin-bottom:10px}
+.r9-ask .a{display:flex;gap:8px;flex-wrap:wrap}
+.r9-cf{display:grid;gap:8px;max-height:56vh;overflow:auto}
+.r9-cf .it{display:grid;grid-template-columns:1fr 120px 90px;gap:8px;align-items:center;padding:10px 12px;border-radius:14px;border:1px solid var(--border)}
+.r9-cf .it small{display:block;color:var(--muted);font-size:12px}.r9-cf input,.r9-cf select{width:100%}
+.r9-f2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.r9-f2 label{font-size:12px;color:var(--muted);font-weight:600}.r9-f2 input,.r9-f2 select{display:block;width:100%;margin-top:4px}.r9-f2 .full{grid-column:1/-1}
 .grow .rt-tag{display:inline-block;margin-right:4px;padding:0 6px;border-radius:999px;font-size:10.5px;font-weight:700;background:rgba(94,92,230,.15);color:#5e5ce6}
-@media (max-width:900px){.rt-ctrl{grid-template-columns:1fr 1fr}.rt-kpis{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:900px){.r9-steps{grid-template-columns:1fr}.r9-s1{grid-template-columns:1fr}.r9-list{grid-template-columns:1fr}.r9-kv{grid-template-columns:1fr 1fr}.r9-cf .it{grid-template-columns:1fr}}
 </style>
 <script>
 (function () {
 'use strict';
-const SEED = [{"id": "R01", "grp": "ADS", "proc": "ADS", "name": "Leak Test", "freq": "maintenance 1Y/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 4, "ppl": 2}, {"id": "R02", "grp": "ADS", "proc": "ADS", "name": "Fill - Xả than", "freq": "1W/lần", "kind": "time", "days": 7, "when": "all", "n": null, "hrs": 8, "ppl": 2}, {"id": "R03", "grp": "ADS", "proc": "ADS", "name": "Vệ sinh filter", "freq": "Shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 2, "ppl": 1}, {"id": "R04", "grp": "ADS", "proc": "ADS", "name": "Gia nhiệt cột", "freq": "Maintenance >7d", "kind": "event", "days": null, "when": "maint7", "n": null, "hrs": 8, "ppl": 1}, {"id": "R05", "grp": "Evap 1", "proc": "EVAP 1", "name": "Leak Test", "freq": "shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 4, "ppl": 1}, {"id": "R06", "grp": "Evap 1", "proc": "EVAP 1", "name": "Thông cột Evap", "freq": "maintenance 1Y/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 8, "ppl": 2}, {"id": "R07", "grp": "Evap 1", "proc": "EVAP 1", "name": "Vệ sinh sensor pass", "freq": "Shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 1, "ppl": 1}, {"id": "R08", "grp": "RO", "proc": "RO", "name": "Đẩy membrane", "freq": "plan trong đợt chạy", "kind": "run", "days": null, "when": "run", "n": null, "hrs": 8, "ppl": 3}, {"id": "R09", "grp": "RO", "proc": "RO", "name": "Ngâm ultrasil 75", "freq": "shutdown >3d", "kind": "event", "days": null, "when": "sd3", "n": null, "hrs": 4, "ppl": 1}, {"id": "R10", "grp": "RO", "proc": "RO", "name": "CIP cooling HX loop", "freq": "maintenance 1Y/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 4, "ppl": 1}, {"id": "R11", "grp": "RO", "proc": "RO", "name": "CIP cooling HX 1+2", "freq": "maintenance 1Y/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 4, "ppl": 1}, {"id": "R12", "grp": "RO", "proc": "RO", "name": "Vệ sinh membrane", "freq": "plan trong đợt chạy", "kind": "run", "days": null, "when": "run", "n": null, "hrs": 8, "ppl": 2}, {"id": "R13", "grp": "NSD", "proc": "NSD", "name": "Thay filter bagfilter", "freq": "2Y/lần", "kind": "time", "days": 730, "when": "all", "n": null, "hrs": 8, "ppl": 3}, {"id": "R14", "grp": "NSD", "proc": "NSD", "name": "Thay filter dehum", "freq": "shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 2, "ppl": 2}, {"id": "R15", "grp": "NSD", "proc": "NSD", "name": "Tháo kiểm tra filter bagfilter", "freq": "1Y/lần", "kind": "time", "days": 365, "when": "all", "n": null, "hrs": 4, "ppl": 2}, {"id": "R16", "grp": "NSD", "proc": "NSD", "name": "Safety test 3M", "freq": "shutdown COM khi tới hạn safety test", "kind": "time", "days": 91, "when": "all", "n": null, "hrs": 2, "ppl": 1}, {"id": "R17", "grp": "NSD", "proc": "NSD", "name": "Safety test 1Y", "freq": "shutdown COM khi tới hạn safety test", "kind": "time", "days": 365, "when": "all", "n": null, "hrs": 4, "ppl": 1}, {"id": "R18", "grp": "NSD", "proc": "NSD", "name": "Thay nozzle", "freq": "3M/lần", "kind": "time", "days": 91, "when": "all", "n": null, "hrs": 1, "ppl": 1}, {"id": "R19", "grp": "NSD", "proc": "NSD", "name": "Thay seal nozzle", "freq": "shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 1, "ppl": 1}, {"id": "R20", "grp": "Bean", "proc": "IDR", "name": "Vệ sinh filter DP", "freq": "3 COM/lần", "kind": "event", "days": null, "when": "ncom", "n": 3, "hrs": 4, "ppl": 2}, {"id": "R21", "grp": "Bean", "proc": "IDR", "name": "Check filter heater", "freq": "shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 2, "ppl": 1}, {"id": "R22", "grp": "EXT - Rein", "proc": "EXT", "name": "Leak test", "freq": "6M/lần", "kind": "time", "days": 182, "when": "all", "n": null, "hrs": 4, "ppl": 2}, {"id": "R23", "grp": "EXT - Rein", "proc": "REIN", "name": "Vệ sinh venting tumbler", "freq": "maintenance", "kind": "event", "days": null, "when": "maint", "n": null, "hrs": 4, "ppl": 2}, {"id": "R24", "grp": "EXT - Rein", "proc": "REIN", "name": "Thông đường venting tumbler", "freq": "trước nhà thầu vệ sinh hàng ca", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 1, "ppl": 1}];
+const SEED = [{"id": "R01", "grp": "ADS", "proc": "ADS", "name": "Leak Test", "freq": "Maintenance · 1 năm/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 4, "ppl": 2}, {"id": "R02", "grp": "ADS", "proc": "ADS", "name": "Fill - Xả than", "freq": "1 tuần/lần", "kind": "time", "days": 7, "when": "all", "n": null, "hrs": 8, "ppl": 2}, {"id": "R03", "grp": "ADS", "proc": "ADS", "name": "Vệ sinh filter", "freq": "Mỗi đợt shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 2, "ppl": 1}, {"id": "R04", "grp": "ADS", "proc": "ADS", "name": "Gia nhiệt cột", "freq": "Maintenance > 7 ngày", "kind": "event", "days": null, "when": "maint7", "n": null, "hrs": 8, "ppl": 1}, {"id": "R05", "grp": "Evap 1", "proc": "EVAP 1", "name": "Leak Test", "freq": "Mỗi đợt shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 4, "ppl": 1}, {"id": "R06", "grp": "Evap 1", "proc": "EVAP 1", "name": "Thông cột Evap", "freq": "Maintenance · 1 năm/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 8, "ppl": 2}, {"id": "R07", "grp": "Evap 1", "proc": "EVAP 1", "name": "Vệ sinh sensor pass", "freq": "Mỗi đợt shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 1, "ppl": 1}, {"id": "R08", "grp": "RO", "proc": "RO", "name": "Đẩy membrane", "freq": "Plan trong đợt chạy", "kind": "run", "days": null, "when": "run", "n": null, "hrs": 8, "ppl": 3}, {"id": "R09", "grp": "RO", "proc": "RO", "name": "Ngâm ultrasil 75", "freq": "Shutdown > 3 ngày", "kind": "event", "days": null, "when": "sd3", "n": null, "hrs": 4, "ppl": 1}, {"id": "R10", "grp": "RO", "proc": "RO", "name": "CIP cooling HX loop", "freq": "Maintenance · 1 năm/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 4, "ppl": 1}, {"id": "R11", "grp": "RO", "proc": "RO", "name": "CIP cooling HX 1+2", "freq": "Maintenance · 1 năm/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 4, "ppl": 1}, {"id": "R12", "grp": "RO", "proc": "RO", "name": "Vệ sinh membrane", "freq": "Plan trong đợt chạy", "kind": "run", "days": null, "when": "run", "n": null, "hrs": 8, "ppl": 2}, {"id": "R13", "grp": "NSD", "proc": "NSD", "name": "Thay filter bagfilter", "freq": "2 năm/lần", "kind": "time", "days": 730, "when": "all", "n": null, "hrs": 8, "ppl": 3}, {"id": "R14", "grp": "NSD", "proc": "NSD", "name": "Thay filter dehum", "freq": "Mỗi đợt shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 2, "ppl": 2}, {"id": "R15", "grp": "NSD", "proc": "NSD", "name": "Tháo kiểm tra filter bagfilter", "freq": "1 năm/lần", "kind": "time", "days": 365, "when": "all", "n": null, "hrs": 4, "ppl": 2}, {"id": "R16", "grp": "NSD", "proc": "NSD", "name": "Safety test 3M", "freq": "3 tháng/lần · làm ở đợt COM gần hạn", "kind": "time", "days": 91, "when": "all", "n": null, "hrs": 2, "ppl": 1}, {"id": "R17", "grp": "NSD", "proc": "NSD", "name": "Safety test 1Y", "freq": "1 năm/lần · làm ở đợt COM gần hạn", "kind": "time", "days": 365, "when": "all", "n": null, "hrs": 4, "ppl": 1}, {"id": "R18", "grp": "NSD", "proc": "NSD", "name": "Thay nozzle", "freq": "3 tháng/lần", "kind": "time", "days": 91, "when": "all", "n": null, "hrs": 1, "ppl": 1}, {"id": "R19", "grp": "NSD", "proc": "NSD", "name": "Thay seal nozzle", "freq": "Mỗi đợt shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 1, "ppl": 1}, {"id": "R20", "grp": "Bean", "proc": "IDR", "name": "Vệ sinh filter DP", "freq": "3 đợt COM/lần", "kind": "event", "days": null, "when": "ncom", "n": 3, "hrs": 4, "ppl": 2}, {"id": "R21", "grp": "Bean", "proc": "IDR", "name": "Check filter heater", "freq": "Mỗi đợt shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 2, "ppl": 1}, {"id": "R22", "grp": "EXT - Rein", "proc": "EXT", "name": "Leak test", "freq": "6 tháng/lần", "kind": "time", "days": 182, "when": "all", "n": null, "hrs": 4, "ppl": 2}, {"id": "R23", "grp": "EXT - Rein", "proc": "REIN", "name": "Vệ sinh venting tumbler", "freq": "Mỗi đợt Maintenance", "kind": "event", "days": null, "when": "maint", "n": null, "hrs": 4, "ppl": 2}, {"id": "R24", "grp": "EXT - Rein", "proc": "REIN", "name": "Thông đường venting tumbler", "freq": "Trước khi nhà thầu vệ sinh hàng ca", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 1, "ppl": 1}];
 const LS = 'sp.routine.v1', DAY = 864e5;
 const esc = s => U.esc(s ?? '');
 const canEdit = () => !(window.Auth && !Auth.ok);
 const needLogin = () => { if (canEdit()) return false; const b = document.getElementById('auBadge'); if (b) b.click(); return true; };
-const WHEN = { all: 'Mọi đợt dừng', maint: 'Maintenance', maint7: 'Maintenance >7 ngày', sd3: 'Shutdown >3 ngày', ncom: 'Mỗi n đợt COM', run: 'Trong đợt chạy' };
-const KIND = { time: '⏱ Theo thời gian', event: '🛑 Theo đợt dừng', run: '▶ Trong đợt chạy' };
-const COLORS = ['#0a84ff', '#30d158', '#ff9f0a', '#bf5af2', '#ff375f', '#64d2ff', '#5e5ce6'];
-const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const WHEN = { all: 'mọi đợt dừng', maint: 'đợt Maintenance', maint7: 'đợt Maintenance trên 7 ngày', sd3: 'đợt dừng trên 3 ngày', ncom: 'mỗi n đợt COM', run: 'trong đợt chạy' };
+const DUR = { 7: '1 tuần', 30: '1 tháng', 91: '3 tháng', 182: '6 tháng', 365: '1 năm', 730: '2 năm' };
+const dayStart = ms => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const toISO = ms => { const d = new Date(ms), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 const fromISO = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || ''); return m ? new Date(+m[1], m[2] - 1, +m[3]).getTime() : null; };
 const dm = ms => { const d = new Date(ms); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`; };
+const ago = ms => { const n = Math.round((dayStart(Date.now()) - ms) / DAY); return n <= 0 ? 'hôm nay' : n < 31 ? `${n} ngày trước` : n < 365 ? `${Math.round(n / 30)} tháng trước` : `${(n / 365).toFixed(1)} năm trước`; };
 
-/* ---------------- DỮ LIỆU ---------------- */
+/* ---------------- DỮ LIỆU (dùng chung với v28) ---------------- */
 let DB = null;
-function blank() { return { items: SEED.map(x => ({ ...x, last: '', lastSeq: null })), stops: [], planCfg: {}, updatedAt: 0 }; }
-function load() { try { DB = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { } if (!DB || !Array.isArray(DB.items)) DB = blank(); }
+function load() {
+  try { DB = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { }
+  if (!DB || !Array.isArray(DB.items)) DB = { items: SEED.map(x => ({ ...x })), stops: [], planCfg: {}, updatedAt: 0 };
+  norm();
+}
+function norm() {
+  DB.stops = DB.stops || []; DB.planCfg = DB.planCfg || {};
+  DB.items.forEach(r => { if (!Array.isArray(r.hist)) r.hist = r.last ? [{ date: r.last, plan: '', by: '' }] : []; const s = SEED.find(x => x.id === r.id); if (s && /\/lần$|COM$/.test(r.freq || '') && !/·/.test(r.freq)) r.freq = s.freq; });
+}
 let saveT;
 function save() {
   DB.updatedAt = Date.now();
   try { localStorage.setItem(LS, JSON.stringify(DB)); } catch (e) { }
   clearTimeout(saveT);
-  saveT = setTimeout(async () => { try { if (typeof sb !== 'undefined') await sb.from('planner_state').upsert({ id: 2, data: { routine: DB, savedAt: 0 }, updated_at: new Date().toISOString() }); } catch (e) { console.warn('[v28] cloud', e); } }, 600);
+  saveT = setTimeout(async () => { try { if (typeof sb !== 'undefined') await sb.from('planner_state').upsert({ id: 2, data: { routine: DB, savedAt: 0 }, updated_at: new Date().toISOString() }); } catch (e) { console.warn('[v29] cloud', e); } }, 600);
 }
 async function loadCloud() {
   try {
     if (typeof sb === 'undefined') return;
     const { data } = await sb.from('planner_state').select('data').eq('id', 2).maybeSingle();
     const c = data && data.data && data.data.routine;
-    if (c && Array.isArray(c.items) && (c.updatedAt || 0) > (DB.updatedAt || 0)) { DB = c; try { localStorage.setItem(LS, JSON.stringify(DB)); } catch (e) { } render(); }
-  } catch (e) { console.warn('[v28] load', e); }
+    if (c && Array.isArray(c.items) && (c.updatedAt || 0) > (DB.updatedAt || 0)) { DB = c; norm(); try { localStorage.setItem(LS, JSON.stringify(DB)); } catch (e) { } render(); }
+  } catch (e) { console.warn('[v29] load', e); }
+}
+function record(r, date, plan, by) {
+  r.hist = r.hist || [];
+  if (!r.hist.some(h => h.date === date && h.plan === plan)) r.hist.push({ date, plan: plan || '', by: by || '' });
+  r.hist.sort((a, b) => a.date.localeCompare(b.date));
+  r.last = r.hist[r.hist.length - 1].date;
 }
 
-/* ---------------- NGỮ CẢNH ĐỢT DỪNG ---------------- */
-let F = { planId: null, st: 'all' };
+/* ---------------- ĐỢT DỪNG ---------------- */
+const F = { planId: null, st: 'need', sel: new Set() };
 function ctx() {
   const plans = Store.state.plans, p = plans.find(x => x.id === F.planId) || Store.plan() || plans[0];
   F.planId = p.id;
-  let days = 3, start = fromISO((p.start || '').slice(0, 10)) || today();
-  try { const r = Scheduler.schedule(p); days = Math.max(1, Math.round((r.windowEnd - r.windowStart) / DAY * 10) / 10); start = r.windowStart; } catch (e) { }
+  let days = 3, start = dayStart(Date.now());
+  try { const r = Scheduler.schedule(p); days = Math.max(1, Math.round((r.windowEnd - r.windowStart) / DAY * 10) / 10); start = dayStart(r.windowStart); } catch (e) { }
   const cfg = DB.planCfg[p.id] || {};
-  const type = cfg.type || (/maint/i.test(p.name) ? 'MAINT' : 'COM');
-  const look = cfg.look ?? 30;
-  const idx = DB.stops.findIndex(s => s.planId === p.id), seq = idx >= 0 ? idx : DB.stops.length;
-  return { p, start: new Date(start).setHours(0, 0, 0, 0), days: cfg.days ?? days, type, look, seq };
+  const idx = DB.stops.findIndex(s => s.planId === p.id);
+  return { p, start, days: cfg.days ?? days, type: cfg.type || (/maint/i.test(p.name) ? 'MAINT' : 'COM'), look: cfg.look ?? 30, seq: idx >= 0 ? idx : DB.stops.length, set: !!cfg.type };
 }
-function applies(w, c) {
-  if (w === 'all') return true;
-  if (w === 'maint') return c.type === 'MAINT';
-  if (w === 'maint7') return c.type === 'MAINT' && c.days > 7;
-  if (w === 'sd3') return c.days > 3;
-  return false;
-}
+const applies = (w, c) => w === 'all' || (w === 'maint' && c.type === 'MAINT') || (w === 'maint7' && c.type === 'MAINT' && c.days > 7) || (w === 'sd3' && c.days > 3);
+const KC = { over: '#ff3b30', need: '#30d158', inplan: '#0a84ff', wait: '#ff9f0a', run: '#64d2ff', ok: '#94a3b8' };
+const LBL = { over: 'Quá hạn', need: 'Cần làm đợt này', inplan: 'Đã có trong kế hoạch', wait: 'Đến hạn – chờ đợt khác', run: 'Làm trong đợt chạy', ok: 'Chưa đến hạn' };
 function status(r, c) {
-  const inPlan = c.p.tasks.some(t => t.routineId === r.id);
+  const t = c.p.tasks.find(x => x.routineId === r.id);
   let o;
-  if (r.kind === 'run') o = { code: 'run', text: '▶ Làm trong đợt chạy' };
+  if (r.kind === 'run') o = { code: 'run', why: 'Việc này làm <b>khi line đang chạy</b>, không đưa vào Shutdown.' };
   else if (r.kind === 'time') {
-    const last = fromISO(r.last), next = last != null && r.days ? last + r.days * DAY : null;
-    const due = next == null || next <= c.start + c.look * DAY, ap = applies(r.when, c);
-    if (due && ap) o = next == null ? { code: 'do', text: 'Làm đợt này · chưa có ngày làm', next } : next < c.start ? { code: 'over', text: `Quá hạn ${Math.round((c.start - next) / DAY)} ngày`, next } : { code: 'do', text: `Làm đợt này · hạn ${dm(next)}`, next };
-    else if (due) o = { code: 'wait', text: `Đến hạn – chờ đợt ${WHEN[r.when]}`, next };
-    else o = { code: 'ok', text: `Còn ${Math.round((next - c.start) / DAY)} ngày`, next };
+    const last = fromISO(r.last), next = last != null && r.days ? last + r.days * DAY : null, due = next == null || next <= c.start + c.look * DAY, ap = applies(r.when, c);
+    const cyc = DUR[r.days] || `${r.days} ngày`;
+    if (next == null) o = { code: ap ? 'need' : 'wait', next, why: `Làm <b>${cyc}/lần</b>${r.when !== 'all' ? ` (chỉ ở ${WHEN[r.when]})` : ''} · <b>chưa có ghi nhận lần làm</b> → nên làm đợt này để bắt đầu theo dõi.` };
+    else if (!due) o = { code: 'ok', next, why: `Làm <b>${cyc}/lần</b> · hạn tiếp theo <b>${dm(next)}</b> – còn ${Math.round((next - c.start) / DAY)} ngày.` };
+    else if (!ap) o = { code: 'wait', next, why: `Đã tới hạn <b>${dm(next)}</b>, nhưng việc này chỉ làm ở <b>${WHEN[r.when]}</b> – đợt này là ${c.type === 'MAINT' ? 'Maintenance' : 'COM'}.` };
+    else if (next < c.start) o = { code: 'over', next, why: `Hạn là <b>${dm(next)}</b> → đã <b>quá ${Math.round((c.start - next) / DAY)} ngày</b>. Phải làm đợt này.` };
+    else o = { code: 'need', next, why: `Hạn <b>${dm(next)}</b> rơi vào khoảng đợt dừng này (${cyc}/lần).` };
   } else if (r.when === 'ncom') {
     const n = Math.max(1, r.n || 1), since = r.lastSeq == null ? n : c.seq - r.lastSeq;
-    o = since >= n ? { code: 'do', text: r.lastSeq == null ? 'Làm đợt này · chưa có dữ liệu' : `Làm đợt này · đã qua ${since} đợt` } : { code: 'ok', text: `Còn ${n - since} đợt` };
-  } else o = applies(r.when, c) ? { code: 'do', text: 'Làm đợt này' } : { code: 'skip', text: 'Không áp dụng đợt này' };
-  if (inPlan && (o.code === 'do' || o.code === 'over')) o = { ...o, code: 'inplan', text: '✓ Đã có trong kế hoạch' };
+    o = since >= n ? { code: 'need', why: `Làm <b>${n} đợt COM/lần</b> · ${r.lastSeq == null ? 'chưa có ghi nhận' : `đã qua <b>${since} đợt</b>`} → tới lượt.` } : { code: 'ok', why: `Làm <b>${n} đợt COM/lần</b> · còn <b>${n - since} đợt</b> nữa.` };
+  } else o = applies(r.when, c) ? { code: 'need', why: `Làm ở <b>${WHEN[r.when]}</b> → đợt này phải làm.` } : { code: 'ok', why: `Chỉ làm ở <b>${WHEN[r.when]}</b> – đợt này không cần.` };
+  if (t) o = { ...o, code: 'inplan', task: t, why: `Đã đưa vào kế hoạch · ${(t.progress || 0) >= 100 ? '<b style="color:#1f9d47">✓ đã xong</b>' + (t.doneBy ? ' – ' + esc(t.doneBy) : '') : '<b>chưa làm</b>'}. ` + o.why };
   return o;
 }
-const isDue = s => s.code === 'do' || s.code === 'over';
+const canAdd = s => s.code === 'need' || s.code === 'over' || s.code === 'wait' || s.code === 'ok';
 
-/* ---------------- GIAO DIỆN ---------------- */
+/* ---------------- RENDER ---------------- */
 function render() {
   const v = document.getElementById('rtView'); if (!v || !document.body.classList.contains('rt-mode')) return;
-  const c = ctx(), list = DB.items.map(r => ({ r, s: status(r, c) }));
-  const cnt = k => list.filter(x => k === 'due' ? isDue(x.s) : k === 'all' ? true : x.s.code === k).length;
-  const show = list.filter(x => F.st === 'all' ? true : F.st === 'due' ? isDue(x.s) : x.s.code === F.st);
-  const groups = new Map(); show.forEach(x => { if (!groups.has(x.r.grp)) groups.set(x.r.grp, []); groups.get(x.r.grp).push(x); });
-  const allGrp = [...new Set(DB.items.map(r => r.grp))];
-  const ro = !canEdit();
+  const c = ctx(), ro = !canEdit(), list = DB.items.map(r => ({ r, s: status(r, c) }));
+  const cnt = k => list.filter(x => k === 'all' ? true : k === 'need' ? (x.s.code === 'need' || x.s.code === 'over') : x.s.code === k).length;
+  [...F.sel].forEach(id => { const x = list.find(y => y.r.id === id); if (!x || x.s.code === 'inplan' || x.s.code === 'run') F.sel.delete(id); });
+  const needN = cnt('need'), inplanN = cnt('inplan');
+  const order = ['over', 'need', 'inplan', 'wait', 'run', 'ok'];
+  const show = F.st === 'all' ? order : F.st === 'need' ? ['over', 'need'] : [F.st];
+  const step = !c.set ? 1 : needN ? 2 : 3;
   v.innerHTML = `
-    <header class="rt-h"><b><i>🔁</i>Routine định kỳ</b>
-      ${ro ? '<button class="rt-pill" data-rt="login">👁 Chỉ xem – đăng nhập</button>' : '<button class="rt-pill" data-rt="new">＋ Task routine</button>'}
-      <button class="rt-pill" data-rt="xls">⬇ Xuất Excel</button>
-      <button class="rt-pill pri" data-rt="add" ${ro || !cnt('due') ? 'disabled' : ''}>➕ Đưa ${cnt('due')} task vào kế hoạch</button>
-      <button class="rt-pill" data-rt="back">Planner</button></header>
-    <section class="rt-ctrl">
-      <label>Kế hoạch Shutdown (đợt dừng)<select id="rtPlan">${Store.state.plans.map(p => `<option value="${esc(p.id)}" ${p.id === c.p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
-      <label>Loại đợt dừng<div class="rt-seg">${[['COM', '🧽 COM'], ['MAINT', '🔧 Maintenance']].map(([k, l]) => `<button type="button" data-rtt="${k}" class="${c.type === k ? 'on' : ''}">${l}</button>`).join('')}</div></label>
-      <label>Số ngày dừng<input id="rtDays" type="number" min="0.5" step="0.5" value="${c.days}"></label>
-      <label>Nhắc trước (ngày)<input id="rtLook" type="number" min="0" value="${c.look}"></label>
+    <header class="r9-h"><div class="t"><i>🔁</i><div><b>Routine định kỳ</b><small>Việc làm theo tần suất – app tự nhắc khi tới hạn</small></div></div>
+      ${ro ? '<button class="r9-btn" data-r9="login">👁 Đăng nhập để chỉnh</button>' : '<button class="r9-btn" data-r9="new">＋ Thêm task routine</button>'}
+      <button class="r9-btn" data-r9="xls">⬇ Xuất Excel</button><button class="r9-btn" data-r9="back">← Planner</button></header>
+    <div class="r9-steps">
+      ${[['Chọn đợt dừng', `${esc(c.p.name)} · ${c.type === 'MAINT' ? 'Maintenance' : 'COM'}`], ['Xem việc cần làm', `${needN} việc đến hạn`], ['Đưa vào kế hoạch', `${inplanN} việc đã đưa vào`]]
+        .map(([b, s], i) => `<div class="r9-step ${i + 1 < step ? 'done' : i + 1 === step ? 'cur' : ''}"><i>${i + 1 < step ? '✓' : i + 1}</i><div><b>${b}</b><small>${s}</small></div></div>`).join('')}</div>
+    <section class="r9-card"><h3><span class="n">1</span>Đợt dừng này là gì?</h3>
+      <div class="r9-s1">
+        <label>Kế hoạch Shutdown<select id="r9Plan">${Store.state.plans.map(p => `<option value="${esc(p.id)}" ${p.id === c.p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+        <label>Loại đợt dừng<div class="r9-seg">${[['COM', '🧽 Shutdown COM'], ['MAINT', '🔧 Maintenance']].map(([k, l]) => `<button type="button" data-r9t="${k}" class="${c.type === k ? 'on' : ''}">${l}</button>`).join('')}</div></label>
+        <label>Số ngày dừng<input id="r9Days" type="number" min="0.5" step="0.5" value="${c.days}"></label></div>
+      <div class="r9-sum">📅 Bắt đầu <b>${dm(c.start)}</b> · dừng <b>${c.days} ngày</b> · loại <b>${c.type === 'MAINT' ? 'Maintenance' : 'COM'}</b> → có <b style="color:#15803d">${needN} việc cần làm</b>${cnt('over') ? `, trong đó <b style="color:#d70015">${cnt('over')} việc quá hạn</b>` : ''}${cnt('wait') ? ` · ${cnt('wait')} việc đến hạn nhưng chờ đợt khác` : ''}.</div></section>
+    <section class="r9-card"><h3><span class="n">2</span>Việc routine – chọn việc muốn đưa vào kế hoạch</h3>
+      <div class="r9-filter">${[['need', 'Cần làm đợt này'], ['inplan', 'Đã có trong KH'], ['wait', 'Chờ đợt khác'], ['ok', 'Chưa đến hạn'], ['run', 'Trong đợt chạy'], ['all', 'Tất cả']]
+        .map(([k, l]) => `<button class="r9-chip ${F.st === k ? 'on' : ''}" data-r9s="${k}" style="--kc:${KC[k] || '#64748b'}">${k === 'all' ? '' : '<i></i>'}${l} <em>${cnt(k)}</em></button>`).join('')}</div>
+      ${show.map(code => { const rows = list.filter(x => x.s.code === code); if (!rows.length) return '';
+        const pick = rows.filter(x => canAdd(x.s)).map(x => x.r.id);
+        return `<div class="r9-sec" style="--kc:${KC[code]}"><span>${LBL[code]}</span><small>${rows.length} việc</small>${!ro && pick.length && (code === 'over' || code === 'need') ? `<button class="all" data-r9all="${pick.join(',')}">Chọn tất cả</button>` : ''}</div>
+          <div class="r9-list">${rows.map(({ r, s }) => { const sel = F.sel.has(r.id), can = !ro && canAdd(s);
+            return `<div class="r9-task ${sel ? 'sel' : ''}" data-r9o="${r.id}">
+              <button type="button" class="r9-ck ${can ? '' : 'na'}" data-r9c="${r.id}" title="Chọn để đưa vào kế hoạch">${sel ? '✓' : ''}</button>
+              <div><div class="nm">${esc(r.name)}</div>
+                <div class="tg"><span>${esc(r.grp)}</span><span class="fq">🔁 ${esc(r.freq)}</span><span>⏱ ${r.hrs}h · 👥 ${r.ppl}</span></div>
+                <div class="r9-why">${s.why}</div>
+                <div class="r9-last">🕘 Lần gần nhất: ${r.last ? `<b>${dm(fromISO(r.last))}</b> (${ago(fromISO(r.last))})` : '<b>chưa có</b>'}${r.hist && r.hist.length > 1 ? ` · đã làm ${r.hist.length} lần` : ''}</div></div>
+              <span class="r9-badge" style="--kc:${KC[s.code]}">${LBL[s.code]}</span></div>`; }).join('')}</div>`; }).join('') || '<p class="muted" style="text-align:center;padding:30px">Không có việc ở mục này.</p>'}
     </section>
-    <section class="rt-kpis">${[['due', 'Làm đợt này', '#30d158'], ['over', 'Quá hạn', '#ff3b30'], ['wait', 'Chờ đợt khác', '#ff9f0a'], ['run', 'Trong đợt chạy', '#0a84ff'], ['all', 'Tất cả', '#64748b']]
-      .map(([k, l, col]) => `<button class="rt-k ${F.st === k ? 'on' : ''}" data-rts="${k}" style="--kc:${col}"><span>${l}</span><b>${cnt(k)}</b></button>`).join('')}</section>
-    <div class="rt-grid">${[...groups].map(([g, rows]) => `<div class="rt-card" style="--c:${COLORS[allGrp.indexOf(g) % COLORS.length]}"><h4><i></i>${esc(g)}<small>${rows.filter(x => isDue(x.s)).length} việc đợt này</small></h4>
-      ${rows.map(({ r, s }) => `<div class="rt-row"><span class="nm" data-rte="${r.id}">${esc(r.name)}</span><span class="rt-st ${s.code}">${esc(s.text)}</span>
-        <div class="meta"><span class="rt-f ${r.kind}">${r.kind === 'time' ? '⏱ ' : r.kind === 'run' ? '▶ ' : '🛑 '}${esc(r.freq)}</span>
-          ${r.kind === 'time' ? `<span>Lần gần nhất: <b>${r.last ? dm(fromISO(r.last)) : '—'}</b></span>${s.next ? `<span>· Lần tới: <b>${dm(s.next)}</b></span>` : ''}` : r.when === 'ncom' ? `<span>Mỗi ${r.n} đợt COM · lần gần nhất: <b>${r.last ? dm(fromISO(r.last)) : '—'}</b></span>` : r.last ? `<span>Lần gần nhất: ${dm(fromISO(r.last))}</span>` : ''}
-          <span class="rt-acts" style="margin-left:auto">${ro ? '' : `<button data-rtd="${r.id}">✓ Đã làm</button>${isDue(s) ? `<button data-rta="${r.id}">＋ Kế hoạch</button>` : ''}`}</span></div></div>`).join('')}</div>`).join('')
-      || '<p class="muted" style="grid-column:1/-1;text-align:center;padding:40px">Không có task ở mục này.</p>'}</div>`;
+    ${F.sel.size ? `<div class="r9-bar"><div><b>${F.sel.size} việc đã chọn</b><br><small>Bước 3: đưa vào kế hoạch "${esc(c.p.name)}"</small></div>
+      <button class="x" data-r9="clr">Bỏ chọn</button><button class="go" data-r9="add">➕ Đưa vào kế hoạch</button></div>` : ''}`;
 }
 
-/* ---------------- THAO TÁC ---------------- */
+/* ---------------- CHI TIẾT 1 TASK ---------------- */
+function detail(id) {
+  const r = DB.items.find(x => x.id === id), c = ctx(), s = status(r, c), ro = !canEdit(), hist = (r.hist || []).slice().reverse();
+  const m = openModal(`<div class="modal-h"><h3>🔁 ${esc(r.name)}</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b r9-dt">
+      <div class="hero"><b>${esc(r.name)}</b><p>${esc(r.grp)} · làm trong process <b>${esc(r.proc)}</b><br>${s.why}</p></div>
+      <div class="r9-kv"><div><span>Tần suất</span><b>${esc(r.freq)}</b></div><div><span>Thời lượng</span><b>${r.hrs} giờ · ${r.ppl} người</b></div><div><span>Trạng thái đợt này</span><b style="color:${KC[s.code]}">${LBL[s.code]}</b></div></div>
+      <b style="font-size:14px">📜 Lịch sử đã làm</b>
+      <div class="r9-tl">${s.next ? `<div class="next"><b>${dm(s.next)}</b> <small>· hạn lần tới</small></div>` : ''}
+        ${hist.length ? hist.map(h => `<div><b>${dm(fromISO(h.date))}</b> <small>· ${esc(h.plan || 'ghi tay')}${h.by ? ' · ' + esc(h.by) : ''} · ${ago(fromISO(h.date))}</small></div>`).join('') : '<div style="opacity:.6"><small>Chưa có lần làm nào được ghi nhận.</small></div>'}</div>
+      ${ro ? '' : s.code === 'inplan' ? `<div class="r9-ask"><div class="q">✓ Việc này đã có trong kế hoạch “${esc(c.p.name)}”.</div><div class="a"><button class="r9-btn" id="r9Go">📊 Xem trên Gantt</button><button class="r9-btn" id="r9Done">✓ Ghi nhận đã làm tay</button></div></div>`
+        : s.code === 'run' ? `<div class="r9-ask"><div class="q">Việc này làm trong đợt chạy – không đưa vào Shutdown.</div><div class="a"><button class="r9-btn ok" id="r9Done">✓ Ghi nhận đã làm</button></div></div>`
+        : `<div class="r9-ask"><div class="q">${s.code === 'need' || s.code === 'over' ? '👉 Bạn có muốn đưa việc này vào kế hoạch Shutdown không?' : 'Chưa bắt buộc đợt này – vẫn có thể đưa vào nếu muốn làm sớm.'}</div>
+          <div class="a"><button class="r9-btn pri" id="r9Add">➕ Có, đưa vào kế hoạch</button><button class="r9-btn" id="r9Done">✓ Đã làm rồi (ghi nhận)</button><button class="r9-btn" data-close>Để sau</button></div></div>`}
+    </div>
+    <div class="modal-f">${ro ? '' : '<button class="btn" id="r9Edit" style="margin-right:auto">✏️ Sửa tần suất</button>'}<button class="btn" data-close>Đóng</button></div>`);
+  const on = (sel, fn) => { const b = m.querySelector(sel); if (b) b.onclick = fn; };
+  on('#r9Add', () => { closeModal(); confirmAdd([id]); });
+  on('#r9Done', () => { closeModal(); markDone(id); });
+  on('#r9Edit', () => { closeModal(); edit(id); });
+  on('#r9Go', () => { closeModal(); close(); App.openPlan(c.p.id); setTimeout(() => Drawer.open(s.task.id), 300); });
+}
 function markDone(id) {
   if (needLogin()) return;
   const r = DB.items.find(x => x.id === id), c = ctx();
   const m = openModal(`<div class="modal-h"><h3>✓ Ghi nhận đã làm</h3><button class="x" data-close>×</button></div>
-    <div class="modal-b"><p style="margin-top:0"><b>${esc(r.name)}</b> · ${esc(r.grp)}</p><div class="rt-f2"><label class="full">Ngày làm<input id="rtD" type="date" value="${toISO(today())}"></label></div></div>
-    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="rtOk">Lưu</button></div>`, 'sm');
-  m.querySelector('#rtOk').onclick = () => { r.last = m.querySelector('#rtD').value; r.lastSeq = c.seq; save(); closeModal(); render(); toast('Đã ghi nhận – lần tới được tính lại.', 'ok'); };
+    <div class="modal-b"><p style="margin-top:0"><b>${esc(r.name)}</b> · ${esc(r.grp)}</p>
+      <div class="r9-f2"><label>Ngày làm<input id="r9D" type="date" value="${toISO(Date.now())}"></label><label>Người làm<input id="r9B" value="${esc(SafeStore.get('op.name') || '')}"></label>
+      <label class="full">Ghi chú / đợt<input id="r9P" value="${esc(c.p.name)}"></label></div></div>
+    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="r9Ok">Lưu</button></div>`, 'sm');
+  m.querySelector('#r9Ok').onclick = () => { record(r, m.querySelector('#r9D').value, m.querySelector('#r9P').value.trim(), m.querySelector('#r9B').value.trim()); r.lastSeq = c.seq; save(); closeModal(); render(); toast('Đã ghi nhận – hạn lần tới được tính lại.', 'ok'); };
 }
 function edit(id) {
-  const ro = !canEdit(), r = id ? DB.items.find(x => x.id === id) : { id: 'R' + Date.now().toString(36), grp: '', proc: '', name: '', freq: '', kind: 'time', days: 365, when: 'all', n: 3, hrs: 2, ppl: 1, last: '', lastSeq: null };
+  if (needLogin()) return;
+  const r = id ? DB.items.find(x => x.id === id) : { id: 'R' + Date.now().toString(36), grp: '', proc: '', name: '', freq: '', kind: 'time', days: 365, when: 'all', n: 3, hrs: 2, ppl: 1, last: '', hist: [] };
   const procs = [...new Set(Store.plan().tasks.map(t => t.process))];
   const m = openModal(`<div class="modal-h"><h3>${id ? '✏️ Sửa' : '＋ Thêm'} task routine</h3><button class="x" data-close>×</button></div>
-    <div class="modal-b"><div class="rt-f2">
-      <label class="full">Tên task<input id="eN" value="${esc(r.name)}"></label>
+    <div class="modal-b"><div class="r9-f2">
+      <label class="full">Tên việc<input id="eN" value="${esc(r.name)}"></label>
       <label>Nhóm (ADS, NSD, Bean…)<input id="eG" value="${esc(r.grp)}"></label>
       <label>Process trong kế hoạch<input id="eP" list="ePl" value="${esc(r.proc)}"><datalist id="ePl">${procs.map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
-      <label>Kiểu nhắc<select id="eK">${Object.entries(KIND).map(([k, l]) => `<option value="${k}" ${r.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label>Chu kỳ<select id="eD">${[[7, '1 tuần'], [30, '1 tháng'], [91, '3 tháng'], [182, '6 tháng'], [365, '1 năm'], [730, '2 năm']].map(([d, l]) => `<option value="${d}" ${+r.days === d ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label>Áp dụng khi<select id="eW">${Object.entries(WHEN).map(([k, l]) => `<option value="${k}" ${r.when === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label>n đợt COM (khi chọn "Mỗi n đợt COM")<input id="eC" type="number" min="1" value="${r.n || 3}"></label>
+      <label class="full">Nhắc theo<select id="eK"><option value="time" ${r.kind === 'time' ? 'selected' : ''}>⏱ Thời gian (cứ x tháng / năm làm 1 lần)</option><option value="event" ${r.kind === 'event' ? 'selected' : ''}>🛑 Đợt dừng (làm khi có đợt COM / Maintenance…)</option><option value="run" ${r.kind === 'run' ? 'selected' : ''}>▶ Đợt chạy (không làm trong Shutdown)</option></select></label>
+      <label>Bao lâu làm 1 lần<select id="eD">${Object.entries(DUR).map(([d, l]) => `<option value="${d}" ${+r.days === +d ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>Chỉ làm ở<select id="eW">${['all', 'maint', 'maint7', 'sd3', 'ncom'].map(k => `<option value="${k}" ${r.when === k ? 'selected' : ''}>${WHEN[k]}</option>`).join('')}</select></label>
+      <label>n đợt COM<input id="eC" type="number" min="1" value="${r.n || 3}"></label>
       <label>Thời lượng (giờ)<input id="eH" type="number" min="0.5" step="0.5" value="${r.hrs || 2}"></label>
       <label>Số người<input id="eM" type="number" min="1" value="${r.ppl || 1}"></label>
-      <label>Ghi chú tần suất (hiển thị)<input id="eF" value="${esc(r.freq)}"></label>
-      <label>Lần làm gần nhất<input id="eL" type="date" value="${esc(r.last)}"></label>
-    </div></div>
-    <div class="modal-f">${id && !ro ? '<button class="btn" id="eDel" style="color:#ff3b30;margin-right:auto">🗑 Xóa</button>' : ''}<button class="btn" data-close>Đóng</button>${ro ? '' : '<button class="btn primary" id="eOk">Lưu</button>'}</div>`);
-  const sync = () => { const k = m.querySelector('#eK').value; m.querySelector('#eD').closest('label').style.display = k === 'time' ? '' : 'none'; m.querySelector('#eC').closest('label').style.display = m.querySelector('#eW').value === 'ncom' ? '' : 'none'; };
+      <label>Lần làm gần nhất<input id="eL" type="date" value="${esc(r.last)}"></label></div></div>
+    <div class="modal-f">${id ? '<button class="btn" id="eDel" style="color:#ff3b30;margin-right:auto">🗑 Xóa</button>' : ''}<button class="btn" data-close>Hủy</button><button class="btn primary" id="eOk">Lưu</button></div>`);
+  const sync = () => { const k = m.querySelector('#eK').value, w = m.querySelector('#eW').value;
+    m.querySelector('#eD').closest('label').style.display = k === 'time' ? '' : 'none'; m.querySelector('#eW').closest('label').style.display = k === 'run' ? 'none' : '';
+    m.querySelector('#eC').closest('label').style.display = k === 'event' && w === 'ncom' ? '' : 'none'; };
   m.addEventListener('change', sync); sync();
-  if (ro) return;
   m.querySelector('#eOk').onclick = () => {
-    const g = s => m.querySelector(s).value.trim();
-    if (!g('#eN')) { toast('Nhập tên task.', 'warn'); return; }
-    Object.assign(r, { name: g('#eN'), grp: g('#eG') || 'Khác', proc: g('#eP') || g('#eG'), kind: g('#eK'), days: +g('#eD'), when: g('#eK') === 'run' ? 'run' : g('#eW'), n: +g('#eC') || 3, hrs: +g('#eH') || 2, ppl: +g('#eM') || 1, last: g('#eL') });
-    r.freq = g('#eF') || (r.kind === 'time' ? m.querySelector('#eD').selectedOptions[0].text + '/lần' : WHEN[r.when]);
-    if (!id) DB.items.push(r);
-    save(); closeModal(); render();
+    const g = s => m.querySelector(s).value.trim(); if (!g('#eN')) { toast('Nhập tên việc.', 'warn'); return; }
+    const k = g('#eK'), w = k === 'run' ? 'run' : g('#eW');
+    Object.assign(r, { name: g('#eN'), grp: g('#eG') || 'Khác', proc: g('#eP') || g('#eG'), kind: k, days: +g('#eD'), when: w, n: +g('#eC') || 3, hrs: +g('#eH') || 2, ppl: +g('#eM') || 1 });
+    r.freq = k === 'time' ? `${DUR[r.days]}/lần${w !== 'all' ? ' · ' + WHEN[w] : ''}` : k === 'run' ? 'Plan trong đợt chạy' : w === 'ncom' ? `${r.n} đợt COM/lần` : 'Mỗi ' + WHEN[w].replace('mọi ', '');
+    if (g('#eL') && g('#eL') !== r.last) record(r, g('#eL'), 'ghi tay', '');
+    if (!id) DB.items.push(r); save(); closeModal(); render();
   };
   const del = m.querySelector('#eDel'); if (del) del.onclick = () => { DB.items = DB.items.filter(x => x.id !== id); save(); closeModal(); render(); };
 }
-function addToPlan(ids) {
+
+/* ---------------- BƯỚC 3: ĐƯA VÀO KẾ HOẠCH ---------------- */
+function confirmAdd(ids) {
   if (needLogin()) return;
-  const c = ctx(), items = DB.items.filter(r => ids.includes(r.id) && !c.p.tasks.some(t => t.routineId === r.id));
-  if (!items.length) { toast('Các task này đã có trong kế hoạch.', 'ok'); return; }
-  if (!DB.stops.some(s => s.planId === c.p.id)) { DB.stops.push({ planId: c.p.id, date: toISO(c.start), type: c.type, days: c.days }); save(); }
-  const before = Store.state.activePlanId;
-  Store.state.activePlanId = c.p.id;
-  Store.commit('Thêm task routine', pl => {
-    const res = Scheduler.schedule(pl), tmp = { tasks: pl.tasks };
-    items.forEach(r => {
-      const proc = r.proc || r.grp, same = pl.tasks.filter(t => t.process === proc && !t.normalRun && !t.hold);
-      const last = same.sort((a, b) => (res.R.get(b.id) || {}).end - (res.R.get(a.id) || {}).end)[0];
-      const br = (same[0] || {}).branch || (/bean|ext|rein|idr|fdr|gch/i.test(r.grp + proc) ? 'Nhánh Hạt' : 'Nhánh Dịch');
-      const t = normalizeTask({ id: nextTaskId(tmp), order: pl.tasks.length + 1, branch: br, process: proc, taskName: '🔁 ' + r.name,
-        durationHours: r.hrs || 2, standardHours: r.hrs || 2, quantity: 1, peopleRequired: r.ppl || 1, assignee: '', owner: '',
-        executionMode: last ? 'after_dependency' : 'parallel', lagHours: 0, notes: 'Routine: ' + r.freq, method: '', progress: 0 });
-      if (last) t.dependencyIds = [last.id];
-      t.routineId = r.id;
-      t.wr = { kind: 'extra', desc: 'Routine định kỳ · ' + r.freq, photos: { done: '1' }, safety: { need: 'Không' }, seqSet: true };
-      pl.tasks.push(t);
+  const c = ctx(), res = Scheduler.schedule(c.p), procs = [...new Set(c.p.tasks.filter(t => !t.normalRun).map(t => t.process))];
+  const items = DB.items.filter(r => ids.includes(r.id) && !c.p.tasks.some(t => t.routineId === r.id));
+  if (!items.length) { toast('Các việc này đã có trong kế hoạch.', 'ok'); return; }
+  const lastOf = proc => c.p.tasks.filter(t => t.process === proc && !t.normalRun && !t.hold && res.R.get(t.id)).sort((a, b) => res.R.get(b.id).end - res.R.get(a.id).end)[0];
+  const m = openModal(`<div class="modal-h"><h3>➕ Đưa ${items.length} việc vào “${esc(c.p.name)}”</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><p class="muted" style="margin-top:0">Mỗi việc được xếp <b>sau việc cuối cùng của process</b> đã chọn. Có thể đổi process / thời lượng trước khi thêm.</p>
+      <div class="r9-cf">${items.map(r => { const l = lastOf(r.proc);
+        return `<div class="it" data-id="${r.id}"><div><b>${esc(r.name)}</b><small>${esc(r.freq)} · ${l ? `sau “${esc(l.taskName.slice(0, 40))}” (xong ${U.fmtDM(res.R.get(l.id).end)})` : 'bắt đầu ngay khi Shutdown'}</small></div>
+          <select data-k="proc">${[...new Set([r.proc, ...procs])].map(p => `<option ${p === r.proc ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
+          <input data-k="hrs" type="number" min="0.5" step="0.5" value="${r.hrs}" title="Giờ"></div>`; }).join('')}</div></div>
+    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="r9Ok">✓ Thêm vào kế hoạch</button></div>`);
+  m.querySelector('#r9Ok').onclick = () => {
+    const pick = [...m.querySelectorAll('.it')].map(el => ({ r: DB.items.find(x => x.id === el.dataset.id), proc: el.querySelector('[data-k=proc]').value, hrs: +el.querySelector('[data-k=hrs]').value || 1 }));
+    if (!DB.stops.some(s => s.planId === c.p.id)) DB.stops.push({ planId: c.p.id, date: toISO(c.start), type: c.type, days: c.days });
+    const before = Store.state.activePlanId; Store.state.activePlanId = c.p.id;
+    Store.commit('Thêm task routine', pl => {
+      const tmp = { tasks: pl.tasks };
+      pick.forEach(x => {
+        const l = lastOf(x.proc), same = pl.tasks.find(t => t.process === x.proc);
+        const t = normalizeTask({ id: nextTaskId(tmp), order: pl.tasks.length + 1, branch: (same || {}).branch || (/bean|ext|rein|idr|fdr|gch/i.test(x.r.grp + x.proc) ? 'Nhánh Hạt' : 'Nhánh Dịch'),
+          process: x.proc, taskName: x.r.name, durationHours: x.hrs, standardHours: x.hrs, quantity: 1, peopleRequired: x.r.ppl || 1, assignee: '', owner: '',
+          executionMode: l ? 'after_dependency' : 'parallel', lagHours: 0, notes: '🔁 Routine · ' + x.r.freq, method: '', progress: 0 });
+        if (l) t.dependencyIds = [l.id];
+        t.routineId = x.r.id; t.wr = { kind: 'extra', desc: '🔁 Routine · ' + x.r.freq, photos: { done: '1' }, safety: { need: 'Không' }, seqSet: true };
+        pl.tasks.push(t);
+      });
     });
-  });
-  Store.state.activePlanId = before;
-  toast(`Đã thêm ${items.length} task routine vào "${c.p.name}".`, 'ok'); render();
+    Store.state.activePlanId = before; save();
+    pick.forEach(x => F.sel.delete(x.r.id)); closeModal(); render();
+    toast(`✓ Đã thêm ${pick.length} việc routine vào kế hoạch.`, 'ok');
+  };
 }
 function exportXls() {
   if (!window.XLSX || !XLSX.utils.aoa_to_sheet) { toast('Chưa tải được thư viện Excel.', 'err'); return; }
-  const c = ctx(), rows = [['Nhóm', 'Task', 'Tần suất', 'Kiểu', 'Áp dụng khi', 'Lần làm gần nhất', 'Lần tới', `Kết quả đợt "${c.p.name}"`]];
-  DB.items.forEach(r => { const s = status(r, c); rows.push([r.grp, r.name, r.freq, KIND[r.kind], WHEN[r.when], r.last ? dm(fromISO(r.last)) : '', s.next ? dm(s.next) : '', s.text]); });
-  const wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = [12, 34, 26, 16, 18, 14, 12, 34].map(w => ({ wch: w }));
+  const c = ctx(), rows = [['Nhóm', 'Việc', 'Tần suất', 'Lần gần nhất', 'Hạn lần tới', `Đợt "${c.p.name}"`, 'Lý do']];
+  DB.items.forEach(r => { const s = status(r, c); rows.push([r.grp, r.name, r.freq, r.last ? dm(fromISO(r.last)) : '', s.next ? dm(s.next) : '', LBL[s.code], s.why.replace(/<[^>]+>/g, '')]); });
+  const wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = [12, 32, 30, 14, 14, 22, 60].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, ws, 'Routine'); XLSX.writeFile(wb, `Routine_${toISO(c.start)}.xlsx`);
 }
-/* task routine đóng trong kế hoạch → tự ghi nhận */
 function syncDone() {
-  if (!canEdit() || !DB) return;
-  let ch = false;
+  if (!canEdit() || !DB) return; let ch = false;
   Store.state.plans.forEach(p => p.tasks.forEach(t => {
     if (!t.routineId || (t.progress || 0) < 100) return;
     const r = DB.items.find(x => x.id === t.routineId); if (!r) return;
-    const d = toISO(t.doneAt || Date.now()), seq = DB.stops.findIndex(s => s.planId === p.id);
-    if (r.last !== d || (seq >= 0 && r.lastSeq !== seq)) { if (!r.last || d >= r.last) { r.last = d; if (seq >= 0) r.lastSeq = seq; ch = true; } }
+    const d = toISO(t.doneAt || Date.now());
+    if (!(r.hist || []).some(h => h.date === d && h.plan === p.name)) { record(r, d, p.name, t.doneBy || ''); const sq = DB.stops.findIndex(s => s.planId === p.id); if (sq >= 0) r.lastSeq = sq; ch = true; }
   }));
   if (ch) { save(); render(); }
 }
 
 /* ---------------- MỞ / ĐÓNG ---------------- */
-const MODES = ['op-mode', 'admin-mode', 'wr-mode'], VIEWS = ['#opView', '#adView', '#wrView'];
 function open() {
-  MODES.forEach(c => document.body.classList.remove(c)); VIEWS.forEach(s => { const e = document.querySelector(s); if (e) e.classList.add('hidden'); });
+  ['op-mode', 'admin-mode', 'wr-mode'].forEach(c => document.body.classList.remove(c));
+  ['#opView', '#adView', '#wrView'].forEach(s => { const e = document.querySelector(s); if (e) e.classList.add('hidden'); });
   try { Drawer.close(); closeModal(); } catch (e) { }
   document.body.classList.add('rt-mode'); document.getElementById('rtView').classList.remove('hidden');
   if (location.hash !== '#routine') history.replaceState(null, '', '#routine');
@@ -8950,32 +9036,36 @@ function open() {
 function close() { document.body.classList.remove('rt-mode'); document.getElementById('rtView').classList.add('hidden'); history.replaceState(null, '', location.pathname + location.search); App.render(); }
 function bind(v) {
   v.addEventListener('click', e => {
-    const a = e.target.closest('[data-rt]');
-    if (a) { const k = a.dataset.rt;
+    const ck = e.target.closest('[data-r9c]'); if (ck) { e.stopPropagation(); if (ck.classList.contains('na')) return; const id = ck.dataset.r9c; F.sel.has(id) ? F.sel.delete(id) : F.sel.add(id); return render(); }
+    const a = e.target.closest('[data-r9]');
+    if (a) { const k = a.dataset.r9;
       if (k === 'back') return close(); if (k === 'login') return needLogin(); if (k === 'new') return edit(null); if (k === 'xls') return exportXls();
-      if (k === 'add') { const c = ctx(); return addToPlan(DB.items.filter(r => isDue(status(r, c))).map(r => r.id)); } }
-    const t = e.target.closest('[data-rtt]'); if (t) { if (needLogin()) return; (DB.planCfg[F.planId] = DB.planCfg[F.planId] || {}).type = t.dataset.rtt; save(); return render(); }
-    const s = e.target.closest('[data-rts]'); if (s) { F.st = s.dataset.rts; return render(); }
-    const ed = e.target.closest('[data-rte]'); if (ed) return edit(ed.dataset.rte);
-    const dn = e.target.closest('[data-rtd]'); if (dn) return markDone(dn.dataset.rtd);
-    const ad = e.target.closest('[data-rta]'); if (ad) return addToPlan([ad.dataset.rta]);
+      if (k === 'clr') { F.sel.clear(); return render(); } if (k === 'add') return confirmAdd([...F.sel]); }
+    const al = e.target.closest('[data-r9all]'); if (al) { al.dataset.r9all.split(',').forEach(id => F.sel.add(id)); return render(); }
+    const t = e.target.closest('[data-r9t]'); if (t) { if (needLogin()) return; (DB.planCfg[F.planId] = DB.planCfg[F.planId] || {}).type = t.dataset.r9t; save(); return render(); }
+    const s = e.target.closest('[data-r9s]'); if (s) { F.st = s.dataset.r9s; return render(); }
+    const o = e.target.closest('[data-r9o]'); if (o) return detail(o.dataset.r9o);
   });
   v.addEventListener('change', e => {
-    if (e.target.id === 'rtPlan') { F.planId = e.target.value; return render(); }
-    if (e.target.id === 'rtDays' || e.target.id === 'rtLook') { if (needLogin()) return render();
-      const cf = DB.planCfg[F.planId] = DB.planCfg[F.planId] || {}; cf[e.target.id === 'rtDays' ? 'days' : 'look'] = Math.max(0, +e.target.value || 0); save(); render(); }
+    if (e.target.id === 'r9Plan') { F.planId = e.target.value; F.sel.clear(); return render(); }
+    if (e.target.id === 'r9Days') { if (needLogin()) return render(); (DB.planCfg[F.planId] = DB.planCfg[F.planId] || {}).days = Math.max(.5, +e.target.value || 1); save(); render(); }
   });
+}
+function updBtn() {
+  const b = document.getElementById('rtTop'); if (!b || !DB) return;
+  try { const c = ctx(), n = DB.items.filter(r => ['need', 'over'].includes(status(r, c).code)).length, o = DB.items.filter(r => status(r, c).code === 'over').length;
+    b.textContent = n ? `🔁 Routine · ${n} việc${o ? ' ⚠' : ''}` : '🔁 Routine'; } catch (e) { }
 }
 function boot() {
   try {
     load();
-    const v = document.createElement('div'); v.id = 'rtView'; v.className = 'hidden'; document.body.appendChild(v); bind(v);
+    let v = document.getElementById('rtView'); if (v) v.remove();
+    v = document.createElement('div'); v.id = 'rtView'; v.className = 'hidden'; document.body.appendChild(v); bind(v);
+    let b = document.getElementById('rtTop'); if (b) b.remove();
     const sp = document.querySelector('.topbar .spacer');
-    if (sp) { const b = document.createElement('button'); b.className = 'tb-btn'; b.id = 'rtTop'; b.textContent = '🔁 Routine'; b.onclick = open; sp.parentNode.insertBefore(b, sp); }
-    /* Gantt: nhãn routine */
+    if (sp) { b = document.createElement('button'); b.className = 'tb-btn'; b.id = 'rtTop'; b.textContent = '🔁 Routine'; b.onclick = open; sp.parentNode.insertBefore(b, sp); }
     const _tr = Gantt.taskRow;
-    Gantt.taskRow = function (t, g, p) { const h = _tr.call(this, t, g, p); return t.routineId ? h.replace(/(<span class="c-name"[^>]*>)/, '$1<i class="rt-tag">🔁 Routine</i>') : h; };
-    /* thay các tab khác đóng tab Routine */
+    Gantt.taskRow = function (t, g, p) { const h = _tr.call(this, t, g, p); return t.routineId ? h.replace(/(<span class="c-name"[^>]*>)/, '$1<i class="rt-tag">🔁</i>') : h; };
     ['OperatorView', 'AdminView', 'WorkRequest'].forEach(k => { const o = window[k]; if (o && o.open) { const _o = o.open; o.open = function (...a) { if (document.body.classList.contains('rt-mode')) { document.body.classList.remove('rt-mode'); v.classList.add('hidden'); } return _o.apply(this, a); }; } });
     let tm; const _ar = App.render;
     App.render = function (...a) { const o = _ar.apply(this, a); clearTimeout(tm); tm = setTimeout(() => { syncDone(); updBtn(); }, 500); return o; };
@@ -8983,18 +9073,14 @@ function boot() {
     if (location.hash === '#routine') open();
     loadCloud(); updBtn();
     window.RoutineView = { open, close, render, status, ctx, get db() { return DB; } };
-    console.log('[v28] đã nạp – tab Routine định kỳ');
-  } catch (e) { console.error('[v28] lỗi:', e); }
+    console.log('[v29] đã nạp – tab Routine 3 bước');
+  } catch (e) { console.error('[v29] lỗi:', e); }
 }
-function updBtn() {
-  const b = document.getElementById('rtTop'); if (!b || !DB) return;
-  try { const c = ctx(), n = DB.items.filter(r => isDue(status(r, c))).length, o = DB.items.filter(r => status(r, c).code === 'over').length;
-    b.textContent = n ? `🔁 Routine · ${n}${o ? ' ⚠' : ''}` : '🔁 Routine'; } catch (e) { }
-}
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 2500)); else setTimeout(boot, 2500);
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 2600)); else setTimeout(boot, 2600);
 })();
 </script>
-<!-- ===================== HẾT v28 ===================== -->
+<!-- ===================== HẾT v29 ===================== -->
+
 
   
 </body>
