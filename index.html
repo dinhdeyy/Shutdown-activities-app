@@ -9198,6 +9198,90 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v30 ===================== -->
 
+<!-- =====================================================================
+     v31 – ICON NHÀ THẦU
+       Task có cột E (Mô tả / phân công) ghi "nhà thầu" / "NT" → bên phải tên người thực hiện
+       hiện thêm icon 👷 Nhà thầu (Gantt, Report ca, panel Sửa task). Chỉ hiển thị – không cần đăng nhập.
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v31-style">
+.v31-nt{display:inline-flex!important;align-items:center;gap:3px;margin-left:6px!important;padding:1px 8px 1px 5px!important;border-radius:999px!important;
+  font-size:11px!important;font-weight:700!important;font-style:normal!important;line-height:16px!important;white-space:nowrap;
+  background:linear-gradient(135deg,#fde68a,#fbbf24)!important;color:#7c2d12!important;box-shadow:0 1px 3px rgba(180,83,9,.3)!important;vertical-align:1px;width:auto!important;height:auto!important}
+.v31-nt b{font-weight:800;font-size:11px}
+body.dark .v31-nt{background:linear-gradient(135deg,#92400e,#b45309)!important;color:#fef3c7!important}
+.v31-hint{margin-top:8px;padding:8px 12px;border-radius:12px;background:rgba(251,191,36,.16);color:#92400e;font-size:13px;font-weight:600}
+body.dark .v31-hint{color:#fcd34d}
+</style>
+<script>
+(function () {
+'use strict';
+const N = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
+/* số nhà thầu ghi trong mô tả: "cần nhà thầu" → 1, "2 nhà thầu" → 2, không có → 0 */
+function ntCount(t) {
+  if (!t || t.normalRun) return 0;
+  const txt = N([t.wr && t.wr.desc, t.notes].filter(Boolean).join(' | '));
+  const m = /(\d+)\s*(nha thau|nt)\b/.exec(txt); if (m) return +m[1];
+  return /nha thau|\bnt\b/.test(txt) ? 1 : 0;
+}
+const already = t => /nha thau|\bnt\b/.test(N(t.assignee));
+const chip = n => `<i class="v31-nt" title="Task cần nhà thầu">👷 <b>${n > 1 ? n + ' ' : ''}Nhà thầu</b></i>`;
+
+function patchGantt() {
+  const _tr = Gantt.taskRow;
+  Gantt.taskRow = function (t, g, p) {
+    let h = _tr.call(this, t, g, p);
+    const n = ntCount(t); if (!n) return h;
+    h = h.replace(/<i class="v24-nt">NT<\/i>/g, '');                       // bỏ nhãn NT cũ cho gọn
+    /* chèn ngay sau phần tên người trong nhãn bên phải thanh */
+    const out = h.replace(/(<div class="outlbl[^"]*"[^>]*>[\s\S]*?)(<\/div>)/, (m, a, b) => a + chip(n) + b);
+    if (out !== h) return out;
+    return h.replace(/(<span class="c-who[^>]*>[\s\S]*?)(<\/span>)/, (m, a, b) => a + chip(n) + b);
+  };
+}
+function patchReport() {
+  const OP = window.OperatorView; if (!OP) return;
+  const _r = OP.render;
+  OP.render = function (...a) {
+    const o = _r.apply(this, a);
+    try {
+      const p = Store.state.plans.find(x => x.id === OP.planId) || Store.plan();
+      document.querySelectorAll('#opView .rp-card').forEach(c => {
+        if (c.querySelector('.v31-nt')) return;
+        const t = p.tasks.find(x => x.id === c.dataset.opTask), n = ntCount(t); if (!n) return;
+        const sp = [...c.querySelectorAll('.r7-row span, .rp-meta')].find(s => s.textContent.includes('👤'));
+        if (sp) { sp.querySelectorAll('.v24-nt').forEach(x => x.remove()); sp.insertAdjacentHTML('beforeend', chip(n)); }
+      });
+    } catch (e) { }
+    return o;
+  };
+}
+function patchDrawer() {
+  const _dr = Drawer.render;
+  Drawer.render = function (t) {
+    const o = _dr.apply(this, arguments);
+    try {
+      const n = ntCount(t), d = document.getElementById('drawer'); if (!n || !d || d.querySelector('.v31-hint')) return o;
+      const host = d.querySelector('.v13-who') || d.querySelector('.v13-hero') || d.querySelector('.drawer-b');
+      const div = document.createElement('div'); div.className = 'v31-hint';
+      div.innerHTML = `👷 Task này cần <b>${n > 1 ? n + ' ' : ''}nhà thầu</b> (theo file Work Request)${already(t) ? '' : ' – nhớ báo nhà thầu / thêm "Nhà thầu" vào người thực hiện'}.`;
+      host && (host.classList.contains('drawer-b') ? host.prepend(div) : host.after(div));
+    } catch (e) { }
+    return o;
+  };
+}
+function boot() {
+  try {
+    patchGantt(); patchReport(); patchDrawer();
+    if (App.res) App.render();
+    console.log('[v31] đã nạp – icon nhà thầu');
+  } catch (e) { console.error('[v31] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 3000)); else setTimeout(boot, 3000);
+})();
+</script>
+<!-- ===================== HẾT v31 ===================== -->
+
   
 </body>
 </html>
