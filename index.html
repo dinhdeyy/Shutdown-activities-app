@@ -9282,6 +9282,205 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v31 ===================== -->
 
+<!-- =====================================================================
+     v32 – ĐÓNG TASK KHÔNG CẦN ẢNH: OPERATOR BÁO XONG → TRƯỞNG CA DUYỆT
+       - Bỏ toàn bộ chụp / upload ảnh (nút chụp, chọn ảnh, ảnh đã upload, cấu hình Drive)
+       - Operator: ▶ Bắt đầu  →  ✓ Xong – gửi trưởng ca duyệt (tick xác nhận + ghi chú)
+       - Trưởng ca (đã đăng nhập mật khẩu): ✅ Duyệt  /  ↩ Trả lại (ghi lý do)
+       - Nút "🛡 Chờ duyệt · n" trên Planner và Report ca để duyệt nhanh
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v32-style">
+/* ẩn mọi phần liên quan ảnh */
+.op-sheet .op-req,.op-sheet .wr-gate,.op-sheet #opDone,.op-sheet .v19-bar,.op-sheet .rp-shead,.op-sheet .v23-badge,
+#v17Open,#v17Gal,.ad-th,.ad-feed,.v21-ok-ic,.v23-ic,[data-more="upload"]{display:none!important}
+.v32-box{margin:0 0 14px;padding:16px;border-radius:20px;border:1.5px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff)}
+.v32-box h4{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px}
+.v32-st{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:12.5px;font-weight:700}
+.v32-st.todo{background:rgba(142,142,147,.16);color:var(--muted)}.v32-st.run{background:rgba(10,132,255,.14);color:#0a84ff}
+.v32-st.wait{background:rgba(255,159,10,.18);color:#b45309}.v32-st.done{background:rgba(48,209,88,.18);color:#15803d}.v32-st.back{background:rgba(255,59,48,.14);color:#d70015}
+.v32-info{font-size:13.5px;line-height:1.6;margin:8px 0}
+.v32-rej{margin:8px 0;padding:9px 12px;border-radius:12px;background:rgba(255,59,48,.10);color:#b91c1c;font-size:13px;font-weight:600}
+.v32-ck{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:14px;background:rgba(120,120,128,.08);font-size:14px;cursor:pointer;margin:8px 0}
+.v32-ck input{width:20px;height:20px;margin-top:1px;flex:none}
+.v32-box textarea,.v32-box input[type=text]{width:100%;margin:6px 0;font-size:15px;border-radius:12px!important}
+.v32-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.v32-acts button{flex:1;min-width:140px;border:0;border-radius:14px;padding:14px 12px;font-size:15px;font-weight:700;cursor:pointer;color:#fff;transition:transform .25s}
+.v32-acts button:active{transform:scale(.96)}
+.v32-acts .go{background:linear-gradient(135deg,#30d158,#0ea5e9)}.v32-acts .start{background:#0a84ff}
+.v32-acts .ok{background:#30d158}.v32-acts .no{background:#ff3b30}.v32-acts .ghost{background:rgba(120,120,128,.18);color:var(--text)}
+.v32-acts button:disabled{opacity:.4;cursor:not-allowed}
+.v32-chip{display:inline-block;margin-right:5px;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:700;background:rgba(255,159,10,.2);color:#b45309}
+.v32-chip.back{background:rgba(255,59,48,.15);color:#d70015}
+#v32Q.has{background:rgba(255,159,10,.2)!important;color:#b45309!important;border-color:rgba(255,159,10,.5)!important}
+.v32-list{display:grid;gap:8px;max-height:60vh;overflow:auto}
+.v32-it{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;padding:12px;border-radius:14px;border:1px solid var(--border)}
+.v32-it small{display:block;color:var(--muted);font-size:12.5px;line-height:1.5}
+.v32-it .b{display:flex;gap:6px}.v32-it .b button{border:0;border-radius:10px;padding:8px 12px;font-weight:700;color:#fff;cursor:pointer}
+.r7-foot.v32{font-size:12.5px}
+</style>
+<script>
+(function () {
+'use strict';
+const esc = s => U.esc(s ?? '');
+const isLead = () => !!(window.Auth && Auth.ok);
+const opName = () => SafeStore.get('op.name') || '';
+const leadName = () => SafeStore.get('lead.name') || opName() || '';
+const OP = () => window.OperatorView;
+const planOf = id => Store.state.plans.find(x => x.id === id) || Store.plan();
+function st(t) {
+  if (!t) return 'todo';
+  if ((t.progress || 0) >= 100) return 'done';
+  if (t.review && t.review.state === 'wait') return 'wait';
+  if (t.review && t.review.state === 'back') return 'back';
+  return t.startedAt ? 'run' : 'todo';
+}
+const LBL = { todo: 'Chưa làm', run: 'Đang làm', wait: '⏳ Chờ trưởng ca duyệt', done: '✅ Đã duyệt', back: '↩ Bị trả lại' };
+function upd(planId, taskId, label, fn) {
+  Store.commit(label, () => { const p = Store.state.plans.find(x => x.id === planId), t = p && p.tasks.find(x => x.id === taskId); if (!t) return false; fn(t); });
+}
+
+/* ---------------- thao tác ---------------- */
+function startTask(pid, tid) { const nm = opName(); if (!nm) return toast('Nhập tên trước (nút tên ở góc trên).', 'warn');
+  upd(pid, tid, 'Bắt đầu task', t => { t.startedAt = Date.now(); t.startedBy = nm; t.progress = Math.max(t.progress || 0, 10); if (t.review && t.review.state === 'back') t.review.state = ''; }); }
+function submit(pid, tid, note) { const nm = opName(); if (!nm) return toast('Nhập tên trước (nút tên ở góc trên).', 'warn');
+  upd(pid, tid, 'Báo xong – chờ duyệt', t => { if (!t.startedAt) { t.startedAt = Date.now(); t.startedBy = nm; }
+    t.review = { state: 'wait', by: nm, at: Date.now(), note: note || '', hist: [...((t.review && t.review.hist) || []), { act: 'Báo xong', by: nm, at: Date.now(), note }] };
+    t.progress = Math.max(t.progress || 0, 95); });
+  toast('Đã gửi – chờ trưởng ca duyệt.', 'ok'); }
+function cancelSubmit(pid, tid) { upd(pid, tid, 'Hủy báo xong', t => { if (t.review) t.review.state = ''; t.progress = Math.min(t.progress || 0, 50); }); }
+function approve(pid, tid, lead) {
+  if (!isLead()) return needLogin();
+  if (!lead) return toast('Nhập tên trưởng ca.', 'warn');
+  SafeStore.set('lead.name', lead);
+  upd(pid, tid, 'Trưởng ca duyệt', t => { const r = t.review || {};
+    t.progress = 100; t.doneBy = r.by || t.startedBy || ''; t.doneAt = r.at || Date.now(); t.approvedBy = lead; t.approvedAt = Date.now();
+    t.review = { ...r, state: 'ok', hist: [...(r.hist || []), { act: 'Duyệt', by: lead, at: Date.now() }] }; });
+  toast('✅ Đã duyệt – task đóng.', 'ok'); }
+function reject(pid, tid, lead) {
+  if (!isLead()) return needLogin();
+  const why = prompt('Lý do trả lại (operator sẽ thấy):', ''); if (why === null) return;
+  if (lead) SafeStore.set('lead.name', lead);
+  upd(pid, tid, 'Trưởng ca trả lại', t => { const r = t.review || {};
+    t.progress = 50; t.review = { ...r, state: 'back', why: why || 'Chưa đạt', backBy: lead || 'Trưởng ca', backAt: Date.now(), hist: [...(r.hist || []), { act: 'Trả lại', by: lead, at: Date.now(), note: why }] }; });
+  toast('Đã trả lại cho operator.', 'warn'); }
+function reopen(pid, tid) { if (!isLead()) return needLogin();
+  if (!confirm('Mở lại task đã duyệt?')) return;
+  upd(pid, tid, 'Mở lại task', t => { t.progress = 50; delete t.approvedBy; delete t.approvedAt; if (t.review) t.review.state = ''; }); }
+function needLogin() { const b = document.getElementById('auBadge'); if (b) b.click(); else toast('Trưởng ca cần đăng nhập để duyệt.', 'warn'); }
+
+/* ---------------- khung trong màn hình task (Report ca) ---------------- */
+function box() {
+  const s = OP() && OP().sheet; if (!s || !document.body.contains(s.m)) return;
+  const b = s.m.querySelector('#opSheetB'), f = s.m.querySelector('#opSheetF'); if (!b) return;
+  b.querySelectorAll('.op-warn').forEach(w => { if (/lưu ảnh|nơi lưu|ảnh/i.test(w.textContent)) w.style.display = 'none'; });
+  const p = planOf(s.planId), t = p.tasks.find(x => x.id === s.taskId); if (!t) return;
+  const k = st(t), r = t.review || {}, lead = isLead();
+  const key = [k, r.at, r.backAt, t.approvedAt, t.startedAt, lead].join('|');
+  let el = b.querySelector('.v32-box'); if (el && el.dataset.k === key) return;
+  if (!el) { el = document.createElement('div'); el.className = 'v32-box'; const after = b.querySelector('.v20-time') || b.querySelector('.op-info'); after ? after.after(el) : b.prepend(el); }
+  el.dataset.k = key;
+  const tm = ms => ms ? U.fmtDM(ms) : '';
+  let html = `<h4>📋 Đóng task <span class="v32-st ${k}">${LBL[k]}</span></h4>`;
+  if (k === 'done') {
+    html += `<div class="v32-info">👷 Làm: <b>${esc(t.doneBy || r.by || '—')}</b>${r.at ? ' · báo xong ' + tm(r.at) : ''}<br>🛡 Duyệt: <b>${esc(t.approvedBy || '—')}</b> · ${tm(t.approvedAt)}${r.note ? `<br>📝 ${esc(r.note)}` : ''}</div>
+      ${lead ? '<div class="v32-acts"><button class="ghost" data-v32="reopen">↩ Mở lại task</button></div>' : ''}`;
+  } else if (k === 'wait') {
+    html += `<div class="v32-info">👷 <b>${esc(r.by)}</b> báo xong lúc <b>${tm(r.at)}</b>${r.note ? `<br>📝 ${esc(r.note)}` : ''}</div>`;
+    html += lead ? `<label style="font-size:12px;color:var(--muted);font-weight:600">Trưởng ca duyệt<input type="text" id="v32L" value="${esc(leadName())}" placeholder="Họ tên trưởng ca"></label>
+        <div class="v32-acts"><button class="ok" data-v32="ok">✅ Duyệt – đóng task</button><button class="no" data-v32="no">↩ Trả lại</button></div>`
+      : `<div class="v32-info" style="color:var(--muted)">Trưởng ca kiểm tra thực tế rồi duyệt trên app (cần đăng nhập).</div>
+        ${U.norm(r.by) === U.norm(opName()) ? '<div class="v32-acts"><button class="ghost" data-v32="cancel">Hủy báo xong</button></div>' : ''}`;
+  } else {
+    if (k === 'back') html += `<div class="v32-rej">↩ Bị trả lại bởi ${esc(r.backBy || 'trưởng ca')} (${tm(r.backAt)}): ${esc(r.why)}</div>`;
+    if (k === 'todo') html += `<div class="v32-acts"><button class="start" data-v32="start">▶ Bắt đầu làm</button></div>`;
+    html += `<label class="v32-ck"><input type="checkbox" id="v32C"><span>Tôi xác nhận <b>đã làm xong</b> việc này${(t.wr && t.wr.safety && (t.wr.safety.wiLoto || t.wr.safety.lotoPts)) ? ', <b>đã tháo LOTO</b> và lắp lại che chắn' : ''}, khu vực <b>sạch và an toàn</b>.</span></label>
+      <textarea id="v32N" rows="2" placeholder="Ghi chú (không bắt buộc): vấn đề phát sinh, vật tư thay…"></textarea>
+      <div class="v32-acts"><button class="go" data-v32="submit" disabled>✓ Xong – gửi trưởng ca duyệt</button></div>`;
+  }
+  el.innerHTML = html;
+  const c = el.querySelector('#v32C'), g = el.querySelector('[data-v32="submit"]'); if (c && g) c.onchange = () => g.disabled = !c.checked;
+  el.onclick = e => { const a = e.target.closest('[data-v32]'); if (!a || a.disabled) return; const x = a.dataset.v32, L = (el.querySelector('#v32L') || {}).value;
+    if (x === 'start') startTask(s.planId, t.id); if (x === 'submit') submit(s.planId, t.id, (el.querySelector('#v32N') || {}).value);
+    if (x === 'cancel') cancelSubmit(s.planId, t.id); if (x === 'ok') approve(s.planId, t.id, (L || '').trim());
+    if (x === 'no') reject(s.planId, t.id, (L || '').trim()); if (x === 'reopen') reopen(s.planId, t.id); };
+  if (f) [...f.children].forEach(ch => { if (!ch.closest('.v32-box')) ch.style.display = 'none'; });
+}
+
+/* ---------------- thẻ việc trong Report ca ---------------- */
+function cards() {
+  const o = OP(); if (!o || !document.body.classList.contains('op-mode')) return;
+  const p = planOf(o.planId);
+  document.querySelectorAll('#opView .rp-card').forEach(c => {
+    const t = p.tasks.find(x => x.id === c.dataset.opTask); if (!t) return;
+    const k = st(t), stEl = c.querySelector('.r7-st, .rp-st');
+    if (stEl && (k === 'wait' || k === 'back' || k === 'done')) { const tx = LBL[k]; if (stEl.textContent !== tx) stEl.textContent = tx; stEl.className = stEl.className.replace(/\b(todo|run|late|done|v2\d-\w+)\b/g, '') + (k === 'done' ? ' done' : ''); }
+    const f = c.querySelector('.r7-foot, .rp-foot');
+    if (f) { const tx = k === 'done' ? `🛡 Duyệt: ${esc(t.approvedBy || '')}` : k === 'wait' ? `⏳ ${esc(t.review.by)} báo xong ${U.fmtHM(t.review.at)}` : k === 'back' ? `↩ Trả lại: ${esc(t.review.why || '')}` : k === 'run' ? `▶ Đang làm${t.startedBy ? ' – ' + esc(t.startedBy) : ''}` : 'Chưa bắt đầu';
+      if (f.dataset.v32 !== tx) { f.dataset.v32 = tx; f.className += ' v32'; f.innerHTML = `<span>${tx}</span>`; } }
+  });
+}
+
+/* ---------------- hàng chờ duyệt ---------------- */
+function pending() { const p = Store.plan(); return p ? p.tasks.filter(t => st(t) === 'wait') : []; }
+function queueBtns() {
+  const n = pending().length, txt = n ? `🛡 Chờ duyệt · ${n}` : '🛡 Chờ duyệt';
+  const place = (host, id, cls) => { if (!host) return; let b = document.getElementById(id);
+    if (!isLead()) { if (b) b.remove(); return; }
+    if (!b) { b = document.createElement('button'); b.id = id; b.className = cls; b.onclick = queue; host.insertBefore(b, host.querySelector('#opBack') || host.querySelector('.spacer') || null); }
+    if (b.textContent !== txt) b.textContent = txt; b.classList.toggle('has', !!n); };
+  const sp = document.querySelector('.topbar .spacer'); if (sp) place(sp.parentNode, 'v32Q', 'tb-btn');
+  place(document.querySelector('#opView .rp-h'), 'v32Q2', 'rp-pill');
+}
+function queue() {
+  if (!isLead()) return needLogin();
+  const p = Store.plan(), list = pending(), res = Scheduler.schedule(p);
+  const m = openModal(`<div class="modal-h"><h3>🛡 Task chờ duyệt (${list.length})</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><label style="font-size:12px;color:var(--muted);font-weight:600">Trưởng ca duyệt<input type="text" id="v32QL" value="${esc(leadName())}" style="display:block;width:100%;margin:4px 0 10px"></label>
+      ${list.length ? `<div class="v32-list">${list.map(t => { const r = res.R.get(t.id);
+        return `<div class="v32-it"><div><b>#${t.order} ${esc(t.taskName)}</b><small>${esc(t.process)} · KH ${r ? U.fmtDM(r.start) + ' → ' + U.fmtHM(r.end) : ''}<br>👷 ${esc(t.review.by)} báo xong ${U.fmtDM(t.review.at)}${t.review.note ? ' · 📝 ' + esc(t.review.note) : ''}</small></div>
+          <div class="b"><button style="background:#30d158" data-q="ok" data-id="${esc(t.id)}">✅ Duyệt</button><button style="background:#ff3b30" data-q="no" data-id="${esc(t.id)}">↩</button></div></div>`; }).join('')}</div>`
+      : '<p>✅ Không có task nào chờ duyệt.</p>'}</div>
+    <div class="modal-f">${list.length > 1 ? '<button class="btn primary" data-q="all">✅ Duyệt tất cả</button>' : ''}<button class="btn" data-close>Đóng</button></div>`, 'sm');
+  m.addEventListener('click', e => { const b = e.target.closest('[data-q]'); if (!b) return; const L = m.querySelector('#v32QL').value.trim();
+    if (b.dataset.q === 'all') { if (!L) return toast('Nhập tên trưởng ca.', 'warn'); list.forEach(t => approve(p.id, t.id, L)); }
+    else if (b.dataset.q === 'ok') approve(p.id, b.dataset.id, L); else reject(p.id, b.dataset.id, L);
+    closeModal(); if (pending().length) setTimeout(queue, 100); });
+}
+
+/* ---------------- Gantt: nhãn chờ duyệt / trả lại ---------------- */
+function patchGantt() {
+  const _tr = Gantt.taskRow;
+  Gantt.taskRow = function (t, g, p) { let h = _tr.call(this, t, g, p); const k = st(t);
+    if (k === 'wait') h = h.replace(/(<span class="c-name"[^>]*>)/, '$1<i class="v32-chip">⏳ Chờ duyệt</i>');
+    if (k === 'back') h = h.replace(/(<span class="c-name"[^>]*>)/, '$1<i class="v32-chip back">↩ Trả lại</i>');
+    return h; };
+}
+
+function boot() {
+  try {
+    patchGantt();
+    const o = OP();
+    if (o) {
+      const _ot = o.openTask;
+      o.openTask = function (...a) { const r = _ot.apply(this, a); const b = o.sheet && o.sheet.m;
+        if (b) new MutationObserver(() => { clearTimeout(b._v32); b._v32 = setTimeout(box, 30); }).observe(b, { childList: true, subtree: true }); box(); return r; };
+      const _r = o.render; o.render = function (...a) { const r = _r.apply(this, a); try { cards(); queueBtns(); } catch (e) { } return r; };
+    }
+    /* chặn mọi chọn ảnh còn sót */
+    document.addEventListener('change', e => { if (e.target && e.target.type === 'file' && e.target.closest('.op-sheet')) { e.stopImmediatePropagation(); e.target.value = ''; } }, true);
+    const _ar = App.render; App.render = function (...a) { const r = _ar.apply(this, a); try { queueBtns(); box(); cards(); } catch (e) { } return r; };
+    if (window.Auth) { const _l = Auth.login; Auth.login = async function (...a) { const r = await _l.apply(this, a); setTimeout(() => { queueBtns(); box(); }, 100); return r; }; }
+    document.querySelectorAll('#menuMore button').forEach(b => { if (/upload ảnh|google drive/i.test(b.textContent)) b.style.display = 'none'; });
+    if (App.res) App.render();
+    console.log('[v32] đã nạp – đóng task: operator báo xong → trưởng ca duyệt (không ảnh)');
+  } catch (e) { console.error('[v32] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 3200)); else setTimeout(boot, 3200);
+})();
+</script>
+<!-- ===================== HẾT v32 ===================== -->
+  
   
 </body>
 </html>
