@@ -8695,6 +8695,307 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v27 ===================== -->
 
+<!-- =====================================================================
+     v28 – TAB 🔁 ROUTINE: task định kỳ theo tần suất + nhắc việc tự động
+       - Kiểu nhắc: ⏱ Theo thời gian (1W·3M·6M·1Y·2Y) · 🛑 Theo đợt dừng (COM / Maintenance / >3 ngày / >7 ngày / mỗi n COM) · ▶ Trong đợt chạy
+       - Chọn kế hoạch Shutdown + loại đợt dừng → app báo task nào PHẢI LÀM đợt này
+       - ➕ Đưa task đến hạn vào kế hoạch · Task đóng xong → tự ghi "lần làm gần nhất" → tính lần tới
+       - Dữ liệu lưu cloud (Supabase planner_state id=2) + máy
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v28-style">
+body.rt-mode>*:not(#rtView):not(#toasts):not(#modalRoot):not(#tip){display:none!important}
+#rtView{flex:1;overflow:auto;padding:14px clamp(10px,2vw,28px) 70px;width:100%}
+.rt-h{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-radius:22px;background:var(--glass,#fff);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border:1px solid var(--glass-bd,#e5e7eb);box-shadow:var(--glass-sh)}
+.rt-h b{font-size:20px;letter-spacing:-.4px;margin-right:auto;display:flex;align-items:center;gap:10px}
+.rt-h b i{font-style:normal;width:40px;height:40px;border-radius:13px;display:grid;place-items:center;color:#fff;background:conic-gradient(from 200deg,#30d158,#0a84ff,#5e5ce6,#30d158)}
+.rt-pill{border:1px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff);color:var(--text);border-radius:999px;padding:9px 15px;font-size:14px;font-weight:600;cursor:pointer}
+.rt-pill.pri{background:linear-gradient(135deg,#0a84ff,#5e5ce6);color:#fff;border:0}
+.rt-pill:disabled{opacity:.45;cursor:not-allowed}
+.rt-ctrl{display:grid;grid-template-columns:minmax(220px,2fr) 1.2fr 1fr 1fr;gap:10px;margin:12px 0}
+.rt-ctrl label{font-size:12px;color:var(--muted);font-weight:600}
+.rt-ctrl select,.rt-ctrl input{display:block;width:100%;margin-top:4px;border-radius:12px!important}
+.rt-seg{display:grid;grid-template-columns:1fr 1fr;padding:3px;border-radius:12px;background:rgba(118,118,128,.14);margin-top:4px}
+.rt-seg button{border:0;background:transparent;color:var(--text);padding:8px;border-radius:10px;font-weight:600;cursor:pointer}
+.rt-seg button.on{background:var(--glass-row,#fff);box-shadow:0 2px 8px rgba(0,0,0,.12);color:#0a84ff}
+.rt-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}
+.rt-k{text-align:left;border:1px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff);border-radius:18px;padding:12px 14px;cursor:pointer;color:var(--text);transition:transform .3s cubic-bezier(.22,1.2,.36,1)}
+.rt-k:hover{transform:translateY(-2px)}
+.rt-k.on{box-shadow:0 0 0 2px var(--kc)}
+.rt-k span{font-size:12.5px;color:var(--muted);font-weight:600}.rt-k b{display:block;font-size:26px;color:var(--kc);letter-spacing:-.5px}
+.rt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+.rt-card{background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#e5e7eb);border-radius:22px;padding:14px 14px 8px;box-shadow:0 4px 16px rgba(15,23,42,.06)}
+.rt-card h4{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}
+.rt-card h4 i{width:10px;height:10px;border-radius:50%;background:var(--c)}
+.rt-card h4 small{margin-left:auto;font-weight:500;color:var(--muted);font-size:12px}
+.rt-row{display:grid;grid-template-columns:1fr auto;gap:4px 8px;padding:9px 4px;border-top:1px solid var(--border)}
+.rt-row:first-of-type{border-top:0}
+.rt-row .nm{font-weight:600;font-size:14px;cursor:pointer}
+.rt-row .nm:hover{color:#0a84ff}
+.rt-row .meta{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.rt-f{padding:2px 9px;border-radius:999px;font-weight:600;font-size:11.5px}
+.rt-f.time{background:rgba(94,92,230,.12);color:#5e5ce6}.rt-f.event{background:rgba(255,159,10,.15);color:#c26a00}.rt-f.run{background:rgba(10,132,255,.12);color:#0a84ff}
+.rt-st{align-self:start;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+.rt-st.do{background:#30d158;color:#fff}.rt-st.over{background:#ff3b30;color:#fff}.rt-st.wait{background:rgba(255,159,10,.18);color:#b45309}
+.rt-st.ok{background:rgba(120,120,128,.12);color:var(--muted)}.rt-st.skip{background:transparent;color:var(--muted)}.rt-st.run{background:rgba(10,132,255,.12);color:#0a84ff}
+.rt-st.inplan{background:rgba(48,209,88,.15);color:#15803d}
+.rt-acts{display:flex;gap:6px}
+.rt-acts button{border:1px solid var(--border);background:transparent;color:var(--text);border-radius:10px;padding:3px 9px;font-size:12px;cursor:pointer}
+.rt-acts button:hover{border-color:#0a84ff;color:#0a84ff}
+.rt-f2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.rt-f2 label{font-size:12px;color:var(--muted);font-weight:600}
+.rt-f2 input,.rt-f2 select{display:block;width:100%;margin-top:4px}.rt-f2 .full{grid-column:1/-1}
+.grow .rt-tag{display:inline-block;margin-right:4px;padding:0 6px;border-radius:999px;font-size:10.5px;font-weight:700;background:rgba(94,92,230,.15);color:#5e5ce6}
+@media (max-width:900px){.rt-ctrl{grid-template-columns:1fr 1fr}.rt-kpis{grid-template-columns:repeat(3,1fr)}}
+</style>
+<script>
+(function () {
+'use strict';
+const SEED = [{"id": "R01", "grp": "ADS", "proc": "ADS", "name": "Leak Test", "freq": "maintenance 1Y/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 4, "ppl": 2}, {"id": "R02", "grp": "ADS", "proc": "ADS", "name": "Fill - Xả than", "freq": "1W/lần", "kind": "time", "days": 7, "when": "all", "n": null, "hrs": 8, "ppl": 2}, {"id": "R03", "grp": "ADS", "proc": "ADS", "name": "Vệ sinh filter", "freq": "Shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 2, "ppl": 1}, {"id": "R04", "grp": "ADS", "proc": "ADS", "name": "Gia nhiệt cột", "freq": "Maintenance >7d", "kind": "event", "days": null, "when": "maint7", "n": null, "hrs": 8, "ppl": 1}, {"id": "R05", "grp": "Evap 1", "proc": "EVAP 1", "name": "Leak Test", "freq": "shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 4, "ppl": 1}, {"id": "R06", "grp": "Evap 1", "proc": "EVAP 1", "name": "Thông cột Evap", "freq": "maintenance 1Y/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 8, "ppl": 2}, {"id": "R07", "grp": "Evap 1", "proc": "EVAP 1", "name": "Vệ sinh sensor pass", "freq": "Shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 1, "ppl": 1}, {"id": "R08", "grp": "RO", "proc": "RO", "name": "Đẩy membrane", "freq": "plan trong đợt chạy", "kind": "run", "days": null, "when": "run", "n": null, "hrs": 8, "ppl": 3}, {"id": "R09", "grp": "RO", "proc": "RO", "name": "Ngâm ultrasil 75", "freq": "shutdown >3d", "kind": "event", "days": null, "when": "sd3", "n": null, "hrs": 4, "ppl": 1}, {"id": "R10", "grp": "RO", "proc": "RO", "name": "CIP cooling HX loop", "freq": "maintenance 1Y/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 4, "ppl": 1}, {"id": "R11", "grp": "RO", "proc": "RO", "name": "CIP cooling HX 1+2", "freq": "maintenance 1Y/lần", "kind": "time", "days": 365, "when": "maint", "n": null, "hrs": 4, "ppl": 1}, {"id": "R12", "grp": "RO", "proc": "RO", "name": "Vệ sinh membrane", "freq": "plan trong đợt chạy", "kind": "run", "days": null, "when": "run", "n": null, "hrs": 8, "ppl": 2}, {"id": "R13", "grp": "NSD", "proc": "NSD", "name": "Thay filter bagfilter", "freq": "2Y/lần", "kind": "time", "days": 730, "when": "all", "n": null, "hrs": 8, "ppl": 3}, {"id": "R14", "grp": "NSD", "proc": "NSD", "name": "Thay filter dehum", "freq": "shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 2, "ppl": 2}, {"id": "R15", "grp": "NSD", "proc": "NSD", "name": "Tháo kiểm tra filter bagfilter", "freq": "1Y/lần", "kind": "time", "days": 365, "when": "all", "n": null, "hrs": 4, "ppl": 2}, {"id": "R16", "grp": "NSD", "proc": "NSD", "name": "Safety test 3M", "freq": "shutdown COM khi tới hạn safety test", "kind": "time", "days": 91, "when": "all", "n": null, "hrs": 2, "ppl": 1}, {"id": "R17", "grp": "NSD", "proc": "NSD", "name": "Safety test 1Y", "freq": "shutdown COM khi tới hạn safety test", "kind": "time", "days": 365, "when": "all", "n": null, "hrs": 4, "ppl": 1}, {"id": "R18", "grp": "NSD", "proc": "NSD", "name": "Thay nozzle", "freq": "3M/lần", "kind": "time", "days": 91, "when": "all", "n": null, "hrs": 1, "ppl": 1}, {"id": "R19", "grp": "NSD", "proc": "NSD", "name": "Thay seal nozzle", "freq": "shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 1, "ppl": 1}, {"id": "R20", "grp": "Bean", "proc": "IDR", "name": "Vệ sinh filter DP", "freq": "3 COM/lần", "kind": "event", "days": null, "when": "ncom", "n": 3, "hrs": 4, "ppl": 2}, {"id": "R21", "grp": "Bean", "proc": "IDR", "name": "Check filter heater", "freq": "shutdown COM", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 2, "ppl": 1}, {"id": "R22", "grp": "EXT - Rein", "proc": "EXT", "name": "Leak test", "freq": "6M/lần", "kind": "time", "days": 182, "when": "all", "n": null, "hrs": 4, "ppl": 2}, {"id": "R23", "grp": "EXT - Rein", "proc": "REIN", "name": "Vệ sinh venting tumbler", "freq": "maintenance", "kind": "event", "days": null, "when": "maint", "n": null, "hrs": 4, "ppl": 2}, {"id": "R24", "grp": "EXT - Rein", "proc": "REIN", "name": "Thông đường venting tumbler", "freq": "trước nhà thầu vệ sinh hàng ca", "kind": "event", "days": null, "when": "all", "n": null, "hrs": 1, "ppl": 1}];
+const LS = 'sp.routine.v1', DAY = 864e5;
+const esc = s => U.esc(s ?? '');
+const canEdit = () => !(window.Auth && !Auth.ok);
+const needLogin = () => { if (canEdit()) return false; const b = document.getElementById('auBadge'); if (b) b.click(); return true; };
+const WHEN = { all: 'Mọi đợt dừng', maint: 'Maintenance', maint7: 'Maintenance >7 ngày', sd3: 'Shutdown >3 ngày', ncom: 'Mỗi n đợt COM', run: 'Trong đợt chạy' };
+const KIND = { time: '⏱ Theo thời gian', event: '🛑 Theo đợt dừng', run: '▶ Trong đợt chạy' };
+const COLORS = ['#0a84ff', '#30d158', '#ff9f0a', '#bf5af2', '#ff375f', '#64d2ff', '#5e5ce6'];
+const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const toISO = ms => { const d = new Date(ms), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+const fromISO = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || ''); return m ? new Date(+m[1], m[2] - 1, +m[3]).getTime() : null; };
+const dm = ms => { const d = new Date(ms); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`; };
+
+/* ---------------- DỮ LIỆU ---------------- */
+let DB = null;
+function blank() { return { items: SEED.map(x => ({ ...x, last: '', lastSeq: null })), stops: [], planCfg: {}, updatedAt: 0 }; }
+function load() { try { DB = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { } if (!DB || !Array.isArray(DB.items)) DB = blank(); }
+let saveT;
+function save() {
+  DB.updatedAt = Date.now();
+  try { localStorage.setItem(LS, JSON.stringify(DB)); } catch (e) { }
+  clearTimeout(saveT);
+  saveT = setTimeout(async () => { try { if (typeof sb !== 'undefined') await sb.from('planner_state').upsert({ id: 2, data: { routine: DB, savedAt: 0 }, updated_at: new Date().toISOString() }); } catch (e) { console.warn('[v28] cloud', e); } }, 600);
+}
+async function loadCloud() {
+  try {
+    if (typeof sb === 'undefined') return;
+    const { data } = await sb.from('planner_state').select('data').eq('id', 2).maybeSingle();
+    const c = data && data.data && data.data.routine;
+    if (c && Array.isArray(c.items) && (c.updatedAt || 0) > (DB.updatedAt || 0)) { DB = c; try { localStorage.setItem(LS, JSON.stringify(DB)); } catch (e) { } render(); }
+  } catch (e) { console.warn('[v28] load', e); }
+}
+
+/* ---------------- NGỮ CẢNH ĐỢT DỪNG ---------------- */
+let F = { planId: null, st: 'all' };
+function ctx() {
+  const plans = Store.state.plans, p = plans.find(x => x.id === F.planId) || Store.plan() || plans[0];
+  F.planId = p.id;
+  let days = 3, start = fromISO((p.start || '').slice(0, 10)) || today();
+  try { const r = Scheduler.schedule(p); days = Math.max(1, Math.round((r.windowEnd - r.windowStart) / DAY * 10) / 10); start = r.windowStart; } catch (e) { }
+  const cfg = DB.planCfg[p.id] || {};
+  const type = cfg.type || (/maint/i.test(p.name) ? 'MAINT' : 'COM');
+  const look = cfg.look ?? 30;
+  const idx = DB.stops.findIndex(s => s.planId === p.id), seq = idx >= 0 ? idx : DB.stops.length;
+  return { p, start: new Date(start).setHours(0, 0, 0, 0), days: cfg.days ?? days, type, look, seq };
+}
+function applies(w, c) {
+  if (w === 'all') return true;
+  if (w === 'maint') return c.type === 'MAINT';
+  if (w === 'maint7') return c.type === 'MAINT' && c.days > 7;
+  if (w === 'sd3') return c.days > 3;
+  return false;
+}
+function status(r, c) {
+  const inPlan = c.p.tasks.some(t => t.routineId === r.id);
+  let o;
+  if (r.kind === 'run') o = { code: 'run', text: '▶ Làm trong đợt chạy' };
+  else if (r.kind === 'time') {
+    const last = fromISO(r.last), next = last != null && r.days ? last + r.days * DAY : null;
+    const due = next == null || next <= c.start + c.look * DAY, ap = applies(r.when, c);
+    if (due && ap) o = next == null ? { code: 'do', text: 'Làm đợt này · chưa có ngày làm', next } : next < c.start ? { code: 'over', text: `Quá hạn ${Math.round((c.start - next) / DAY)} ngày`, next } : { code: 'do', text: `Làm đợt này · hạn ${dm(next)}`, next };
+    else if (due) o = { code: 'wait', text: `Đến hạn – chờ đợt ${WHEN[r.when]}`, next };
+    else o = { code: 'ok', text: `Còn ${Math.round((next - c.start) / DAY)} ngày`, next };
+  } else if (r.when === 'ncom') {
+    const n = Math.max(1, r.n || 1), since = r.lastSeq == null ? n : c.seq - r.lastSeq;
+    o = since >= n ? { code: 'do', text: r.lastSeq == null ? 'Làm đợt này · chưa có dữ liệu' : `Làm đợt này · đã qua ${since} đợt` } : { code: 'ok', text: `Còn ${n - since} đợt` };
+  } else o = applies(r.when, c) ? { code: 'do', text: 'Làm đợt này' } : { code: 'skip', text: 'Không áp dụng đợt này' };
+  if (inPlan && (o.code === 'do' || o.code === 'over')) o = { ...o, code: 'inplan', text: '✓ Đã có trong kế hoạch' };
+  return o;
+}
+const isDue = s => s.code === 'do' || s.code === 'over';
+
+/* ---------------- GIAO DIỆN ---------------- */
+function render() {
+  const v = document.getElementById('rtView'); if (!v || !document.body.classList.contains('rt-mode')) return;
+  const c = ctx(), list = DB.items.map(r => ({ r, s: status(r, c) }));
+  const cnt = k => list.filter(x => k === 'due' ? isDue(x.s) : k === 'all' ? true : x.s.code === k).length;
+  const show = list.filter(x => F.st === 'all' ? true : F.st === 'due' ? isDue(x.s) : x.s.code === F.st);
+  const groups = new Map(); show.forEach(x => { if (!groups.has(x.r.grp)) groups.set(x.r.grp, []); groups.get(x.r.grp).push(x); });
+  const allGrp = [...new Set(DB.items.map(r => r.grp))];
+  const ro = !canEdit();
+  v.innerHTML = `
+    <header class="rt-h"><b><i>🔁</i>Routine định kỳ</b>
+      ${ro ? '<button class="rt-pill" data-rt="login">👁 Chỉ xem – đăng nhập</button>' : '<button class="rt-pill" data-rt="new">＋ Task routine</button>'}
+      <button class="rt-pill" data-rt="xls">⬇ Xuất Excel</button>
+      <button class="rt-pill pri" data-rt="add" ${ro || !cnt('due') ? 'disabled' : ''}>➕ Đưa ${cnt('due')} task vào kế hoạch</button>
+      <button class="rt-pill" data-rt="back">Planner</button></header>
+    <section class="rt-ctrl">
+      <label>Kế hoạch Shutdown (đợt dừng)<select id="rtPlan">${Store.state.plans.map(p => `<option value="${esc(p.id)}" ${p.id === c.p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+      <label>Loại đợt dừng<div class="rt-seg">${[['COM', '🧽 COM'], ['MAINT', '🔧 Maintenance']].map(([k, l]) => `<button type="button" data-rtt="${k}" class="${c.type === k ? 'on' : ''}">${l}</button>`).join('')}</div></label>
+      <label>Số ngày dừng<input id="rtDays" type="number" min="0.5" step="0.5" value="${c.days}"></label>
+      <label>Nhắc trước (ngày)<input id="rtLook" type="number" min="0" value="${c.look}"></label>
+    </section>
+    <section class="rt-kpis">${[['due', 'Làm đợt này', '#30d158'], ['over', 'Quá hạn', '#ff3b30'], ['wait', 'Chờ đợt khác', '#ff9f0a'], ['run', 'Trong đợt chạy', '#0a84ff'], ['all', 'Tất cả', '#64748b']]
+      .map(([k, l, col]) => `<button class="rt-k ${F.st === k ? 'on' : ''}" data-rts="${k}" style="--kc:${col}"><span>${l}</span><b>${cnt(k)}</b></button>`).join('')}</section>
+    <div class="rt-grid">${[...groups].map(([g, rows]) => `<div class="rt-card" style="--c:${COLORS[allGrp.indexOf(g) % COLORS.length]}"><h4><i></i>${esc(g)}<small>${rows.filter(x => isDue(x.s)).length} việc đợt này</small></h4>
+      ${rows.map(({ r, s }) => `<div class="rt-row"><span class="nm" data-rte="${r.id}">${esc(r.name)}</span><span class="rt-st ${s.code}">${esc(s.text)}</span>
+        <div class="meta"><span class="rt-f ${r.kind}">${r.kind === 'time' ? '⏱ ' : r.kind === 'run' ? '▶ ' : '🛑 '}${esc(r.freq)}</span>
+          ${r.kind === 'time' ? `<span>Lần gần nhất: <b>${r.last ? dm(fromISO(r.last)) : '—'}</b></span>${s.next ? `<span>· Lần tới: <b>${dm(s.next)}</b></span>` : ''}` : r.when === 'ncom' ? `<span>Mỗi ${r.n} đợt COM · lần gần nhất: <b>${r.last ? dm(fromISO(r.last)) : '—'}</b></span>` : r.last ? `<span>Lần gần nhất: ${dm(fromISO(r.last))}</span>` : ''}
+          <span class="rt-acts" style="margin-left:auto">${ro ? '' : `<button data-rtd="${r.id}">✓ Đã làm</button>${isDue(s) ? `<button data-rta="${r.id}">＋ Kế hoạch</button>` : ''}`}</span></div></div>`).join('')}</div>`).join('')
+      || '<p class="muted" style="grid-column:1/-1;text-align:center;padding:40px">Không có task ở mục này.</p>'}</div>`;
+}
+
+/* ---------------- THAO TÁC ---------------- */
+function markDone(id) {
+  if (needLogin()) return;
+  const r = DB.items.find(x => x.id === id), c = ctx();
+  const m = openModal(`<div class="modal-h"><h3>✓ Ghi nhận đã làm</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><p style="margin-top:0"><b>${esc(r.name)}</b> · ${esc(r.grp)}</p><div class="rt-f2"><label class="full">Ngày làm<input id="rtD" type="date" value="${toISO(today())}"></label></div></div>
+    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="rtOk">Lưu</button></div>`, 'sm');
+  m.querySelector('#rtOk').onclick = () => { r.last = m.querySelector('#rtD').value; r.lastSeq = c.seq; save(); closeModal(); render(); toast('Đã ghi nhận – lần tới được tính lại.', 'ok'); };
+}
+function edit(id) {
+  const ro = !canEdit(), r = id ? DB.items.find(x => x.id === id) : { id: 'R' + Date.now().toString(36), grp: '', proc: '', name: '', freq: '', kind: 'time', days: 365, when: 'all', n: 3, hrs: 2, ppl: 1, last: '', lastSeq: null };
+  const procs = [...new Set(Store.plan().tasks.map(t => t.process))];
+  const m = openModal(`<div class="modal-h"><h3>${id ? '✏️ Sửa' : '＋ Thêm'} task routine</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><div class="rt-f2">
+      <label class="full">Tên task<input id="eN" value="${esc(r.name)}"></label>
+      <label>Nhóm (ADS, NSD, Bean…)<input id="eG" value="${esc(r.grp)}"></label>
+      <label>Process trong kế hoạch<input id="eP" list="ePl" value="${esc(r.proc)}"><datalist id="ePl">${procs.map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
+      <label>Kiểu nhắc<select id="eK">${Object.entries(KIND).map(([k, l]) => `<option value="${k}" ${r.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>Chu kỳ<select id="eD">${[[7, '1 tuần'], [30, '1 tháng'], [91, '3 tháng'], [182, '6 tháng'], [365, '1 năm'], [730, '2 năm']].map(([d, l]) => `<option value="${d}" ${+r.days === d ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>Áp dụng khi<select id="eW">${Object.entries(WHEN).map(([k, l]) => `<option value="${k}" ${r.when === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>n đợt COM (khi chọn "Mỗi n đợt COM")<input id="eC" type="number" min="1" value="${r.n || 3}"></label>
+      <label>Thời lượng (giờ)<input id="eH" type="number" min="0.5" step="0.5" value="${r.hrs || 2}"></label>
+      <label>Số người<input id="eM" type="number" min="1" value="${r.ppl || 1}"></label>
+      <label>Ghi chú tần suất (hiển thị)<input id="eF" value="${esc(r.freq)}"></label>
+      <label>Lần làm gần nhất<input id="eL" type="date" value="${esc(r.last)}"></label>
+    </div></div>
+    <div class="modal-f">${id && !ro ? '<button class="btn" id="eDel" style="color:#ff3b30;margin-right:auto">🗑 Xóa</button>' : ''}<button class="btn" data-close>Đóng</button>${ro ? '' : '<button class="btn primary" id="eOk">Lưu</button>'}</div>`);
+  const sync = () => { const k = m.querySelector('#eK').value; m.querySelector('#eD').closest('label').style.display = k === 'time' ? '' : 'none'; m.querySelector('#eC').closest('label').style.display = m.querySelector('#eW').value === 'ncom' ? '' : 'none'; };
+  m.addEventListener('change', sync); sync();
+  if (ro) return;
+  m.querySelector('#eOk').onclick = () => {
+    const g = s => m.querySelector(s).value.trim();
+    if (!g('#eN')) { toast('Nhập tên task.', 'warn'); return; }
+    Object.assign(r, { name: g('#eN'), grp: g('#eG') || 'Khác', proc: g('#eP') || g('#eG'), kind: g('#eK'), days: +g('#eD'), when: g('#eK') === 'run' ? 'run' : g('#eW'), n: +g('#eC') || 3, hrs: +g('#eH') || 2, ppl: +g('#eM') || 1, last: g('#eL') });
+    r.freq = g('#eF') || (r.kind === 'time' ? m.querySelector('#eD').selectedOptions[0].text + '/lần' : WHEN[r.when]);
+    if (!id) DB.items.push(r);
+    save(); closeModal(); render();
+  };
+  const del = m.querySelector('#eDel'); if (del) del.onclick = () => { DB.items = DB.items.filter(x => x.id !== id); save(); closeModal(); render(); };
+}
+function addToPlan(ids) {
+  if (needLogin()) return;
+  const c = ctx(), items = DB.items.filter(r => ids.includes(r.id) && !c.p.tasks.some(t => t.routineId === r.id));
+  if (!items.length) { toast('Các task này đã có trong kế hoạch.', 'ok'); return; }
+  if (!DB.stops.some(s => s.planId === c.p.id)) { DB.stops.push({ planId: c.p.id, date: toISO(c.start), type: c.type, days: c.days }); save(); }
+  const before = Store.state.activePlanId;
+  Store.state.activePlanId = c.p.id;
+  Store.commit('Thêm task routine', pl => {
+    const res = Scheduler.schedule(pl), tmp = { tasks: pl.tasks };
+    items.forEach(r => {
+      const proc = r.proc || r.grp, same = pl.tasks.filter(t => t.process === proc && !t.normalRun && !t.hold);
+      const last = same.sort((a, b) => (res.R.get(b.id) || {}).end - (res.R.get(a.id) || {}).end)[0];
+      const br = (same[0] || {}).branch || (/bean|ext|rein|idr|fdr|gch/i.test(r.grp + proc) ? 'Nhánh Hạt' : 'Nhánh Dịch');
+      const t = normalizeTask({ id: nextTaskId(tmp), order: pl.tasks.length + 1, branch: br, process: proc, taskName: '🔁 ' + r.name,
+        durationHours: r.hrs || 2, standardHours: r.hrs || 2, quantity: 1, peopleRequired: r.ppl || 1, assignee: '', owner: '',
+        executionMode: last ? 'after_dependency' : 'parallel', lagHours: 0, notes: 'Routine: ' + r.freq, method: '', progress: 0 });
+      if (last) t.dependencyIds = [last.id];
+      t.routineId = r.id;
+      t.wr = { kind: 'extra', desc: 'Routine định kỳ · ' + r.freq, photos: { done: '1' }, safety: { need: 'Không' }, seqSet: true };
+      pl.tasks.push(t);
+    });
+  });
+  Store.state.activePlanId = before;
+  toast(`Đã thêm ${items.length} task routine vào "${c.p.name}".`, 'ok'); render();
+}
+function exportXls() {
+  if (!window.XLSX || !XLSX.utils.aoa_to_sheet) { toast('Chưa tải được thư viện Excel.', 'err'); return; }
+  const c = ctx(), rows = [['Nhóm', 'Task', 'Tần suất', 'Kiểu', 'Áp dụng khi', 'Lần làm gần nhất', 'Lần tới', `Kết quả đợt "${c.p.name}"`]];
+  DB.items.forEach(r => { const s = status(r, c); rows.push([r.grp, r.name, r.freq, KIND[r.kind], WHEN[r.when], r.last ? dm(fromISO(r.last)) : '', s.next ? dm(s.next) : '', s.text]); });
+  const wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = [12, 34, 26, 16, 18, 14, 12, 34].map(w => ({ wch: w }));
+  XLSX.utils.book_append_sheet(wb, ws, 'Routine'); XLSX.writeFile(wb, `Routine_${toISO(c.start)}.xlsx`);
+}
+/* task routine đóng trong kế hoạch → tự ghi nhận */
+function syncDone() {
+  if (!canEdit() || !DB) return;
+  let ch = false;
+  Store.state.plans.forEach(p => p.tasks.forEach(t => {
+    if (!t.routineId || (t.progress || 0) < 100) return;
+    const r = DB.items.find(x => x.id === t.routineId); if (!r) return;
+    const d = toISO(t.doneAt || Date.now()), seq = DB.stops.findIndex(s => s.planId === p.id);
+    if (r.last !== d || (seq >= 0 && r.lastSeq !== seq)) { if (!r.last || d >= r.last) { r.last = d; if (seq >= 0) r.lastSeq = seq; ch = true; } }
+  }));
+  if (ch) { save(); render(); }
+}
+
+/* ---------------- MỞ / ĐÓNG ---------------- */
+const MODES = ['op-mode', 'admin-mode', 'wr-mode'], VIEWS = ['#opView', '#adView', '#wrView'];
+function open() {
+  MODES.forEach(c => document.body.classList.remove(c)); VIEWS.forEach(s => { const e = document.querySelector(s); if (e) e.classList.add('hidden'); });
+  try { Drawer.close(); closeModal(); } catch (e) { }
+  document.body.classList.add('rt-mode'); document.getElementById('rtView').classList.remove('hidden');
+  if (location.hash !== '#routine') history.replaceState(null, '', '#routine');
+  F.planId = Store.state.activePlanId; render();
+}
+function close() { document.body.classList.remove('rt-mode'); document.getElementById('rtView').classList.add('hidden'); history.replaceState(null, '', location.pathname + location.search); App.render(); }
+function bind(v) {
+  v.addEventListener('click', e => {
+    const a = e.target.closest('[data-rt]');
+    if (a) { const k = a.dataset.rt;
+      if (k === 'back') return close(); if (k === 'login') return needLogin(); if (k === 'new') return edit(null); if (k === 'xls') return exportXls();
+      if (k === 'add') { const c = ctx(); return addToPlan(DB.items.filter(r => isDue(status(r, c))).map(r => r.id)); } }
+    const t = e.target.closest('[data-rtt]'); if (t) { if (needLogin()) return; (DB.planCfg[F.planId] = DB.planCfg[F.planId] || {}).type = t.dataset.rtt; save(); return render(); }
+    const s = e.target.closest('[data-rts]'); if (s) { F.st = s.dataset.rts; return render(); }
+    const ed = e.target.closest('[data-rte]'); if (ed) return edit(ed.dataset.rte);
+    const dn = e.target.closest('[data-rtd]'); if (dn) return markDone(dn.dataset.rtd);
+    const ad = e.target.closest('[data-rta]'); if (ad) return addToPlan([ad.dataset.rta]);
+  });
+  v.addEventListener('change', e => {
+    if (e.target.id === 'rtPlan') { F.planId = e.target.value; return render(); }
+    if (e.target.id === 'rtDays' || e.target.id === 'rtLook') { if (needLogin()) return render();
+      const cf = DB.planCfg[F.planId] = DB.planCfg[F.planId] || {}; cf[e.target.id === 'rtDays' ? 'days' : 'look'] = Math.max(0, +e.target.value || 0); save(); render(); }
+  });
+}
+function boot() {
+  try {
+    load();
+    const v = document.createElement('div'); v.id = 'rtView'; v.className = 'hidden'; document.body.appendChild(v); bind(v);
+    const sp = document.querySelector('.topbar .spacer');
+    if (sp) { const b = document.createElement('button'); b.className = 'tb-btn'; b.id = 'rtTop'; b.textContent = '🔁 Routine'; b.onclick = open; sp.parentNode.insertBefore(b, sp); }
+    /* Gantt: nhãn routine */
+    const _tr = Gantt.taskRow;
+    Gantt.taskRow = function (t, g, p) { const h = _tr.call(this, t, g, p); return t.routineId ? h.replace(/(<span class="c-name"[^>]*>)/, '$1<i class="rt-tag">🔁 Routine</i>') : h; };
+    /* thay các tab khác đóng tab Routine */
+    ['OperatorView', 'AdminView', 'WorkRequest'].forEach(k => { const o = window[k]; if (o && o.open) { const _o = o.open; o.open = function (...a) { if (document.body.classList.contains('rt-mode')) { document.body.classList.remove('rt-mode'); v.classList.add('hidden'); } return _o.apply(this, a); }; } });
+    let tm; const _ar = App.render;
+    App.render = function (...a) { const o = _ar.apply(this, a); clearTimeout(tm); tm = setTimeout(() => { syncDone(); updBtn(); }, 500); return o; };
+    window.addEventListener('hashchange', () => { if (location.hash === '#routine') open(); });
+    if (location.hash === '#routine') open();
+    loadCloud(); updBtn();
+    window.RoutineView = { open, close, render, status, ctx, get db() { return DB; } };
+    console.log('[v28] đã nạp – tab Routine định kỳ');
+  } catch (e) { console.error('[v28] lỗi:', e); }
+}
+function updBtn() {
+  const b = document.getElementById('rtTop'); if (!b || !DB) return;
+  try { const c = ctx(), n = DB.items.filter(r => isDue(status(r, c))).length, o = DB.items.filter(r => status(r, c).code === 'over').length;
+    b.textContent = n ? `🔁 Routine · ${n}${o ? ' ⚠' : ''}` : '🔁 Routine'; } catch (e) { }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 2500)); else setTimeout(boot, 2500);
+})();
+</script>
+<!-- ===================== HẾT v28 ===================== -->
+
   
 </body>
 </html>
