@@ -10056,6 +10056,61 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v37 ===================== -->
 
+<!-- =====================================================================
+     v38 – "DÙNG FILE MẪU SẴN" / "TỰ ĐỘNG – TASK CÓ SẴN" = BỘ TASK CHUẨN 32H
+       Thay bộ task cũ (96 task Plan 20.10 – có "Lắp CV steam heater"…) bằng đúng
+       200 task của file Shutdown_32h_Task_Chuan.xlsx, xếp TỪ TRÊN XUỐNG theo thời gian chuẩn,
+       tính từ giờ "Bắt đầu Shutdown" bạn chọn. Process chưa tới giờ = Normal run.
+     Cần có khối v34 (Lịch chuẩn 32h) phía trên.
+     DÁN NGAY TRƯỚC dòng </body> – đặt TRƯỚC khối v37 (chống giật)
+     ===================================================================== -->
+<script>
+(function () {
+'use strict';
+function toPlanRows() {
+  const S = window.Std32; if (!S) return null;
+  const rows = S.compute(S.DATA.rows.map(r => ({ ...r })), { ...S.DATA.off });
+  /* đúng định dạng mà nút "Dùng file mẫu sẵn" (v30) và Tạo lịch (v27) đang đọc */
+  return rows.map((r, i) => ({ br: r.branch, pr: r.proc, eq: '', nm: r.name, ds: [r.note, r.nt ? 'cần nhà thầu' : ''].filter(Boolean).join(' · '),
+    s: r.s, d: r.dur, p: r.ppl, chk: 'Không', saf: [], k: 'Bắt buộc', _i: i, _mode: r.mode }));
+}
+function boot() {
+  try {
+    const S = window.Std32;
+    if (!S) { console.warn('[v38] chưa có khối v34 – giữ bộ task cũ'); return; }
+    const rows = toPlanRows();
+    /* 1. nút "📦 Dùng file mẫu sẵn" (v30) đọc biến này */
+    window.PLAN_TASKS_2026 = rows;
+    /* 2. chế độ "⚡ Tự động – dùng task có sẵn" (v27 templateTasks) */
+    const build = () => S.buildTasks(S.compute(S.DATA.rows.map(r => ({ ...r })), { ...S.DATA.off }));
+    try { templateTasks = build; } catch (e) { } window.templateTasks = build;
+    /* 3. giữ đúng thứ tự file: task cùng giờ bắt đầu giữ thứ tự trên → dưới */
+    const WR = window.WorkRequest;
+    if (WR) {
+      const _r = WR.render;
+      WR.render = function (...a) {
+        const d = WR.data;
+        if (d && d.v30 && Array.isArray(d.rows) && !d.v38) {
+          d.v38 = true;
+          d.fileName = 'Form mẫu chuẩn 32h (' + rows.length + ' task)';
+          d.rows.sort((x, y) => (x.off - y.off) || (rows.findIndex(r => r.nm === x.name && r.pr === x.process) - rows.findIndex(r => r.nm === y.name && r.pr === y.process)));
+        }
+        return _r.apply(this, a);
+      };
+    }
+    /* đổi chữ trên giao diện */
+    const fix = () => document.querySelectorAll('#wrView .v30-note, #wrView .w4-tpl, #wrView .v6-built').forEach(el => {
+      el.innerHTML = el.innerHTML.replace(/Plan Shutdown 20\.10\.2026 \(\d+ task\)|bộ task mẫu \(14 task\)|File mẫu sẵn \(Plan Shutdown\)/g, `form chuẩn 32h (${rows.length} task)`);
+    });
+    const v = document.getElementById('wrView'); if (v) new MutationObserver(fix).observe(v, { childList: true, subtree: true });
+    console.log('[v38] đã nạp – form mẫu = bộ task chuẩn 32h (' + rows.length + ' task)');
+  } catch (e) { console.error('[v38] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 3700)); else setTimeout(boot, 3700);
+})();
+</script>
+<!-- ===================== HẾT v38 ===================== -->
+  
   
 </body>
 </html>
