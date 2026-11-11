@@ -10344,6 +10344,85 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v40 ===================== -->
 
+<!-- =====================================================================
+     v41 – 2 NHÃN TEMPLATE: 🛑 Template Shutdown (32h) · 🔄 Template Changeover (16h)
+       Bấm "📦 Dùng file mẫu sẵn" → chọn 1 trong 2 template → task xếp theo mốc giờ,
+       tính từ giờ "Bắt đầu Shutdown" bạn chọn. Changeover có sẵn người thực hiện theo plan.
+     DÁN NGAY TRƯỚC dòng </body> (sau khối v40)
+     ===================================================================== -->
+<style id="v41-style">
+.v41-opts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.v41-opt{display:flex;flex-direction:column;gap:6px;text-align:left;padding:16px;border-radius:18px;border:1.5px solid var(--border,#e5e7eb);background:var(--glass-row,#fff);color:var(--text);cursor:pointer;transition:transform .25s cubic-bezier(.22,1.2,.36,1),box-shadow .2s,border-color .2s}
+.v41-opt:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(15,23,42,.12);border-color:var(--c)}
+.v41-opt .tag{align-self:flex-start;padding:3px 11px;border-radius:999px;font-size:12px;font-weight:800;color:#fff;background:var(--c)}
+.v41-opt b{font-size:16px}.v41-opt small{color:var(--muted);font-size:12.5px;line-height:1.5}
+.v41-lbl{display:inline-block;margin-left:6px;padding:2px 10px;border-radius:999px;font-size:11.5px;font-weight:800;color:#fff;vertical-align:1px}
+@media (max-width:640px){.v41-opts{grid-template-columns:1fr}}
+</style>
+<script>
+(function () {
+'use strict';
+const CO = [{"br": "Nhánh Hạt", "pr": "GCH", "eq": "", "nm": "Hold Abort + nhận hạt chuyển qua EXT startup 4 silo (phần 1)", "ds": "", "who": "S.Kiên", "s": 0, "d": 3.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "GCH", "eq": "", "nm": "Hold Abort + nhận hạt chuyển qua EXT startup 4 silo (phần 2)", "ds": "Giao tiếp từ S.Kiên", "who": "Công", "s": 3, "d": 5.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "EXT", "eq": "", "nm": "Empty Extract In and Rinsing Drainage Tank", "ds": "Hot water · EXT Hot Water Tank", "who": "S.Kiên", "s": 0, "d": 0.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "EXT", "eq": "", "nm": "Rinsing EXT Clarifier 1", "ds": "> 80–86 °C, 20–25 m3/h · Group D", "who": "S.Kiên", "s": 0, "d": 0.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "EXT", "eq": "", "nm": "Rinsing manifold và xả về tank 7m3", "ds": "> 70–86 °C, 25 m3/h", "who": "S.Kiên", "s": 0, "d": 0.16666666666666666, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "EXT", "eq": "", "nm": "Vệ sinh top cell EXT, filter bằng drinking hoặc súng cao áp, lắp line", "ds": "Soft water", "who": "S.Kiên + Long + Công (4+A)", "s": 0, "d": 1.3333333333333333, "p": 4, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "EXT", "eq": "", "nm": "Empty và rinse nước nóng 3 WBs, xả về intertank ADS rồi xả cống (1-by-1, 20 phút/WB)", "ds": "> 70–86 °C, 25 m3/h · Group A → Tank 7m3", "who": "S.Kiên", "s": 1, "d": 1.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "EXT", "eq": "", "nm": "Tháo mở và vệ sinh sàn rung 8 cell bằng nước, lắp line", "ds": "Soft water", "who": "S.Kiên + Bảo (M+4)", "s": 2, "d": 2.6666666666666665, "p": 3, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "EXT", "eq": "", "nm": "Mở vệ sinh small hopper, STRV, đường ống chuyển hạt + lắp line", "ds": "Soft water", "who": "Công + S.Kiên + Bảo (M+4)", "s": 4, "d": 0.8333333333333334, "p": 4, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "EXT", "eq": "", "nm": "START-UP EXT", "ds": "Mốc start-up", "who": "S.Kiên", "s": 8, "d": 0.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Dịch", "pr": "ADS", "eq": "", "nm": "Chạy nước water push (6 cột) 100m3 để xả plush toàn bộ dịch EXT (phần 1)", "ds": "ADS Hot water tank", "who": "Giang", "s": 2, "d": 1.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Dịch", "pr": "ADS", "eq": "", "nm": "Chạy nước water push (6 cột) 100m3 để xả plush toàn bộ dịch EXT (phần 2)", "ds": "", "who": "Lực", "s": 3, "d": 3.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Dịch", "pr": "ADS", "eq": "", "nm": "Empty và rinse intertank", "ds": "ADS Hot water tank → Drain", "who": "Lực", "s": 6, "d": 0.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Dịch", "pr": "ADS", "eq": "", "nm": "RE-START ADS", "ds": "Mốc re-start", "who": "Lực", "s": 13, "d": 0.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Dịch", "pr": "EVAP 1", "eq": "", "nm": "Vét dịch GC Extract và rinsing Feedtank xả cống", "ds": "Group A", "who": "Lực", "s": 6, "d": 0.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Dịch", "pr": "EVAP 1", "eq": "", "nm": "Chạy rinse bằng nước soft và xả cống (2 round, mỗi round xả pass 1 lần)", "ds": "Flow 20 m3/h, MVR 2600 rpm, condensate về feedtank, outlet xả cống V4728", "who": "Lực", "s": 7, "d": 3.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Dịch", "pr": "EVAP 1", "eq": "", "nm": "Tiếp tục rinse Evap bằng nước soft, mở feed line, nước xả về tank CIP return", "ds": "Soft water → Group B", "who": "Lực", "s": 10, "d": 1.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Dịch", "pr": "EVAP 1", "eq": "", "nm": "RE-START GC Evaporator", "ds": "Mốc re-start", "who": "Lực", "s": 13, "d": 0.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "REIN", "eq": "", "nm": "Empty 3 Thick Tanks", "ds": "Hot water", "who": "Công", "s": 9, "d": 0.3333333333333333, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "REIN", "eq": "", "nm": "Rinsing Manifold", "ds": "> 80–86 °C, 15 m3/h · Group B → Tank 7m3", "who": "Công", "s": 10, "d": 0.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "REIN", "eq": "", "nm": "Rinsing 3 Thick Tanks", "ds": "> 80–86 °C, 15 m3/h · Group B → Tank 7m3", "who": "Lượng", "s": 11, "d": 1.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "REIN", "eq": "", "nm": "Bơm nước nóng vào 10 tumbler (từng cái, 20 phút bơm + 60 phút quay)", "ds": "> 80–86 °C, 15 m3/h", "who": "Lượng", "s": 12, "d": 4.333333333333333, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "REIN", "eq": "", "nm": "Xả nước 10 tumbler và vệ sinh hopper discharge", "ds": "Sump pit", "who": "Lượng", "s": 13, "d": 3.6666666666666665, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "REIN", "eq": "", "nm": "Tháo manhole hopper nhỏ, vệ sinh bên trong bằng vòi drinking / súng cao áp", "ds": "Soft water", "who": "S.Kiên + H.Anh", "s": 19, "d": 0.8333333333333334, "p": 2, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "REIN", "eq": "", "nm": "Vệ sinh đường chuyển hạt REIN → FDR bằng nước soft", "ds": "Soft water", "who": "S.Kiên + H.Anh", "s": 21, "d": 0.5, "p": 2, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "IDR", "eq": "", "nm": "Sấy trống 12 deck", "ds": "", "who": "Bảo", "s": 0, "d": 2.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "IDR", "eq": "", "nm": "Hạ nhiệt tháp", "ds": "", "who": "Long", "s": 3, "d": 1.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "IDR", "eq": "", "nm": "Vệ sinh receiving hopper + inlet valve bằng nước, intercleaning deck 1, gom hạt deck 1 + STRV 0m, lắp line", "ds": "", "who": "Long + Phú + Lượng (4+N)", "s": 5, "d": 3.0, "p": 4, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "FDR", "eq": "", "nm": "Empty beans 12 decks", "ds": "", "who": "Phú", "s": 16, "d": 2.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "FDR", "eq": "", "nm": "Cooling và cleaning receiving hopper FDR + inlet valve (drinking water)", "ds": "", "who": "Phú", "s": 19, "d": 0.5, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "FDR", "eq": "", "nm": "Intercleaning deck 1 + gom hạt deck 1 + gom hạt STRV 0m, lắp line", "ds": "", "who": "Bảo", "s": 20, "d": 3.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "DGC Filling", "eq": "", "nm": "Empty DGC (empty beans)", "ds": "", "who": "H.Anh", "s": 19, "d": 1.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}, {"br": "Nhánh Hạt", "pr": "DGC Filling", "eq": "", "nm": "Intercleaning: vệ sinh hopper, lưới sàng", "ds": "Giao ca 2 tiếp tục vệ sinh", "who": "H.Anh", "s": 21, "d": 2.0, "p": 1, "chk": "Không", "saf": [], "k": "Bắt buộc"}];
+const TPL = {
+  sd: { key: 'sd', icon: '🛑', label: 'Template Shutdown', color: '#ff6b00', hint: 'Bộ task chuẩn Shutdown 32 tiếng – 14 process, thời gian tiêu chuẩn.' },
+  co: { key: 'co', icon: '🔄', label: 'Template Changeover', color: '#0a84ff', hint: 'Changeover 16h – theo plan Changeover 16h 21.11: GCH, EXT, ADS, EVAP 1, REIN, IDR, FDR, DGC. Có sẵn người thực hiện.' },
+};
+let pick = null, sdRows = null, armed = false;
+const WHO = new Map(CO.map(r => [r.pr + '|' + r.nm, r.who]));
+
+function choose(btn) {
+  if (!sdRows) sdRows = window.PLAN_TASKS_2026 || [];
+  const nSd = sdRows.length;
+  const m = openModal(`<div class="modal-h"><h3>📦 Chọn template</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b"><div class="v41-opts">
+      ${[['sd', nSd], ['co', CO.length]].map(([k, n]) => { const t = TPL[k];
+        return `<button type="button" class="v41-opt" data-v41="${k}" style="--c:${t.color}"><span class="tag">${t.icon} ${t.label}</span><b>${n} task</b><small>${t.hint}</small></button>`; }).join('')}
+    </div><p class="muted small" style="margin:12px 0 0">Giờ của task tính từ ô <b>Bắt đầu Shutdown</b>. Changeover: mốc 0h = 13:00 trên plan gốc.</p></div>`, 'sm');
+  m.addEventListener('click', e => {
+    const o = e.target.closest('[data-v41]'); if (!o) return;
+    pick = o.dataset.v41;
+    window.PLAN_TASKS_2026 = pick === 'co' ? CO.map(r => ({ ...r })) : sdRows;
+    closeModal(); armed = true; btn.click();
+  });
+}
+function label() {
+  const WR = window.WorkRequest, d = WR && WR.data; if (!d || !d.v30 || !pick) return;
+  const t = TPL[pick], name = `${t.icon} ${t.label} (${d.rows.length} task)`;
+  if (d.fileName !== name) d.fileName = name;
+  if (pick === 'co') d.rows.forEach(r => { if (!r.who) r.who = WHO.get(r.process + '|' + r.name) || ''; });
+  document.querySelectorAll('#wrView .v30-note').forEach(n => { if (!n.querySelector('.v41-lbl')) n.insertAdjacentHTML('afterbegin', `<span class="v41-lbl" style="background:${t.color}">${t.icon} ${t.label}</span> `); });
+  if (WR.form && !WR.form.name) WR.form.name = pick === 'co' ? 'Changeover 16h' : 'Shutdown 32h';
+}
+function boot() {
+  try {
+    /* chặn trước nút v30 để hỏi chọn template */
+    window.addEventListener('click', e => {
+      const b = e.target.closest && e.target.closest('#wrView [data-v30="tpl"]'); if (!b) return;
+      if (armed) { armed = false; return; }                 // lần bấm lại sau khi đã chọn → để v30 xử lý
+      e.preventDefault(); e.stopImmediatePropagation(); choose(b);
+    }, true);
+    const WR = window.WorkRequest;
+    if (WR) { const _r = WR.render; WR.render = function (...a) { try { label(); } catch (x) { } const o = _r.apply(this, a); try { label(); } catch (x) { } return o; }; }
+    /* gán người thực hiện cho task Changeover khi tạo lịch */
+    const _c = Store.commit;
+    Store.commit = function (lbl, ...a) {
+      const before = new Set(Store.state.plans.map(p => p.id)), out = _c.call(this, lbl, ...a);
+      if (pick === 'co' && /Tạo lịch từ Work Request/.test(lbl)) {
+        const p = Store.state.plans.find(x => !before.has(x.id));
+        if (p) { pick = null; _c.call(this, 'Gán người theo plan Changeover', () => { const q = Store.state.plans.find(x => x.id === p.id);
+          q.wr = { ...(q.wr || {}), template: 'changeover' };
+          q.tasks.forEach(t => { const w = WHO.get(t.process + '|' + t.taskName); if (w && !t.assignee) t.assignee = w; }); }); }
+      }
+      return out;
+    };
+    console.log('[v41] đã nạp – 2 template: Shutdown / Changeover (' + CO.length + ' task)');
+  } catch (e) { console.error('[v41] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 4500)); else setTimeout(boot, 4500);
+})();
+</script>
+<!-- ===================== HẾT v41 ===================== -->
+
 </body>
 </html>
 
