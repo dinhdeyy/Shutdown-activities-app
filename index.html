@@ -9712,6 +9712,131 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v34 ===================== -->
 
+<!-- =====================================================================
+     v35 – TRANG TASK CHÍNH: SẮP THEO THỨ TỰ THỰC HIỆN (không theo ABC)
+       - Process / Nhánh: process bắt đầu sớm hơn nằm trên (Normal run không tính)
+       - Task trong process: giờ bắt đầu sớm → muộn (cùng giờ thì giữ thứ tự cũ)
+       - STT (#) tự đánh lại theo giờ bắt đầu khi lịch thay đổi (kéo thanh, dời task…)
+       - Nút "↕ Thứ tự: Thực hiện / ABC" để bật – tắt
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v35-style">
+#v35Btn.on{background:rgba(10,132,255,.14)!important;color:#0a84ff!important;border-color:rgba(10,132,255,.45)!important}
+</style>
+<script>
+(function () {
+'use strict';
+const LS = 'sp.v35.execOrder';
+const isOn = () => localStorage.getItem(LS) !== '0';
+const canEdit = () => !(window.Auth && !Auth.ok);
+const real = t => !t.normalRun && !t.hold;
+
+/* ---------- thứ hạng theo giờ bắt đầu ---------- */
+function ranks(p) {
+  let R; try { R = (App.res && App.res.R && App.res.R.size) ? App.res.R : Scheduler.schedule(p).R; } catch (e) { return null; }
+  const st = t => (R.get(t.id) || {}).start ?? Infinity;
+  const first = new Map();
+  const put = (k, v) => { if (k == null || k === '') return; const o = first.get(k); if (o === undefined || v < o) first.set(k, v); };
+  p.tasks.forEach(t => { const s = real(t) ? st(t) : Infinity; put(t.process, s); put(t.branch, s); });
+  p.tasks.forEach(t => { put(t.process, Infinity); put(t.branch, Infinity); });
+  const rank = new Map(), idx = new Map();
+  [...first].forEach(([k, v], i) => idx.set(k, i));
+  [...first].sort((a, b) => a[1] - b[1] || idx.get(a[0]) - idx.get(b[0])).forEach(([k], i) => rank.set(String(k), i));
+  return { rank, st };
+}
+
+/* ---------- 1. đánh lại STT theo giờ bắt đầu (task trong process sắp đúng) ---------- */
+let busy = false;
+function renumber() {
+  if (busy || !isOn() || !canEdit() || App.view === 'home') return;
+  const p = Store.plan(); if (!p || !p.tasks.length) return;
+  const r = ranks(p); if (!r) return;
+  const want = p.tasks.slice().sort((a, b) =>
+    (r.rank.get(String(a.process)) ?? 999) - (r.rank.get(String(b.process)) ?? 999) ||
+    (a.normalRun ? 0 : 1) - (b.normalRun ? 0 : 1) ||
+    r.st(a) - r.st(b) || (a.order || 0) - (b.order || 0));
+  if (want.every((t, i) => t.order === i + 1)) return;
+  busy = true;
+  try { Store.commit('Sắp task theo thứ tự thực hiện', () => { const q = Store.plan(), m = new Map(want.map((t, i) => [t.id, i + 1])); q.tasks.forEach(t => { t.order = m.get(t.id) || t.order; }); }); }
+  finally { busy = false; }
+}
+
+/* ---------- 2. process / nhánh không sắp theo ABC ---------- */
+const _lc = String.prototype.localeCompare;
+let RANK = null;
+function cmp(that, other, ...a) {
+  if (RANK) { const x = RANK.get(String(that)), y = RANK.get(String(other)); if (x !== undefined && y !== undefined) return x - y; }
+  return _lc.call(that, other, ...a);
+}
+function withRank(fn, self, args) {
+  if (!isOn()) return fn.apply(self, args);
+  const p = Store.plan(), r = p && ranks(p);
+  RANK = r ? r.rank : null;
+  String.prototype.localeCompare = function (o, ...a) { return cmp(this, o, ...a); };
+  try { return fn.apply(self, args); } finally { String.prototype.localeCompare = _lc; RANK = null; }
+}
+
+/* ---------- 3. dự phòng: nếu Gantt vẫn ra ABC → xếp lại khối process trên màn hình ---------- */
+function domFix() {
+  if (!isOn() || App.view === 'home') return;
+  const p = Store.plan(), r = p && ranks(p); if (!r) return;
+  const first = document.querySelector('.grow[data-id]'); if (!first) return;
+  const box = first.parentElement, rows = [...box.children].filter(x => x.classList.contains('grow'));
+  if (rows.length < 3) return;
+  const byId = new Map(p.tasks.map(t => [t.id, t]));
+  /* chia khối: mỗi dòng tiêu đề (không phải task) mở 1 khối mới */
+  const blocks = []; let cur = null;
+  rows.forEach(el => {
+    const t = byId.get(el.dataset.id);
+    if (!t) { cur = { head: [el], rows: [], key: null, isBranch: /branch/.test(el.className) }; blocks.push(cur); }
+    else { if (!cur) { cur = { head: [], rows: [], key: null }; blocks.push(cur); } cur.rows.push(el); if (cur.key == null) cur.key = t.process; }
+  });
+  /* gộp tiêu đề nhánh (không có task) vào khối ngay sau */
+  for (let i = blocks.length - 2; i >= 0; i--) if (!blocks[i].rows.length) { blocks[i + 1].head = blocks[i].head.concat(blocks[i + 1].head); blocks[i + 1].branchHead = blocks[i].isBranch || blocks[i + 1].branchHead; blocks.splice(i, 1); }
+  const rk = b => b.key == null ? 999 : (r.rank.get(String(b.key)) ?? 999);
+  const sorted = blocks.every((b, i) => !i || rk(blocks[i - 1]) <= rk(b));
+  if (sorted) return;
+  /* chỉ đổi chỗ khi KHÔNG có tiêu đề nhánh (tránh tách nhánh) – nếu có thì chỉ xếp trong từng nhánh */
+  const groups = []; let g = null;
+  blocks.forEach(b => { if (b.branchHead || !g) { g = { branch: b.branchHead ? b : null, list: [] }; groups.push(g); if (b.branchHead) return; } g.list.push(b); });
+  const frag = document.createDocumentFragment();
+  groups.sort((a, b) => Math.min(...[a.branch, ...a.list].filter(Boolean).map(rk)) - Math.min(...[b.branch, ...b.list].filter(Boolean).map(rk)))
+    .forEach(gr => { if (gr.branch) [...gr.branch.head, ...gr.branch.rows].forEach(x => frag.appendChild(x));
+      gr.list.sort((a, b) => rk(a) - rk(b)).forEach(b => [...b.head, ...b.rows].forEach(x => frag.appendChild(x))); });
+  box.appendChild(frag);
+  if (window.Gantt && typeof Gantt.drawArrows === 'function') try { Gantt.drawArrows(); } catch (e) { }
+}
+
+/* ---------- nút bật / tắt ---------- */
+function btn() {
+  const sp = document.querySelector('.topbar .spacer'); if (!sp) return;
+  let b = document.getElementById('v35Btn');
+  if (!b) { b = document.createElement('button'); b.id = 'v35Btn'; b.className = 'tb-btn';
+    b.onclick = () => { localStorage.setItem(LS, isOn() ? '0' : '1'); App.render(); toast(isOn() ? 'Sắp task theo thứ tự thực hiện.' : 'Sắp task theo thứ tự cũ.', 'ok'); };
+    sp.parentNode.insertBefore(b, sp); }
+  const on = isOn(); b.classList.toggle('on', on); b.textContent = on ? '↕ Thứ tự: Thực hiện' : '↕ Thứ tự: ABC';
+}
+
+function boot() {
+  try {
+    ['render', 'build', 'buildRows', 'rows'].forEach(k => { if (window.Gantt && typeof Gantt[k] === 'function') { const f = Gantt[k]; Gantt[k] = function (...a) { return withRank(f, this, a); }; } });
+    const _ar = App.render;
+    let tm;
+    App.render = function (...a) {
+      const o = withRank(_ar, this, a);
+      try { btn(); domFix(); } catch (e) { console.warn('[v35]', e); }
+      if (!busy) { clearTimeout(tm); tm = setTimeout(renumber, 350); }
+      return o;
+    };
+    if (App.res) App.render();
+    console.log('[v35] đã nạp – sắp task theo thứ tự thực hiện');
+  } catch (e) { console.error('[v35] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 3800)); else setTimeout(boot, 3800);
+})();
+</script>
+<!-- ===================== HẾT v35 ===================== -->
+
   
 </body>
 </html>
