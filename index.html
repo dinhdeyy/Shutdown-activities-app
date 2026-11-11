@@ -10050,7 +10050,7 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 @keyframes v39pulse{0%,100%{box-shadow:0 6px 18px rgba(255,120,0,.4)}50%{box-shadow:0 6px 18px rgba(255,120,0,.4),0 0 0 6px rgba(255,159,10,.18)}}
 #auP{font-size:18px!important;padding:14px 16px!important;border-radius:14px!important;letter-spacing:3px}
 /* ---------- 1. dashboard ---------- */
-body.db-mode>*:not(#dbView):not(.topbar):not(#toasts):not(#modalRoot):not(#tip){display:none!important}
+body.db-mode>*:not(#dbView):not(.topbar):not(#toasts):not(#modalRoot):not(#tip):not(.dd-menu):not(#v12Ov){display:none!important}
 #dbView{flex:1;overflow:auto;padding:12px clamp(10px,2vw,28px) 60px;width:100%;--g:#30d158;--b:#0a84ff;--o:#ff9f0a;--r:#ff3b30}
 .db-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 .db-h b{font-size:20px;letter-spacing:-.4px;margin-right:auto}
@@ -10223,6 +10223,7 @@ function close() { if (!document.body.classList.contains('db-mode')) return; doc
 
 /* ---------- nút đăng nhập ---------- */
 function badge() {
+  document.querySelectorAll('#v32Q, #v32Q2').forEach(x => x.remove());   // bỏ hẳn nút Chờ duyệt
   const b = document.getElementById('auBadge'); if (!b) return;
   const ok = !!(window.Auth && Auth.ok), txt = ok ? '✓ Đã đăng nhập · Đăng xuất' : '🔒 Đăng nhập để chỉnh sửa';
   if (b.textContent !== txt) b.textContent = txt;
@@ -10263,6 +10264,86 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 <!-- ===================== HẾT v39 ===================== -->
   
   
+<!-- =====================================================================
+     v40 – SỬA TASK TỰ LƯU (không cần bấm "Lưu")
+       - Task đang có: sửa ô nào → tự lưu sau 0.6 giây, panel vẫn mở, không hỏi xác nhận
+       - Nút "Lưu" đổi thành dấu "✓ Đã tự lưu" · task MỚI vẫn bấm "Thêm task" như cũ
+     DÁN NGAY TRƯỚC dòng </body> (sau khối v39)
+     ===================================================================== -->
+<style id="v40-style">
+#drawer.v40-auto .drawer-f [data-v40save]{display:none!important}
+.v40-st{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;font-size:13px;font-weight:700;background:rgba(48,209,88,.14);color:#15803d;transition:all .2s}
+.v40-st.ing{background:rgba(10,132,255,.12);color:#0a84ff}
+.v40-st.err{background:rgba(255,59,48,.12);color:#d70015}
+</style>
+<script>
+(function () {
+'use strict';
+const DELAY = 600;
+let timer = null, saving = false;
+function drawer() { return document.getElementById('drawer'); }
+function saveBtn(d) {
+  return [...d.querySelectorAll('.drawer-f button')].find(b => /^\s*(Lưu|Thêm task|Thêm)\s*$/i.test(b.textContent)) || d.querySelector('.drawer-f .btn.primary');
+}
+function status(d, kind, txt) {
+  const f = d.querySelector('.drawer-f'); if (!f) return;
+  let s = f.querySelector('.v40-st');
+  if (!s) { s = document.createElement('span'); s.className = 'v40-st'; f.prepend(s); }
+  s.className = 'v40-st ' + (kind || ''); s.textContent = txt;
+}
+function setup() {
+  const d = drawer(); if (!d) return;
+  const b = saveBtn(d); if (!b) return;
+  b.dataset.v40save = '1';
+  if (App.drawerIsNew) { d.classList.remove('v40-auto'); b.textContent = 'Thêm task'; const s = d.querySelector('.v40-st'); if (s) s.remove(); return; }
+  d.classList.add('v40-auto');
+  if (!d.querySelector('.v40-st')) status(d, '', '✓ Tự động lưu');
+}
+function autosave() {
+  const d = drawer(); if (!d || App.drawerIsNew || !App.drawerTaskId || saving) return;
+  if (window.Auth && !Auth.ok) { status(d, 'err', '🔒 Đăng nhập để lưu'); return; }
+  const ae = document.activeElement, fid = ae && d.contains(ae) ? ae.id : '', caret = ae && 'selectionStart' in ae ? ae.selectionStart : null;
+  const _close = Drawer.close, _toast = window.toast;
+  saving = true;
+  Drawer.close = function () { };                       // giữ panel mở
+  window.toast = function (m, k) { if (k === 'err' || k === 'warn') return _toast.apply(this, arguments); };
+  try { Drawer.save(); }
+  catch (e) { console.warn('[v40]', e); }
+  finally { Drawer.close = _close; window.toast = _toast; saving = false; }
+  const d2 = drawer(), err = d2 && d2.querySelector('#d_err');
+  if (err && err.textContent.trim()) status(d2, 'err', '⚠ ' + err.textContent.trim());
+  else if (d2) { status(d2, '', '✓ Đã lưu ' + new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })); if (err) err.textContent = ''; }
+  if (fid) { const el = document.getElementById(fid); if (el && el !== document.activeElement) { el.focus(); try { if (caret != null) el.setSelectionRange(caret, caret); } catch (e) { } } }
+}
+function schedule(e) {
+  const d = drawer(); if (!d || !d.contains(e.target) || App.drawerIsNew || saving) return;
+  if (!/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.target.type === 'file') return;
+  if (e.target.closest('.wf-pick, .v36-box, .v14-ord')) return;     // các khối này đã tự lưu riêng
+  status(d, 'ing', '… đang lưu');
+  clearTimeout(timer); timer = setTimeout(autosave, e.type === 'change' ? 150 : DELAY);
+}
+function boot() {
+  try {
+    document.addEventListener('input', schedule, true);
+    document.addEventListener('change', schedule, true);
+    /* bấm chọn task phụ thuộc / PPE / Song song… (nút, không phải ô nhập) */
+    document.addEventListener('click', e => {
+      const d = drawer(); if (!d || !d.contains(e.target) || App.drawerIsNew) return;
+      if (e.target.closest('.v10-opts button, .v10-it, [data-v10rm], .ppe, [data-ppe], .segc button')) { status(d, 'ing', '… đang lưu'); clearTimeout(timer); timer = setTimeout(autosave, 300); }
+    }, true);
+    /* đóng panel khi còn thay đổi chưa lưu → lưu luôn */
+    const _c = Drawer.close;
+    Drawer.close = function (...a) { if (timer && !saving) { clearTimeout(timer); timer = null; autosave(); } return _c.apply(this, a); };
+    const _r = Drawer.render;
+    Drawer.render = function (...a) { const o = _r.apply(this, a); try { setup(); } catch (e) { } return o; };
+    console.log('[v40] đã nạp – Sửa task tự lưu');
+  } catch (e) { console.error('[v40] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 4400)); else setTimeout(boot, 4400);
+})();
+</script>
+<!-- ===================== HẾT v40 ===================== -->
+
 </body>
 </html>
 
