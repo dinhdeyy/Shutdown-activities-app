@@ -9964,6 +9964,72 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v36 ===================== -->
 
+<!-- =====================================================================
+     v38b – "DÙNG FILE MẪU SẴN" = BỘ TASK CHUẨN 32H (bản sửa lỗi đứng web)
+       Lỗi v38 cũ: bộ theo dõi giao diện ghi lại chữ liên tục → vòng lặp vô hạn → web đứng.
+       Bản này: chỉ đổi chữ khi thật sự khác, không theo dõi lặp, không sắp xếp lại 200 dòng mỗi lần vẽ.
+       - 200 task của form chuẩn 32h, đúng thứ tự từ trên xuống, giờ tính từ "Bắt đầu Shutdown"
+       - Cần có khối v34 (Lịch chuẩn 32h) phía trên
+     CÁCH DÁN: XÓA khối v38 cũ (nếu đã dán), dán khối này NGAY TRƯỚC dòng </body>
+     ===================================================================== -->
+<script>
+(function () {
+'use strict';
+const LABEL = 'Form mẫu chuẩn 32h';
+let ROWS = null;
+
+function toPlanRows(S) {
+  const rows = S.compute(S.DATA.rows.map(r => ({ ...r })), { ...S.DATA.off });
+  return rows.map(r => ({
+    br: r.branch, pr: r.proc, eq: '', nm: r.name,
+    ds: [r.note, r.nt ? 'cần nhà thầu' : ''].filter(Boolean).join(' · '),
+    s: Math.round(r.s * 1000) / 1000, d: r.dur, p: r.ppl, chk: 'Không', saf: [], k: 'Bắt buộc',
+  }));
+}
+
+/* đổi chữ trên giao diện – CHỈ ghi khi khác, không dùng MutationObserver */
+function fixText() {
+  const v = document.getElementById('wrView'); if (!v || !ROWS) return;
+  const re = /Plan Shutdown 20\.10\.2026 \(\d+ task\)|bộ task mẫu \(14 task\)|File mẫu sẵn \(Plan Shutdown\)/g;
+  v.querySelectorAll('.v30-note, .w4-tpl, .v6-built, .w4-file p').forEach(el => {
+    if (!re.test(el.innerHTML)) return; re.lastIndex = 0;
+    const nx = el.innerHTML.replace(re, `${LABEL} (${ROWS.length} task)`);
+    if (nx !== el.innerHTML) el.innerHTML = nx;
+  });
+}
+
+function boot(tries) {
+  try {
+    const S = window.Std32;
+    if (!S || !S.DATA) { if ((tries || 0) < 20) return setTimeout(() => boot((tries || 0) + 1), 300); console.warn('[v38b] chưa có khối v34'); return; }
+    ROWS = toPlanRows(S);
+    /* 1. nút "📦 Dùng file mẫu sẵn" (v30) đọc biến này */
+    window.PLAN_TASKS_2026 = ROWS;
+    /* 2. chế độ "⚡ Tự động – dùng task có sẵn" */
+    const build = () => S.buildTasks(S.compute(S.DATA.rows.map(r => ({ ...r })), { ...S.DATA.off }));
+    try { templateTasks = build; } catch (e) { }
+    window.templateTasks = build;
+    /* 3. đổi tên file hiển thị 1 lần + sửa chữ sau mỗi lần vẽ tab (không lặp) */
+    const WR = window.WorkRequest;
+    if (WR && !WR.__v38b) {
+      WR.__v38b = true;
+      const _r = WR.render;
+      WR.render = function (...a) {
+        const d = WR.data;
+        if (d && d.v30 && !d.v38b) { d.v38b = true; d.fileName = `${LABEL} (${ROWS.length} task)`; }
+        const o = _r.apply(this, a);
+        try { fixText(); } catch (e) { }
+        return o;
+      };
+    }
+    console.log('[v38b] đã nạp – form mẫu = bộ task chuẩn 32h (' + ROWS.length + ' task)');
+  } catch (e) { console.error('[v38b] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 3700)); else setTimeout(boot, 3700);
+})();
+</script>
+<!-- ===================== HẾT v38b ===================== -->
+
   
 </body>
 </html>
