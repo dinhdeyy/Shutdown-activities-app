@@ -10030,6 +10030,238 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v38b ===================== -->
 
+<!-- =====================================================================
+     v39 – DASHBOARD MỚI + BỎ "CHỜ DUYỆT" + NÚT ĐĂNG NHẬP DỄ THẤY
+       1. Tab "Dashboard" (thanh trên) → dashboard mới:
+          KPI · tiến độ theo thời gian · bảng nhiệt theo NGÀY × CA · theo PROCESS · task trễ / vừa xong
+       2. Ẩn nút "🛡 Chờ duyệt" (chức năng duyệt đã bỏ)
+       3. Nút đăng nhập: to, có màu, có chữ rõ ràng
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v39-style">
+/* ---------- 2. bỏ Chờ duyệt ---------- */
+#v32Q,#v32Q2{display:none!important}
+/* ---------- 3. nút đăng nhập ---------- */
+#auBadge{display:inline-flex!important;align-items:center;gap:7px;padding:8px 16px!important;border-radius:999px!important;font-size:13.5px!important;font-weight:800!important;
+  cursor:pointer;border:0!important;white-space:nowrap;transition:transform .25s cubic-bezier(.22,1.2,.36,1),box-shadow .2s}
+#auBadge:hover{transform:translateY(-2px)}
+#auBadge.ro{background:linear-gradient(135deg,#ff9f0a,#ff6b00)!important;color:#fff!important;box-shadow:0 6px 18px rgba(255,120,0,.4)!important;animation:v39pulse 2.2s infinite}
+#auBadge.rw{background:linear-gradient(135deg,#30d158,#0fa968)!important;color:#fff!important;box-shadow:0 4px 14px rgba(48,209,88,.35)!important}
+@keyframes v39pulse{0%,100%{box-shadow:0 6px 18px rgba(255,120,0,.4)}50%{box-shadow:0 6px 18px rgba(255,120,0,.4),0 0 0 6px rgba(255,159,10,.18)}}
+#auP{font-size:18px!important;padding:14px 16px!important;border-radius:14px!important;letter-spacing:3px}
+/* ---------- 1. dashboard ---------- */
+body.db-mode>*:not(#dbView):not(.topbar):not(#toasts):not(#modalRoot):not(#tip){display:none!important}
+#dbView{flex:1;overflow:auto;padding:12px clamp(10px,2vw,28px) 60px;width:100%;--g:#30d158;--b:#0a84ff;--o:#ff9f0a;--r:#ff3b30}
+.db-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.db-h b{font-size:20px;letter-spacing:-.4px;margin-right:auto}
+.db-h select{border-radius:999px!important;padding:8px 14px!important}
+.db-btn{border:1px solid var(--glass-bd,#e5e7eb);background:var(--glass-row,#fff);color:var(--text);border-radius:999px;padding:8px 15px;font-weight:600;cursor:pointer}
+.db-card{background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#e5e7eb);border-radius:22px;padding:16px 18px;box-shadow:0 4px 16px rgba(15,23,42,.05)}
+.db-card h4{margin:0 0 12px;font-size:12.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;display:flex;align-items:center;gap:8px}
+.db-card h4 small{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500}
+.db-kpis{display:grid;grid-template-columns:1.3fr repeat(5,1fr);gap:12px;margin-bottom:12px}
+.db-ring{display:flex;align-items:center;gap:16px}
+.db-ring .rg{--p:0;flex:none;position:relative;width:104px;height:104px;border-radius:50%;background:conic-gradient(from -90deg,#30d158,#34c7ff calc(var(--p)*1%),rgba(120,120,128,.16) 0)}
+.db-ring .rg::after{content:'';position:absolute;inset:11px;border-radius:50%;background:var(--glass-row,#fff)}
+.db-ring .rg b{position:absolute;inset:0;z-index:1;display:grid;place-items:center;font-size:24px;font-weight:800}
+.db-ring span{font-size:13px;color:var(--muted);line-height:1.6}.db-ring span b{color:var(--text);font-size:15px}
+.db-k span{font-size:12.5px;color:var(--muted);font-weight:600}
+.db-k b{display:block;font-size:30px;font-weight:800;letter-spacing:-1px;color:var(--kc,var(--text));line-height:1.15}
+.db-k small{color:var(--muted);font-size:12px}
+.db-row{display:grid;grid-template-columns:1.6fr 1fr;gap:12px;margin-bottom:12px}
+.db-svg{width:100%;height:230px;display:block}
+.db-leg{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
+.db-leg i{display:inline-block;width:12px;height:4px;border-radius:2px;margin-right:5px;vertical-align:middle}
+/* heatmap ngày × ca */
+.db-heat{display:grid;grid-template-columns:110px repeat(3,1fr);gap:6px;font-size:12.5px}
+.db-heat .hd{font-weight:700;color:var(--muted);text-align:center;font-size:12px}
+.db-heat .dy{font-weight:700;display:flex;align-items:center}
+.db-cell{border-radius:12px;padding:8px 10px;min-height:52px;background:rgba(120,120,128,.08);position:relative;cursor:default}
+.db-cell b{font-size:16px;font-weight:800}.db-cell small{display:block;color:inherit;opacity:.85;font-size:11.5px}
+.db-cell .bar{position:absolute;left:8px;right:8px;bottom:6px;height:4px;border-radius:2px;background:rgba(0,0,0,.08);overflow:hidden}
+.db-cell .bar i{display:block;height:100%;background:currentColor;border-radius:2px}
+.db-cell.now{outline:2.5px solid var(--b);outline-offset:1px}
+.db-cell.empty{opacity:.35}
+/* process */
+.db-pr{display:grid;grid-template-columns:120px 1fr 92px;gap:10px;align-items:center;font-size:13px;padding:5px 0}
+.db-pr .nm{display:flex;align-items:center;gap:7px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.db-pr .nm i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--c)}
+.db-pr .tr{position:relative;height:12px;border-radius:6px;background:rgba(120,120,128,.14);overflow:hidden}
+.db-pr .tr i{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:var(--c)}
+.db-pr .tr s{position:absolute;top:0;bottom:0;border-radius:6px;background:repeating-linear-gradient(45deg,rgba(255,59,48,.55) 0 4px,transparent 4px 8px)}
+.db-pr em{font-style:normal;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.db-pr em b{color:var(--text)}
+/* danh sách */
+.db-li{display:flex;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border,#e5e7eb);font-size:13px;cursor:pointer}
+.db-li:first-of-type{border-top:0}
+.db-li:hover b{color:var(--b)}
+.db-li .dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--c)}
+.db-li div{flex:1;min-width:0}.db-li b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.db-li small{color:var(--muted)}
+.db-li .tg{flex:none;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px}
+.db-empty{color:var(--muted);text-align:center;padding:26px 0;font-size:13.5px}
+@media (max-width:1100px){.db-kpis{grid-template-columns:repeat(3,1fr)}.db-kpis .db-ring{grid-column:1/-1}.db-row{grid-template-columns:1fr}}
+</style>
+<script>
+(function () {
+'use strict';
+const esc = s => (window.U ? U.esc(s ?? '') : String(s ?? ''));
+const H = 36e5, DAY = 864e5, pad = n => String(n).padStart(2, '0');
+const SH = [6, 14, 22];
+const real = t => !t.normalRun && !t.hold;
+const isDone = t => (t.progress || 0) >= 100;
+const dkey = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const WD = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+const dlabel = k => { const [y, m, d] = k.split('-').map(Number), x = new Date(y, m - 1, d); return `${WD[x.getDay()]} ${pad(d)}/${pad(m)}`; };
+const hm = ms => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const dm = ms => { const d = new Date(ms); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${hm(ms)}`; };
+/* ca của 1 thời điểm: Ca 3 22:00 → 06:00 tính cho ngày bắt đầu ca */
+function shiftOf(ms) {
+  const d = new Date(ms), h = d.getHours();
+  if (h < SH[0]) return { day: dkey(ms - DAY), ca: 3 };
+  return { day: dkey(ms), ca: h < SH[1] ? 1 : h < SH[2] ? 2 : 3 };
+}
+const pct = (a, b) => b ? Math.round(100 * a / b) : 0;
+const color = p => p >= 100 ? '#15803d' : p >= 70 ? '#16a34a' : p >= 40 ? '#b45309' : p > 0 ? '#c2410c' : '#64748b';
+const bgc = p => p >= 100 ? 'rgba(48,209,88,.28)' : p >= 70 ? 'rgba(48,209,88,.16)' : p >= 40 ? 'rgba(255,159,10,.18)' : p > 0 ? 'rgba(255,107,0,.14)' : 'rgba(120,120,128,.08)';
+const pcolor = (p, k) => { try { return processColor(p, k); } catch (e) { return '#0a84ff'; } };
+
+const V = { proc: '' };
+function data() {
+  const p = Store.plan(); if (!p) return null;
+  let res; try { res = Scheduler.schedule(p); } catch (e) { return null; }
+  const now = Date.now();
+  const L = p.tasks.filter(real).map(t => { const r = res.R.get(t.id) || {}; return { t, s: r.start, e: r.end, done: isDone(t) }; })
+    .filter(x => isFinite(x.s) && (!V.proc || x.t.process === V.proc));
+  L.forEach(x => { x.late = !x.done && now > x.e; x.run = !x.done && now >= x.s && now <= x.e; x.doneAt = x.done ? (x.t.doneAt || x.e) : null; });
+  return { p, res, now, L, procs: [...new Set(p.tasks.filter(real).map(t => t.process))] };
+}
+
+/* ---------- biểu đồ tiến độ (kế hoạch vs thực tế) ---------- */
+function chart(D) {
+  const { L, now } = D; if (!L.length) return '<div class="db-empty">Chưa có task.</div>';
+  const t0 = Math.min(...L.map(x => x.s)), t1 = Math.max(...L.map(x => x.e), now < t0 ? t0 + H : Math.min(now, t0 + 30 * DAY));
+  const W = 800, Ht = 210, pl = 34, pr = 10, pt = 10, pb = 26, n = L.length;
+  const X = t => pl + (W - pl - pr) * (t - t0) / Math.max(1, t1 - t0), Y = c => pt + (Ht - pt - pb) * (1 - c / n);
+  const step = (arr) => { arr.sort((a, b) => a - b); let c = 0, d = `M${X(t0)},${Y(0)}`; arr.forEach(t => { d += ` L${X(t)},${Y(c)}`; c++; d += ` L${X(t)},${Y(c)}`; }); return { d, c }; };
+  const plan = step(L.map(x => x.e)), act = step(L.filter(x => x.done).map(x => Math.min(x.doneAt, t1)));
+  const lastX = X(Math.min(Math.max(now, t0), t1));
+  let grid = '';
+  for (let i = 0; i <= 4; i++) { const c = Math.round(n * i / 4); grid += `<line x1="${pl}" x2="${W - pr}" y1="${Y(c)}" y2="${Y(c)}" stroke="currentColor" opacity=".08"/><text x="${pl - 6}" y="${Y(c) + 4}" font-size="10" text-anchor="end" fill="currentColor" opacity=".55">${c}</text>`; }
+  const span = t1 - t0, stepH = span > 4 * DAY ? 24 : span > 2 * DAY ? 12 : 6;
+  for (let t = Math.ceil(t0 / (stepH * H)) * stepH * H; t <= t1; t += stepH * H) grid += `<text x="${X(t)}" y="${Ht - 8}" font-size="10" text-anchor="middle" fill="currentColor" opacity=".55">${new Date(t).getHours() === 0 ? dlabel(dkey(t)).slice(3) : hm(t)}</text>`;
+  const fillAct = act.d + ` L${X(L.filter(x => x.done).length ? Math.min(Math.max(...L.filter(x => x.done).map(x => x.doneAt)), t1) : t0)},${Y(0)} Z`;
+  return `<svg class="db-svg" viewBox="0 0 ${W} ${Ht}" preserveAspectRatio="none">${grid}
+    <path d="${fillAct}" fill="rgba(48,209,88,.15)"/>
+    <path d="${plan.d}" fill="none" stroke="#0a84ff" stroke-width="2" stroke-dasharray="6 4"/>
+    <path d="${act.d}" fill="none" stroke="#30d158" stroke-width="3"/>
+    ${now > t0 && now < t1 ? `<line x1="${lastX}" x2="${lastX}" y1="${pt}" y2="${Ht - pb}" stroke="#ff3b30" stroke-width="1.5" stroke-dasharray="3 3"/><text x="${lastX + 4}" y="${pt + 10}" font-size="10" fill="#ff3b30">Bây giờ</text>` : ''}</svg>
+    <div class="db-leg"><span><i style="background:#0a84ff"></i>Kế hoạch (tích lũy)</span><span><i style="background:#30d158"></i>Đã xong thực tế</span></div>`;
+}
+/* ---------- bảng nhiệt ngày × ca ---------- */
+function heat(D) {
+  const m = new Map();
+  D.L.forEach(x => { const s = shiftOf(x.s), k = s.day + '|' + s.ca; if (!m.has(k)) m.set(k, { n: 0, d: 0, late: 0 }); const o = m.get(k); o.n++; if (x.done) o.d++; if (x.late) o.late++; });
+  const days = [...new Set([...m.keys()].map(k => k.split('|')[0]))].sort();
+  if (!days.length) return '<div class="db-empty">Chưa có task.</div>';
+  const cur = shiftOf(D.now), curK = cur.day + '|' + cur.ca;
+  return `<div class="db-heat"><span></span>${['Ca 1 · 06–14', 'Ca 2 · 14–22', 'Ca 3 · 22–06'].map(x => `<span class="hd">${x}</span>`).join('')}
+    ${days.map(d => `<span class="dy">${dlabel(d)}</span>${[1, 2, 3].map(c => { const o = m.get(d + '|' + c); if (!o) return '<div class="db-cell empty"></div>';
+      const p = pct(o.d, o.n);
+      return `<div class="db-cell ${d + '|' + c === curK ? 'now' : ''}" style="background:${bgc(p)};color:${color(p)}" title="${o.d}/${o.n} task xong${o.late ? ' · ' + o.late + ' trễ' : ''}">
+        <b>${o.d}/${o.n}</b><small>${p}% xong${o.late ? ` · ⚠ ${o.late} trễ` : ''}</small><span class="bar"><i style="width:${p}%"></i></span></div>`; }).join('')}`).join('')}</div>`;
+}
+/* ---------- theo process ---------- */
+function procs(D) {
+  const m = new Map();
+  D.L.forEach(x => { const k = x.t.process; if (!m.has(k)) m.set(k, { n: 0, d: 0, late: 0, s: Infinity }); const o = m.get(k); o.n++; if (x.done) o.d++; if (x.late) o.late++; o.s = Math.min(o.s, x.s); });
+  return [...m].sort((a, b) => a[1].s - b[1].s).map(([k, o]) => `<div class="db-pr" style="--c:${pcolor(D.p, k)}"><span class="nm"><i></i>${esc(k)}</span>
+    <div class="tr"><i style="width:${pct(o.d, o.n)}%"></i>${o.late ? `<s style="left:${pct(o.d, o.n)}%;width:${pct(o.late, o.n)}%"></s>` : ''}</div>
+    <em><b>${o.d}</b>/${o.n} · ${pct(o.d, o.n)}%${o.late ? ` <span style="color:#d70015">⚠${o.late}</span>` : ''}</em></div>`).join('') || '<div class="db-empty">Chưa có task.</div>';
+}
+function list(arr, kind, D) {
+  if (!arr.length) return `<div class="db-empty">${kind === 'late' ? '✅ Không có task trễ' : 'Chưa có task nào xong'}</div>`;
+  return arr.slice(0, 8).map(x => `<div class="db-li" data-dbo="${esc(x.t.id)}" style="--c:${pcolor(D.p, x.t.process)}"><span class="dot"></span>
+    <div><b>#${x.t.order} ${esc(x.t.taskName)}</b><small>${esc(x.t.process)} · ${kind === 'late' ? 'KH xong ' + dm(x.e) : '✓ ' + dm(x.doneAt) + (x.t.doneBy ? ' · ' + esc(x.t.doneBy) : '')}</small></div>
+    <span class="tg" style="${kind === 'late' ? 'background:rgba(255,59,48,.14);color:#d70015' : 'background:rgba(48,209,88,.16);color:#15803d'}">${kind === 'late' ? 'Trễ ' + Math.max(1, Math.round((D.now - x.e) / H)) + 'h' : 'Xong'}</span></div>`).join('');
+}
+function render() {
+  const v = document.getElementById('dbView'); if (!v || !document.body.classList.contains('db-mode')) return;
+  const D = data(); if (!D) { v.innerHTML = '<div class="db-empty">Mở 1 kế hoạch để xem Dashboard.</div>'; return; }
+  const { L, now } = D, n = L.length, d = L.filter(x => x.done).length, late = L.filter(x => x.late), run = L.filter(x => x.run).length;
+  const due = L.filter(x => x.e <= now), dueDone = due.filter(x => x.done).length;
+  const cur = shiftOf(now), curL = L.filter(x => { const s = shiftOf(x.s); return s.day === cur.day && s.ca === cur.ca; });
+  const end = n ? Math.max(...L.map(x => x.e)) : now;
+  v.innerHTML = `<div class="db-h"><b>📊 Dashboard · ${esc(D.p.name)}</b>
+      <select id="dbProc"><option value="">Tất cả process</option>${D.procs.map(k => `<option ${V.proc === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
+      <button class="db-btn" data-db="back">← Gantt</button></div>
+    <div class="db-kpis">
+      <div class="db-card db-ring"><div class="rg" style="--p:${pct(d, n)}"><b>${pct(d, n)}%</b></div>
+        <span>Đã hoàn thành<br><b>${d} / ${n} task</b><br>Kết thúc dự kiến ${n ? dm(end) : '—'}</span></div>
+      <div class="db-card db-k" style="--kc:#0a84ff"><span>Đang thực hiện</span><b>${run}</b><small>theo giờ kế hoạch</small></div>
+      <div class="db-card db-k" style="--kc:${late.length ? '#ff3b30' : '#30d158'}"><span>Trễ</span><b>${late.length}</b><small>quá giờ, chưa xong</small></div>
+      <div class="db-card db-k" style="--kc:#30d158"><span>Đúng tiến độ</span><b>${pct(dueDone, due.length)}%</b><small>${dueDone}/${due.length} task đến hạn đã xong</small></div>
+      <div class="db-card db-k" style="--kc:#5e5ce6"><span>Ca hiện tại · Ca ${cur.ca}</span><b>${curL.filter(x => x.done).length}/${curL.length}</b><small>${dlabel(cur.day)}</small></div>
+      <div class="db-card db-k" style="--kc:#ff9f0a"><span>Còn lại</span><b>${n - d}</b><small>${L.filter(x => x.s > now).length} chưa tới giờ</small></div>
+    </div>
+    <div class="db-row"><div class="db-card"><h4>📈 Tiến độ hoàn thành theo thời gian</h4>${chart(D)}</div>
+      <div class="db-card"><h4>🏭 Theo process <small>xanh = xong · sọc đỏ = trễ</small></h4>${procs(D)}</div></div>
+    <div class="db-row"><div class="db-card"><h4>🗓 Theo ngày & ca <small>số task xong / tổng · viền xanh = ca hiện tại</small></h4>${heat(D)}</div>
+      <div class="db-card"><h4>⚠ Task trễ <small>${late.length}</small></h4>${list(late.sort((a, b) => a.e - b.e), 'late', D)}
+        <h4 style="margin-top:16px">✅ Vừa hoàn thành</h4>${list(L.filter(x => x.done).sort((a, b) => b.doneAt - a.doneAt), 'done', D)}</div></div>`;
+}
+
+/* ---------- mở / đóng ---------- */
+function setTabs(on) { const a = document.getElementById('tabDash'), g = document.getElementById('tabGantt'); if (a) a.classList.toggle('active', on); if (g) g.classList.toggle('active', !on); }
+function open() {
+  if (App.view === 'home') { toast('Mở 1 kế hoạch trước.', 'warn'); return; }
+  ['op-mode', 'admin-mode', 'wr-mode', 'rt-mode', 'wf-mode'].forEach(c => document.body.classList.remove(c));
+  try { Drawer.close(); } catch (e) { }
+  document.body.classList.add('db-mode'); document.getElementById('dbView').classList.remove('hidden'); setTabs(true); render();
+}
+function close() { if (!document.body.classList.contains('db-mode')) return; document.body.classList.remove('db-mode'); document.getElementById('dbView').classList.add('hidden'); setTabs(false); }
+
+/* ---------- nút đăng nhập ---------- */
+function badge() {
+  const b = document.getElementById('auBadge'); if (!b) return;
+  const ok = !!(window.Auth && Auth.ok), txt = ok ? '✓ Đã đăng nhập · Đăng xuất' : '🔒 Đăng nhập để chỉnh sửa';
+  if (b.textContent !== txt) b.textContent = txt;
+  b.classList.toggle('ro', !ok); b.classList.toggle('rw', ok);
+  b.title = ok ? 'Bấm để đăng xuất' : 'Bấm để nhập mật khẩu';
+}
+
+function boot() {
+  try {
+    const v = document.createElement('div'); v.id = 'dbView'; v.className = 'hidden'; document.body.appendChild(v);
+    v.addEventListener('click', e => {
+      if (e.target.closest('[data-db="back"]')) return close();
+      const o = e.target.closest('[data-dbo]'); if (o) { close(); setTimeout(() => Drawer.open(o.dataset.dbo), 50); }
+    });
+    v.addEventListener('change', e => { if (e.target.id === 'dbProc') { V.proc = e.target.value; render(); } });
+    document.addEventListener('click', e => {
+      if (e.target.closest && e.target.closest('#tabDash')) { e.preventDefault(); e.stopImmediatePropagation(); open(); return; }
+      if (e.target.closest && e.target.closest('#tabGantt, #btnHome, #wrTop, #rtTop, #wfTop, #auAdmin')) close();
+    }, true);
+    let raf = 0;
+    const _ar = App.render;
+    App.render = function (...a) {
+      const o = _ar.apply(this, a);
+      try { badge(); } catch (e) { }
+      if (document.body.classList.contains('db-mode')) { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); }
+      return o;
+    };
+    if (window.Auth && Auth.login) { const _l = Auth.login; Auth.login = async function (...a) { const r = await _l.apply(this, a); setTimeout(badge, 50); return r; }; }
+    if (window.Auth && Auth.logout) { const _o = Auth.logout; Auth.logout = function (...a) { const r = _o.apply(this, a); setTimeout(badge, 50); return r; }; }
+    setInterval(() => { if (document.body.classList.contains('db-mode')) render(); }, 60000);
+    badge();
+    console.log('[v39] đã nạp – Dashboard mới · bỏ Chờ duyệt · nút đăng nhập');
+  } catch (e) { console.error('[v39] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 4200)); else setTimeout(boot, 4200);
+})();
+</script>
+<!-- ===================== HẾT v39 ===================== -->
+  
   
 </body>
 </html>
