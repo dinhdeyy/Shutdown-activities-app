@@ -9837,6 +9837,133 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v35 ===================== -->
 
+<!-- =====================================================================
+     v36 – THEO DÕI TASK ĐÃ THỰC HIỆN / CHƯA (bỏ bằng chứng ảnh)
+       - Panel "Sửa task": 2 nút lớn  ⏳ Chưa thực hiện | ✅ Đã thực hiện  (lưu ngay, không cần bấm Lưu)
+       - Gantt: vòng tròn ○ cạnh tên task → bấm để đánh dấu nhanh
+       - Task đã thực hiện: dòng + thanh mờ đi, tên gạch nhẹ, ghi "✓ Xong – tên · giờ"
+       - Đếm "✅ x/y đã xong" trên thanh công cụ
+       - Ẩn toàn bộ phần bằng chứng / ảnh để đóng task
+     DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
+     ===================================================================== -->
+<style id="v36-style">
+/* ---- bỏ bằng chứng / ảnh ---- */
+#drawer [data-v13="ev"],#drawer .v36-noev,#drawer .wr-opbox,#drawer .v32-box{display:none!important}
+/* ---- khung trạng thái trong panel ---- */
+.v36-box{margin:10px 0 4px;padding:12px;border-radius:18px;background:var(--glass-row,#fff);border:1px solid var(--glass-bd,#e5e7eb)}
+.v36-box h5{margin:0 0 8px;font-size:13px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.v36-seg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.v36-seg button{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 10px;border-radius:14px;border:1.5px solid var(--border,#e5e7eb);
+  background:transparent;color:var(--text);font-size:15px;font-weight:700;cursor:pointer;transition:all .25s cubic-bezier(.22,1.2,.36,1)}
+.v36-seg button:hover{transform:translateY(-2px)}
+.v36-seg button.on.todo{background:rgba(142,142,147,.16);border-color:rgba(142,142,147,.6)}
+.v36-seg button.on.done{background:linear-gradient(135deg,#30d158,#0fa968);border-color:transparent;color:#fff;box-shadow:0 8px 20px rgba(48,209,88,.35)}
+.v36-seg button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.v36-meta{margin-top:8px;font-size:12.5px;color:var(--muted)}
+/* ---- Gantt ---- */
+.v36-ck{flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-right:5px;border-radius:50%;border:1.8px solid rgba(120,120,128,.55);
+  font-size:11px;font-weight:900;color:transparent;cursor:pointer;vertical-align:-3px;transition:all .2s;background:transparent}
+.v36-ck:hover{border-color:#30d158;color:#30d158}
+.grow.v36-done .v36-ck{background:#30d158;border-color:#30d158;color:#fff}
+.grow.v36-done{opacity:.5;filter:grayscale(.55) blur(.25px);transition:opacity .25s,filter .25s}
+.grow.v36-done:hover{opacity:.9;filter:none}
+.grow.v36-done .c-name,.grow.v36-done .outlbl b{text-decoration:line-through;text-decoration-color:rgba(48,209,88,.8)}
+.v36-tag{display:inline-block;margin-left:6px;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:700;font-style:normal;background:rgba(48,209,88,.18);color:#15803d}
+body.ro .v36-ck{pointer-events:none}
+#v36Cnt{font-weight:700}
+</style>
+<script>
+(function () {
+'use strict';
+const esc = s => (window.U ? U.esc(s ?? '') : String(s ?? ''));
+const canEdit = () => !(window.Auth && !Auth.ok);
+const needLogin = () => { if (canEdit()) return false; const b = document.getElementById('auBadge'); if (b) b.click(); else toast('Cần đăng nhập để cập nhật.', 'warn'); return true; };
+const who = () => (window.SafeStore && (SafeStore.get('lead.name') || SafeStore.get('op.name'))) || (window.Auth && Auth.user) || '';
+const isDone = t => (t && (t.progress || 0) >= 100);
+const fmt = ms => { if (!ms) return ''; const d = new Date(ms), p = n => String(n).padStart(2, '0'); return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+
+/* ---------------- đổi trạng thái ---------------- */
+function setDone(id, on) {
+  if (needLogin()) return;
+  Store.commit(on ? 'Đánh dấu đã thực hiện' : 'Đánh dấu chưa thực hiện', () => {
+    const t = Store.plan().tasks.find(x => x.id === id); if (!t) return false;
+    if (on) { t.progress = 100; t.doneAt = Date.now(); t.doneBy = who(); }
+    else { t.progress = 0; delete t.doneAt; delete t.doneBy; delete t.approvedBy; delete t.approvedAt; if (t.review) t.review.state = ''; }
+  });
+}
+
+/* ---------------- panel Sửa task ---------------- */
+function hideEvidence(d) {
+  d.querySelectorAll('.xseq, .v13-card, div').forEach(el => {
+    if (el.children.length > 40) return;
+    const h = el.querySelector(':scope > .xs-h, :scope > h5, :scope > h4');
+    if (h && /bằng chứng|ảnh/i.test(h.textContent)) el.classList.add('v36-noev');
+  });
+}
+function panel(t) {
+  const d = document.getElementById('drawer'); if (!d || !t || !t.id || App.drawerIsNew || t.normalRun) return;
+  hideEvidence(d);
+  d.querySelectorAll('.v36-box').forEach(x => x.remove());
+  const cur = Store.plan().tasks.find(x => x.id === t.id) || t, done = isDone(cur), ro = !canEdit();
+  const box = document.createElement('div'); box.className = 'v36-box';
+  box.innerHTML = `<h5>Trạng thái thực hiện</h5>
+    <div class="v36-seg"><button type="button" class="todo ${done ? '' : 'on'}" data-v36="0" ${ro ? 'disabled' : ''}>⏳ Chưa thực hiện</button>
+      <button type="button" class="done ${done ? 'on' : ''}" data-v36="1" ${ro ? 'disabled' : ''}>✅ Đã thực hiện</button></div>
+    <div class="v36-meta">${done ? `✓ Hoàn thành${cur.doneBy ? ' – <b>' + esc(cur.doneBy) + '</b>' : ''}${cur.doneAt ? ' · ' + fmt(cur.doneAt) : ''}` : ro ? 'Đăng nhập để cập nhật trạng thái.' : 'Bấm “Đã thực hiện” khi task làm xong – lưu ngay.'}</div>`;
+  box.onclick = e => { const b = e.target.closest('[data-v36]'); if (!b || b.disabled) return;
+    const on = b.dataset.v36 === '1'; if (on === isDone(Store.plan().tasks.find(x => x.id === t.id))) return;
+    setDone(t.id, on); panel(Store.plan().tasks.find(x => x.id === t.id)); };
+  const hero = d.querySelector('.v13-hero');
+  if (hero) hero.after(box); else { const b = d.querySelector('.drawer-b'); b && b.prepend(box); }
+}
+
+/* ---------------- Gantt ---------------- */
+function rowId(r) { return r.dataset.id || ((r.querySelector('[data-id]') || {}).dataset || {}).id || ''; }
+function gantt() {
+  const p = Store.plan(); if (!p || App.view === 'home') return;
+  const byId = new Map(p.tasks.map(t => [t.id, t]));
+  document.querySelectorAll('.grow').forEach(r => {
+    const t = byId.get(rowId(r)); if (!t || t.normalRun) return;
+    const done = isDone(t); r.classList.toggle('v36-done', done);
+    const nm = r.querySelector('.c-name'); if (!nm) return;
+    let ck = nm.querySelector('.v36-ck');
+    if (!ck) { ck = document.createElement('span'); ck.className = 'v36-ck'; ck.dataset.v36id = t.id; nm.prepend(ck); }
+    ck.textContent = '✓'; ck.title = done ? 'Đã thực hiện – bấm để bỏ' : 'Bấm để đánh dấu đã thực hiện';
+    const lbl = r.querySelector('.outlbl'); if (lbl) { let tg = lbl.querySelector('.v36-tag');
+      if (done && !tg) { tg = document.createElement('i'); tg.className = 'v36-tag'; lbl.appendChild(tg); }
+      if (tg) { if (done) tg.textContent = `✓ Xong${t.doneBy ? ' – ' + t.doneBy : ''}${t.doneAt ? ' · ' + fmt(t.doneAt) : ''}`; else tg.remove(); } }
+  });
+  counter(p);
+}
+function counter(p) {
+  const sp = document.querySelector('.topbar .spacer'); if (!sp) return;
+  let b = document.getElementById('v36Cnt');
+  if (!b) { b = document.createElement('button'); b.id = 'v36Cnt'; b.className = 'tb-btn'; b.title = 'Số task đã thực hiện'; sp.parentNode.insertBefore(b, sp); }
+  const L = p.tasks.filter(t => !t.normalRun && !t.hold), n = L.filter(isDone).length;
+  const txt = `✅ ${n}/${L.length} đã xong`; if (b.textContent !== txt) b.textContent = txt;
+}
+document.addEventListener('mousedown', e => { if (e.target.closest && e.target.closest('.v36-ck')) e.stopPropagation(); }, true);
+document.addEventListener('click', e => {
+  const c = e.target.closest && e.target.closest('.v36-ck'); if (!c) return;
+  e.preventDefault(); e.stopPropagation();
+  const t = Store.plan().tasks.find(x => x.id === c.dataset.v36id); if (t) setDone(t.id, !isDone(t));
+}, true);
+
+function boot() {
+  try {
+    const _dr = Drawer.render;
+    Drawer.render = function (t) { const o = _dr.apply(this, arguments); try { panel(t); } catch (e) { console.warn('[v36]', e); } return o; };
+    const _ar = App.render;
+    App.render = function (...a) { const o = _ar.apply(this, a); try { gantt(); const d = document.getElementById('drawer'); if (d && App.drawerTaskId) { hideEvidence(d); const t = Store.plan().tasks.find(x => x.id === App.drawerTaskId); if (t && d.querySelector('.v36-box')) panel(t); } } catch (e) { } return o; };
+    if (App.res) App.render();
+    console.log('[v36] đã nạp – đánh dấu đã thực hiện / chưa');
+  } catch (e) { console.error('[v36] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 4000)); else setTimeout(boot, 4000);
+})();
+</script>
+<!-- ===================== HẾT v36 ===================== -->
+
   
 </body>
 </html>
