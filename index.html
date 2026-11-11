@@ -9964,6 +9964,98 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v36 ===================== -->
 
+<!-- =====================================================================
+     v37 – CHỐNG GIẬT / NHÁY KHI MỞ APP
+       Nguyên nhân: ~20 khối v… khởi động lệch nhau (0.3s → 4s), mỗi khối lại vẽ lại
+       toàn bộ Gantt + tự lưu dữ liệu → màn hình nhảy liên tục 4–5 giây đầu và mỗi lần sửa.
+       Cách sửa:
+         1. Màn hình chờ "Đang tải…" cho tới khi mọi khối đã nạp xong → hiện 1 lần, mượt
+         2. Gộp nhiều lệnh vẽ lại liên tiếp thành 1 lần / khung hình
+         3. Chặn vòng lặp tự-lưu (Normal run, OT, sắp thứ tự…) chạy lặp nhiều lần
+         4. Tắt hiệu ứng trượt / nảy lặp lại mỗi lần vẽ lại (chỉ giữ khi mở lần đầu)
+     DÁN NGAY TRƯỚC dòng </body> – PHẢI LÀ KHỐI CUỐI CÙNG
+     ===================================================================== -->
+<style id="v37-style">
+/* 1. màn hình chờ */
+body.v37-loading>*:not(#v37Splash){visibility:hidden!important}
+#v37Splash{position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  background:var(--bg,#eef2f8);font:600 15px/1.4 -apple-system,"Segoe UI",Arial,sans-serif;color:#475569;transition:opacity .35s ease}
+#v37Splash i{width:42px;height:42px;border-radius:50%;border:4px solid rgba(10,132,255,.2);border-top-color:#0a84ff;animation:v37spin .8s linear infinite}
+#v37Splash.out{opacity:0;pointer-events:none}
+body.dark #v37Splash{background:#0b0f1a;color:#cbd5e1}
+@keyframes v37spin{to{transform:rotate(360deg)}}
+/* 4. không chạy lại hiệu ứng mỗi lần vẽ lại */
+body.v37-ready .grow,body.v37-ready .bar,body.v37-ready .outlbl,body.v37-ready .rp-card,body.v37-ready .w4-card,
+body.v37-ready .r9-task,body.v37-ready .op-req,body.v37-ready .xseq,body.v37-ready .rs-box,body.v37-ready .v13-card,
+body.v37-ready .v13-hero,body.v37-ready .r7-box{animation:none!important}
+body.v37-ready .grow .bar{transition:none!important}
+body.v37-ready #drawer{animation:none!important}
+body.v37-ready #drawer.v37-open{animation:v13In .35s cubic-bezier(.22,1.2,.36,1)!important}
+</style>
+<div id="v37Splash"><i></i><span>Đang tải Shutdown Planner…</span></div>
+<script>
+(function () {
+'use strict';
+document.body.classList.add('v37-loading');
+const READY_AT = 4300;                       // khối cuối (v36) nạp lúc ~4.0s
+const AUTO = /Normal run|OT \/ nhà thầu|bàn giao ca|thứ tự thực hiện|dữ liệu Workflow|Gán người Normal run/i;
+
+function boot() {
+  try {
+    /* ---- 3. chặn vòng lặp tự-lưu: mỗi loại tối đa 2 lần / 5 giây ---- */
+    const hits = new Map(), _commit = Store.commit;
+    Store.commit = function (label, ...a) {
+      if (AUTO.test(String(label || ''))) {
+        const now = Date.now(), arr = (hits.get(label) || []).filter(x => now - x < 5000);
+        if (arr.length >= 2) { console.warn('[v37] bỏ qua tự-lưu lặp:', label); return; }
+        arr.push(now); hits.set(label, arr);
+      }
+      return _commit.call(this, label, ...a);
+    };
+
+    /* ---- 2. gộp vẽ lại: nhiều lần gọi liên tiếp → 1 lần / khung hình ---- */
+    const _render = App.render;
+    let rendering = false, pending = false, raf = 0;
+    const run = function (self, args) {
+      rendering = true;
+      try { return _render.apply(self, args); }
+      finally { rendering = false; if (pending) { pending = false; cancelAnimationFrame(raf); raf = requestAnimationFrame(() => run(App, [])); } }
+    };
+    App.render = function (...a) {
+      if (rendering) { pending = true; return; }          // gọi lồng trong lúc đang vẽ → để khung sau
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      return run(this, a);
+    };
+
+    /* ---- hiệu ứng panel chỉ khi mở task mới ---- */
+    if (window.Drawer && Drawer.open) {
+      const _o = Drawer.open;
+      Drawer.open = function (...a) {
+        const r = _o.apply(this, a), d = document.getElementById('drawer');
+        if (d) { d.classList.remove('v37-open'); void d.offsetWidth; d.classList.add('v37-open'); setTimeout(() => d.classList.remove('v37-open'), 400); }
+        return r;
+      };
+    }
+
+    /* ---- 1. vẽ 1 lần rồi mới hiện ---- */
+    try { App.render(); } catch (e) { }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.body.classList.remove('v37-loading'); document.body.classList.add('v37-ready');
+      const s = document.getElementById('v37Splash'); if (s) { s.classList.add('out'); setTimeout(() => s.remove(), 400); }
+    }));
+    console.log('[v37] đã nạp – chống giật / nháy');
+  } catch (e) {
+    console.error('[v37] lỗi:', e);
+    document.body.classList.remove('v37-loading'); const s = document.getElementById('v37Splash'); if (s) s.remove();
+  }
+}
+/* an toàn: dù có lỗi gì, sau 8s vẫn bỏ màn hình chờ */
+setTimeout(() => { if (document.body.classList.contains('v37-loading')) { document.body.classList.remove('v37-loading'); const s = document.getElementById('v37Splash'); if (s) s.remove(); } }, 8000);
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, READY_AT)); else setTimeout(boot, READY_AT);
+})();
+</script>
+<!-- ===================== HẾT v37 ===================== -->
+
   
 </body>
 </html>
