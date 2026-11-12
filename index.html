@@ -10518,6 +10518,86 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v42 ===================== -->
 
+
+<!-- PERFORMANCE PATCH v1: batch updates, preserve viewport, disable startup motion -->
+<style id="perf-smooth-style">
+html.perf-boot *,html.perf-boot *::before,html.perf-boot *::after{
+  animation:none!important;transition:none!important;scroll-behavior:auto!important
+}
+/* Isolate the large app surfaces so a small update does not repaint the whole page. */
+#ganttView,#dashView,#homeView,#drawer,#modalRoot{contain:layout paint style}
+</style>
+<script id="perf-smooth-patch">
+(function(){
+  'use strict';
+  document.documentElement.classList.add('perf-boot');
+  var raf=0, pendingLabel='', remoteTimer=0, pendingRemote=null;
+  function frame(fn){
+    if(raf) cancelAnimationFrame(raf);
+    raf=requestAnimationFrame(function(){raf=0;fn();});
+  }
+  function viewport(){
+    var g=document.getElementById('gscroll');
+    return {x:g?g.scrollLeft:0,y:g?g.scrollTop:0,wx:window.scrollX,wy:window.scrollY};
+  }
+  function restore(v){
+    var g=document.getElementById('gscroll');
+    if(g){g.scrollLeft=v.x;g.scrollTop=v.y;}
+    if(window.scrollX!==v.wx||window.scrollY!==v.wy) window.scrollTo(v.wx,v.wy);
+  }
+  function install(){
+    if(!window.App||!window.Store) return setTimeout(install,100);
+
+    /* One data change can trigger many nested patches. Render only once per frame. */
+    App.afterChange=function(){
+      Store.save();
+      frame(function(){
+        var v=viewport();
+        App.recompute();
+        App.render();
+        restore(v);
+      });
+    };
+
+    /* Cloud bursts are collapsed into one visual update. */
+    if(typeof window.applyCloud==='function'){
+      window.applyCloud=function(d){
+        pendingRemote=d;
+        clearTimeout(remoteTimer);
+        remoteTimer=setTimeout(function(){
+          var x=pendingRemote; pendingRemote=null;
+          if(!x||!Array.isArray(x.plans)) return;
+          window.lastCloudAt=x.savedAt||0;
+          var clean=Store.sanitize({plans:x.plans,activePlanId:Store.state.activePlanId,ui:Store.state.ui});
+          Store.state.plans=clean.plans;
+          Store.state.activePlanId=clean.activePlanId;
+          frame(function(){
+            var v=viewport();
+            App.recompute();
+            App.render();
+            restore(v);
+          });
+        },120);
+      };
+    }
+
+    /* Avoid synchronous localStorage writes while the user is interacting. */
+    Store.save=function(){
+      clearTimeout(this.saveTimer);
+      var self=this;
+      this.saveTimer=setTimeout(function(){self.flush();},500);
+    };
+
+    document.documentElement.classList.remove('perf-boot');
+    console.log('[performance] smooth update patch active');
+  }
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',function(){setTimeout(install,4750)},{once:true});
+  }else setTimeout(install,4750);
+  /* Safety: never leave startup motion disabled indefinitely. */
+  setTimeout(function(){document.documentElement.classList.remove('perf-boot');},5500);
+})();
+</script>
 </body>
 </html>
 
