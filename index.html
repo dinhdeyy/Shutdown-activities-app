@@ -8025,14 +8025,15 @@ let syncing = false;
 function syncNR() {
   if (syncing || !canEdit() || document.body.classList.contains('op-mode')) return;
   const p = Store.plan(); if (!p) return;
-  const P = U.parseLocalISO(p.start), want = wanted(p);
-  const have = p.tasks.filter(isNR).map(t => ({ proc: t.process, s: P + (t.constraintOffsetHours || 0) * MS_H, e: P + ((t.constraintOffsetHours || 0) + t.durationHours) * MS_H }));
+  const man = new Set(p.tasks.filter(t => isNR(t) && t.nrManual).map(t => t.process));
+  const P = U.parseLocalISO(p.start), want = wanted(p).filter(w => !man.has(w.proc));
+  const have = p.tasks.filter(t => isNR(t) && !man.has(t.process)).map(t => ({ proc: t.process, s: P + (t.constraintOffsetHours || 0) * MS_H, e: P + ((t.constraintOffsetHours || 0) + t.durationHours) * MS_H }));
   if (sig(want) === sig(have)) return;
   syncing = true;
   try {
     const keep = new Map(p.tasks.filter(isNR).map(t => [t.process + '|' + Math.round((t.constraintOffsetHours || 0) * 60), t.assignee]));
     Store.commit('Cập nhật Normal run', pl => {
-      const tmp = { tasks: pl.tasks.filter(t => !isNR(t)) };
+      const tmp = { tasks: pl.tasks.filter(t => !isNR(t) || man.has(t.process)) };
       want.forEach(w => {
         const off = (w.s - P) / MS_H, dur = (w.e - w.s) / MS_H;
         const t = normalizeTask({ id: nextTaskId(tmp), order: 0, branch: w.br, process: w.proc, taskName: `Normal run – ${w.proc}`,
@@ -10318,7 +10319,7 @@ function autosave() {
 function schedule(e) {
   const d = drawer(); if (!d || !d.contains(e.target) || App.drawerIsNew || saving) return;
   if (!/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.target.type === 'file') return;
-  if (e.target.closest('.wf-pick, .v36-box, .v14-ord')) return;     // các khối này đã tự lưu riêng
+  if (e.target.closest('.wf-pick, .v36-box, .v14-ord, .v42-dur')) return;     // các khối này đã tự lưu riêng
   status(d, 'ing', '… đang lưu');
   clearTimeout(timer); timer = setTimeout(autosave, e.type === 'change' ? 150 : DELAY);
 }
@@ -10422,6 +10423,100 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 })();
 </script>
 <!-- ===================== HẾT v41 ===================== -->
+
+<!-- =====================================================================
+     v42 – CHỈNH THỜI LƯỢNG TỰ DO
+       1. Normal run / task template: kéo mép phải hoặc dời thanh → giữ nguyên, không bị tự trả về
+          (đoạn Normal run đã chỉnh tay được đánh dấu "chỉnh tay"; bấm ↺ để trả về tự động)
+       2. Panel Sửa task: ô "⏱ Thời lượng" ngay đầu panel – nhập số giờ → thanh ngoài Gantt đổi theo ngay
+     DÁN NGAY TRƯỚC dòng </body> (sau khối v41)
+     ===================================================================== -->
+<style id="v42-style">
+.v42-dur{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding:10px 12px;border-radius:16px;background:var(--glass-row,#fff)}
+.v42-dur b{font-size:13px}
+.v42-dur .ip{display:flex;align-items:center;border:1.5px solid var(--border,#e5e7eb);border-radius:12px;overflow:hidden}
+.v42-dur .ip button{border:0;background:rgba(120,120,128,.12);width:34px;height:36px;font-size:18px;font-weight:700;cursor:pointer;color:var(--text)}
+.v42-dur .ip input{width:70px;border:0!important;text-align:center;font-size:16px;font-weight:700;padding:6px!important;box-shadow:none!important;border-radius:0!important}
+.v42-dur small{color:var(--muted);font-size:12.5px}
+.v42-dur .rs{margin-left:auto;border:0;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;background:rgba(48,209,88,.15);color:#15803d}
+.v42-man{display:inline-block;margin-left:4px;padding:0 6px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(255,159,10,.2);color:#b45309}
+</style>
+<script>
+(function () {
+'use strict';
+const esc = s => U.esc(s ?? '');
+const canEdit = () => !(window.Auth && !Auth.ok);
+const USER = /^(Kéo task|Đổi thời lượng|Sửa task|Dời cả nhánh|Thời lượng nhanh)/;
+const sig = t => [t.durationHours, t.constraintOffsetHours, t.constraintType].join('|');
+
+/* 1. đánh dấu Normal run do người dùng chỉnh → v23 không tự tạo lại */
+function wrapCommit() {
+  const _c = Store.commit;
+  Store.commit = function (label, fn, ...rest) {
+    if (!USER.test(String(label || '')) || typeof fn !== 'function') return _c.call(this, label, fn, ...rest);
+    const f2 = function (...a) {
+      const p = Store.plan(), before = new Map(p.tasks.filter(t => t.normalRun).map(t => [t.id, sig(t)]));
+      const r = fn.apply(this, a);
+      Store.plan().tasks.forEach(t => { if (t.normalRun && before.has(t.id) && before.get(t.id) !== sig(t)) t.nrManual = true; });
+      return r;
+    };
+    return _c.call(this, label, f2, ...rest);
+  };
+}
+function resetNR(proc) {
+  Store.commit('Normal run tự động lại', () => { Store.plan().tasks.forEach(t => { if (t.normalRun && t.process === proc) delete t.nrManual; }); });
+  toast('Normal run ' + proc + ' sẽ tự tính lại theo task đầu tiên.', 'ok');
+}
+
+/* 2. ô thời lượng nhanh trong panel */
+function setDur(id, h) {
+  if (!canEdit()) { const b = document.getElementById('auBadge'); if (b) b.click(); return; }
+  h = Math.round(Math.max(0.25, h) * 4) / 4;
+  Store.commit('Thời lượng nhanh', () => { const t = Store.plan().tasks.find(x => x.id === id); if (!t) return false; t.durationHours = h; t.standardHours = h; });
+  const d = document.getElementById('drawer');
+  const di = d && d.querySelector('#d_dur'), du = d && d.querySelector('#d_durU');
+  if (di) { if (du) du.value = 'h'; di.value = h; }
+  box(Store.plan().tasks.find(x => x.id === id));
+}
+function box(t) {
+  const d = document.getElementById('drawer'); if (!d || !t || !t.id || App.drawerIsNew) return;
+  const hero = d.querySelector('.v13-hero'); if (!hero) return;
+  const r = App.res && App.res.R.get(t.id), ro = !canEdit();
+  let el = hero.querySelector('.v42-dur');
+  if (!el) { el = document.createElement('div'); el.className = 'v42-dur'; const who = hero.querySelector('.v13-who'); who ? who.after(el) : hero.appendChild(el); }
+  el.innerHTML = `<b>⏱ Thời lượng</b>
+    <span class="ip"><button type="button" data-v42="-" ${ro ? 'disabled' : ''}>−</button><input id="v42Dur" type="number" min="0.25" step="0.25" value="${+t.durationHours.toFixed(2)}" ${ro ? 'disabled' : ''}><button type="button" data-v42="+" ${ro ? 'disabled' : ''}>+</button></span>
+    <small>giờ = ${U.fmtDur(t.durationHours)}${r ? ` · ${U.fmtHM(r.start)} → ${U.fmtDM(r.end)}` : ''}</small>
+    ${t.normalRun && t.nrManual ? `<button type="button" class="rs" data-v42="reset">↺ Normal run tự động</button>` : ''}`;
+  const tg = hero.querySelector('.v13-tags');
+  if (tg && r) [...tg.children].forEach(s => { if (/^🕒/.test(s.textContent)) s.textContent = `🕒 ${U.fmtDM(r.start)} → ${U.fmtHM(r.end)}`; if (/^⏱/.test(s.textContent)) s.textContent = `⏱ ${U.fmtDur(t.durationHours)}`; });
+}
+document.addEventListener('change', e => { if (e.target.id === 'v42Dur') { const h = U.num(e.target.value, 0); if (h > 0 && App.drawerTaskId) setDur(App.drawerTaskId, h); } }, true);
+document.addEventListener('keydown', e => { if (e.target.id === 'v42Dur' && e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }, true);
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('.v42-dur [data-v42]'); if (!b || !App.drawerTaskId) return;
+  e.preventDefault(); e.stopPropagation();
+  const t = Store.plan().tasks.find(x => x.id === App.drawerTaskId); if (!t) return;
+  if (b.dataset.v42 === 'reset') { resetNR(t.process); return box(Store.plan().tasks.find(x => x.id === t.id)); }
+  setDur(t.id, t.durationHours + (b.dataset.v42 === '+' ? 0.5 : -0.5));
+}, true);
+
+function boot() {
+  try {
+    wrapCommit();
+    const _dr = Drawer.render;
+    Drawer.render = function (t) { const o = _dr.apply(this, arguments); try { box(t); } catch (e) { console.warn('[v42]', e); } return o; };
+    const _tr = Gantt.taskRow;
+    Gantt.taskRow = function (t, g, p) { const h = _tr.call(this, t, g, p); return t.normalRun && t.nrManual ? h.replace(/(<span class="c-name"[^>]*>)/, '$1<i class="v42-man" title="Đã chỉnh tay – không tự tính lại">✎</i>') : h; };
+    const _ar = App.render;
+    App.render = function (...a) { const o = _ar.apply(this, a); try { const d = document.getElementById('drawer'); if (d && App.drawerTaskId && document.activeElement?.id !== 'v42Dur') box(Store.plan().tasks.find(x => x.id === App.drawerTaskId)); } catch (e) { } return o; };
+    console.log('[v42] đã nạp – chỉnh thời lượng tự do');
+  } catch (e) { console.error('[v42] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 4600)); else setTimeout(boot, 4600);
+})();
+</script>
+<!-- ===================== HẾT v42 ===================== -->
 
 </body>
 </html>
