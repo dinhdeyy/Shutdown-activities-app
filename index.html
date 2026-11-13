@@ -11939,6 +11939,30 @@ function renderPop() {
   var b = pop.querySelector('#csSync'); if (b) b.onclick = function () { retries = 0; push(); pull(); b.textContent = 'Đang đồng bộ…'; setTimeout(renderPop, 900); };
   Array.prototype.forEach.call(pop.querySelectorAll('.cs-kick'), function (btn) { btn.onclick = function () { requestKick(decodeURIComponent(btn.getAttribute('data-kid') || ''), decodeURIComponent(btn.getAttribute('data-kname') || 'User')); }; });
 }
+/* Kick button fallback: inject directly into every visible device row, independent of renderPop markup. */
+function ensureKickButtons() {
+  if (readKick()) return;
+  var box = document.getElementById('csPop');
+  if (!box) return;
+  var rows = box.querySelectorAll('.cs-row');
+  var online = peers();
+  rows.forEach(function(row, i) {
+    var p = online[i];
+    if (!p || p.id === CLIENT_ID) return;
+    var btn = row.querySelector('.cs-kick');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'cs-kick'; btn.textContent = '⛔ Kick';
+      row.appendChild(btn);
+    }
+    btn.style.cssText = 'display:inline-flex!important;visibility:visible!important;opacity:1!important;position:relative!important;flex:0 0 auto!important;min-width:72px!important;padding:7px 10px!important;background:#dc2626!important;color:white!important;border:0!important;border-radius:9px!important;cursor:pointer!important;z-index:10!important';
+    btn.onclick = function(e) { e.stopPropagation(); requestKick(p.id, p.name || 'User'); };
+  });
+}
+var kickObserver = new MutationObserver(function() { if (!window.__kickCheckQueued) { window.__kickCheckQueued = true; requestAnimationFrame(function(){ window.__kickCheckQueued = false; ensureKickButtons(); }); } });
+function startKickObserver() { var box=document.getElementById('csPop'); if (box) { kickObserver.observe(box, {childList:true,subtree:true}); ensureKickButtons(); } }
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',startKickObserver); else startKickObserver();
+setInterval(ensureKickButtons, 1500);
 setInterval(function () { trackNow(false); renderBox(); }, 4000);
 document.addEventListener('visibilitychange', function () { trackNow(true); });
 
