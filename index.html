@@ -688,7 +688,7 @@ const Scheduler = {
       if (t.executionMode === 'after_dependency' && !t.dependencyIds.length) issues.push({ type: 'data', level: 'info', taskIds: [t.id], msg: `${t.taskName || t.id}: chọn "Chạy sau task phụ thuộc" nhưng chưa chọn task tiền nhiệm.` });
     }
     const durMs = t => Math.max(0, Math.round((t.durationHours || 0) * MS_H));
-    const anchored = t => t.executionMode === 'fixed' || t.locked;
+    const anchored = t => t.executionMode === 'fixed' || t.locked || (t.pinned && t.constraintOffsetHours != null);   // v46: pinned = giờ do người dùng đặt
     const fullOrder = order.concat(inCycle), cyc = new Set(inCycle);
     for (const id of fullOrder) {
       const t = g.byId.get(id);
@@ -8044,13 +8044,14 @@ window.NRSkip = {
       want.forEach(w => { if (w.proc === t.process && w.s < e - MS_MIN && w.e > s + MS_MIN) set.add(nrKey(P, w.proc, w.s, w.e)); });
     });
     p.nrSkip = [...set];
+    p.nrOff = [...new Set([...(p.nrOff || []), ...nr.map(t => t.process)])];   // v46: đã xóa Normal run → process này không tự tạo lại
   },
 };
 let syncing = false;
 function syncNR() {
   if (syncing || !canEdit() || document.body.classList.contains('op-mode')) return;
   const p = Store.plan(); if (!p) return;
-  const man = new Set(p.tasks.filter(t => isNR(t) && t.nrManual).map(t => t.process));
+  const man = new Set([...p.tasks.filter(t => isNR(t) && t.nrManual).map(t => t.process), ...(p.nrOff || [])]);
   const P = U.parseLocalISO(p.start), skip = new Set(p.nrSkip || []);
   const want = wanted(p).filter(w => !man.has(w.proc) && !skip.has(nrKey(P, w.proc, w.s, w.e)));
   const have = p.tasks.filter(t => isNR(t) && !man.has(t.process)).map(t => ({ proc: t.process, s: P + (t.constraintOffsetHours || 0) * MS_H, e: P + ((t.constraintOffsetHours || 0) + t.durationHours) * MS_H }));
@@ -10492,7 +10493,7 @@ function wrapCommit() {
   };
 }
 function resetNR(proc) {
-  Store.commit('Normal run tự động lại', () => { Store.plan().tasks.forEach(t => { if (t.normalRun && t.process === proc) delete t.nrManual; }); });
+  Store.commit('Normal run tự động lại', () => { const pl = Store.plan(); pl.tasks.forEach(t => { if (t.normalRun && t.process === proc) delete t.nrManual; }); if (pl.nrOff) pl.nrOff = pl.nrOff.filter(x => x !== proc); });
   toast('Normal run ' + proc + ' sẽ tự tính lại theo task đầu tiên.', 'ok');
 }
 
@@ -10906,6 +10907,630 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 })();
 </script>
 <!-- ===================== HẾT v45 ===================== -->
+
+<!-- =====================================================================
+     v46 – (1) XÓA TASK CHẮC CHẮN: xóa xong không bị hiện lại
+               · Normal run đã xóa không tự tạo lại
+               · đồng bộ cloud: máy khác đang mở bản cũ không "hồi sinh" task đã xóa
+           (2) KÉO THẢ TỰ DO: kéo đi đâu cũng được (sớm hơn / muộn hơn task trước),
+               kéo mép TRÁI hoặc PHẢI để đổi giờ bắt đầu / kết thúc, giữ Alt = chỉnh từng phút
+           (3) BẤM VÀO TASK → mục "🕒 Giờ": nhập giờ bắt đầu, giờ kết thúc, thời lượng, ghim giờ
+           (4) 🖼 XUẤT ẢNH GANTT: ảnh PNG nét cao, đủ toàn bộ task giống y tab Gantt
+     DÁN NGAY TRƯỚC dòng </body> (sau khối v45)
+     ===================================================================== -->
+<style id="v46-style">
+/* ---- mép trái để kéo đổi giờ bắt đầu ---- */
+.bar .v46-lh{position:absolute;left:0;top:0;bottom:0;width:9px;cursor:ew-resize;z-index:3;border-radius:9px 0 0 9px}
+.bar .handle{z-index:3;width:9px!important}
+.bar:hover .v46-lh{background:rgba(255,255,255,.4)}
+body.ro .bar .v46-lh{display:none}
+.bar.v46-pin{outline:2px dashed rgba(255,255,255,.95);outline-offset:-4px}
+.bar.v46-drag{opacity:.9;z-index:60!important;box-shadow:0 14px 30px rgba(0,0,0,.3)!important}
+.v46-ghost{position:absolute;top:4px;bottom:4px;border:2px dashed rgba(10,132,255,.7);border-radius:9px;pointer-events:none;z-index:1}
+/* ---- mục 🕒 Giờ trong panel Sửa task ---- */
+#drawer .v46-time{margin:0 0 12px;padding:14px;border-radius:20px;background:var(--glass-row,#fff);border:1.5px solid rgba(10,132,255,.35);
+  box-shadow:0 6px 18px rgba(10,132,255,.08)}
+#drawer .v46-time h5{margin:0 0 10px;font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#drawer .v46-time h5 i{font-style:normal;display:inline-grid;place-items:center;width:26px;height:26px;border-radius:9px;background:rgba(10,132,255,.14)}
+#drawer .v46-tag{margin-left:auto;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:rgba(48,209,88,.15);color:#15803d}
+#drawer .v46-tag.pin{background:rgba(255,159,10,.18);color:#b45309}
+#drawer .v46-g{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#drawer .v46-g label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted)}
+#drawer .v46-g input{width:100%;font-size:14px!important;font-weight:700;padding:8px 10px!important;border-radius:12px!important}
+#drawer .v46-dur{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;flex-wrap:wrap}
+#drawer .v46-dur>span:first-child{font-weight:600;color:var(--muted);margin-right:4px}
+#drawer .v46-dur input{width:64px;text-align:center;font-weight:700;padding:6px!important;border-radius:10px!important}
+#drawer .v46-q{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+#drawer .v46-q button,#drawer .v46-act button{border:1px solid var(--glass-bd,#e5e7eb);background:rgba(118,118,128,.08);color:var(--text);border-radius:10px;padding:6px 10px;
+  font-size:12.5px;font-weight:600;cursor:pointer;transition:transform .2s,background .2s}
+#drawer .v46-q button:hover,#drawer .v46-act button:hover{background:rgba(10,132,255,.12);transform:translateY(-1px)}
+#drawer .v46-q .lbl{font-size:12px;color:var(--muted);align-self:center;margin-right:2px}
+#drawer .v46-pinrow{display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:10px;border-radius:12px;background:rgba(255,159,10,.08);font-size:13px;cursor:pointer}
+#drawer .v46-pinrow input{margin-top:2px;width:16px;height:16px}
+#drawer .v46-pinrow small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
+#drawer .v46-info{margin-top:10px;font-size:12.5px;color:var(--muted);line-height:1.55}
+#drawer .v46-info b{color:var(--text)}
+#drawer .v46-info .w{color:#b45309;font-weight:600}
+#drawer .v46-act{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+#drawer .v46-act .danger{color:#d70015;border-color:rgba(255,59,48,.35);background:rgba(255,59,48,.08)}
+#drawer .v46-act .danger:hover{background:#ff3b30;color:#fff}
+#drawer .v46-err{margin-top:8px;color:#d70015;font-size:12.5px;font-weight:600}
+body.ro #drawer .v46-time input,body.ro #drawer .v46-time button{pointer-events:none;opacity:.55}
+/* ---- nút xuất ảnh ---- */
+#v46Img{white-space:nowrap}
+.v46-ex label.opt{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:8px;border-radius:12px;border:1.5px solid var(--glass-bd,#e5e7eb);cursor:pointer}
+.v46-ex label.opt:has(input:checked){border-color:var(--accent,#0a84ff);background:rgba(10,132,255,.07)}
+.v46-ex label.opt small{display:block;color:var(--muted);font-size:11.5px}
+.v46-ex .chk{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:13px;cursor:pointer}
+.v46-ex .note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
+.v46-prev{max-width:100%;max-height:58vh;display:block;margin:0 auto;border-radius:10px;border:1px solid var(--glass-bd,#e5e7eb);background:#fff;object-fit:contain}
+.v46-busy{position:fixed;inset:0;z-index:400;display:grid;place-items:center;background:rgba(15,23,42,.35);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+.v46-busy div{padding:16px 22px;border-radius:16px;background:var(--glass-2,#fff);font-weight:700;box-shadow:0 16px 40px rgba(0,0,0,.25)}
+@media print{.bar .v46-lh,#v46Img{display:none}}
+</style>
+<script>
+(function () {
+'use strict';
+const MIN = 60000;
+const plan = () => Store.plan();
+const findT = id => plan().tasks.find(x => x.id === id);
+const loggedOut = () => window.Auth && !Auth.ok && !document.body.classList.contains('op-mode');
+const roundMin = h => Math.round(h * 60) / 60;
+
+/* =====================================================================
+   1. XÓA TASK
+   ===================================================================== */
+/* khóa nhận diện task khi đồng bộ cloud: task mới có uid riêng, task cũ dùng id + tên */
+const keyOf = t => t.uid ? 'u:' + t.uid : 'i:' + t.id + '|' + t.taskName;
+function tomb(p, gone) {
+  const now = Date.now(), keep = now - 45 * 864e5;
+  const m = new Map((p.v46del || []).filter(x => x.at > keep).map(x => [x.k, x]));
+  gone.forEach(t => m.set(keyOf(t), { k: keyOf(t), at: now }));
+  p.v46del = [...m.values()];
+}
+function isDead(p, t) {
+  const k = keyOf(t), tb = (p.v46del || []).find(x => x.k === k);
+  return !!tb && tb.at > ((p.v46rev || {})[k] || 0);
+}
+/* gộp danh sách đã xóa của "src" vào "dst" rồi bỏ task đã xóa khỏi dst – trả về true nếu dst bị đổi */
+function mergeDel(dstPlans, srcPlans) {
+  const sm = new Map((srcPlans || []).map(p => [p.id, p])); let changed = false;
+  (dstPlans || []).forEach(dp => {
+    const sp = sm.get(dp.id);
+    if (sp) {
+      const m = new Map((dp.v46del || []).map(x => [x.k, x]));
+      (sp.v46del || []).forEach(x => { const o = m.get(x.k); if (!o || o.at < x.at) m.set(x.k, x); });
+      dp.v46del = [...m.values()];
+      const rv = { ...(dp.v46rev || {}) };
+      Object.entries(sp.v46rev || {}).forEach(([k, v]) => { if (!(rv[k] >= v)) rv[k] = v; });
+      dp.v46rev = rv;
+      if (sp.nrOff && sp.nrOff.length) dp.nrOff = [...new Set([...(dp.nrOff || []), ...sp.nrOff])];
+    }
+    if (!Array.isArray(dp.tasks)) return;
+    const n = dp.tasks.length, dead = new Set(dp.tasks.filter(t => isDead(dp, t)).map(t => t.id));
+    if (!dead.size) return;
+    dp.tasks = dp.tasks.filter(t => !dead.has(t.id));
+    dp.tasks.forEach(t => { if (Array.isArray(t.dependencyIds)) t.dependencyIds = t.dependencyIds.filter(d => !dead.has(d)); });
+    if (dp.tasks.length !== n) changed = true;
+  });
+  return changed;
+}
+async function delTasks(ids, ask = true) {
+  ids = [...new Set(ids)].filter(Boolean);
+  const p = plan(), list = p.tasks.filter(t => ids.includes(t.id));
+  if (!list.length) return false;
+  if (loggedOut()) {
+    if (typeof askLogin === 'function') { if (!(await askLogin('Cần đăng nhập để xóa task.'))) return false; }
+    else { toast('Cần đăng nhập để xóa task.', 'warn'); return false; }
+  }
+  const set = new Set(ids);
+  const after = p.tasks.filter(t => !set.has(t.id) && (t.dependencyIds || []).some(d => set.has(d))).length;
+  const nm = list.length === 1 ? `task <b>${U.esc(list[0].taskName)}</b>` : `<b>${list.length}</b> task`;
+  if (ask && !(await confirmBox('Xóa task', `Xóa ${nm}?${after ? `<br><br>${after} task đang chạy sau sẽ tự nối vào task trước đó.` : ''}<br><span class="muted small">Có thể hoàn tác bằng Ctrl+Z.</span>`, 'Xóa', true))) return false;
+  /* đóng panel TRƯỚC khi xóa – để chế độ tự lưu không ghi lại task vừa xóa */
+  if (App.drawerTaskId && set.has(App.drawerTaskId)) { try { Drawer.close(); } catch (e) { } }
+  const ok = Store.commit(list.length === 1 ? 'Xóa task ' + list[0].taskName : `Xóa ${list.length} task`, pl => {
+    const gone = pl.tasks.filter(t => set.has(t.id)); if (!gone.length) return false;
+    if (window.NRSkip) { try { NRSkip.mark(pl, gone); } catch (e) { } }
+    pl.tasks = pl.tasks.filter(t => !set.has(t.id));
+    pl.tasks.forEach(t => {
+      if (Array.isArray(t.dependencyIds) && t.dependencyIds.some(d => set.has(d))) {
+        const nd = [...new Set(t.dependencyIds.flatMap(d => set.has(d) ? ((gone.find(g => g.id === d) || {}).dependencyIds || []).filter(x => !set.has(x) && x !== t.id) : [d]))];
+        t.dependencyIds = nd; if (!nd.length && t.executionMode === 'after_dependency') t.executionMode = 'parallel';
+      }
+      if (Array.isArray(t.ssDeps)) t.ssDeps = t.ssDeps.filter(x => !set.has(x.id));
+    });
+  });
+  if (ok === false) return false;
+  if (set.has(App.selectedId)) App.selectedId = null;
+  const left = plan().tasks.filter(t => set.has(t.id)).length;
+  if (left) { toast('Chưa xóa được – thử lại hoặc tải lại trang.', 'err'); return false; }
+  toast(list.length === 1 ? `Đã xóa "${list[0].taskName}" (Ctrl+Z để hoàn tác)` : `Đã xóa ${list.length} task (Ctrl+Z để hoàn tác)`, 'ok');
+  return true;
+}
+
+/* mọi lệnh "Xóa…" (1 task, nhiều task) đều ghi nhớ task đã xóa; task mới tạo được gắn uid riêng */
+function wrapCommit() {
+  const _c = Store.commit;
+  Store.commit = function (label, fn, ...rest) {
+    if (typeof fn !== 'function') return _c.call(this, label, fn, ...rest);
+    const f2 = function (...a) {
+      const p0 = Store.plan(), before = new Map((p0 ? p0.tasks : []).map(t => [t.id, t]));
+      const r = fn.apply(this, a);
+      try {
+        const p = Store.plan();
+        if (r !== false && p && p === p0) {
+          const ids = new Set(p.tasks.map(t => t.id));
+          p.tasks.forEach(t => { if (!before.has(t.id) && !t.uid) t.uid = U.uid(); });
+          if (/^Xóa/.test(String(label || ''))) { const gone = [...before.values()].filter(t => !ids.has(t.id)); if (gone.length) tomb(p, gone); }
+        }
+      } catch (e) { console.warn('[v46] commit', e); }
+      return r;
+    };
+    return _c.call(this, label, f2, ...rest);
+  };
+  /* Ctrl+Z trả lại task đã xóa → đánh dấu "hồi sinh" để cloud không xóa lại */
+  ['doUndo', 'doRedo'].forEach(k => {
+    const _f = Store[k];
+    Store[k] = function (...a) {
+      const p0 = Store.plan(), dead = new Set((p0 && p0.v46del || []).map(x => x.k));
+      const o = _f.apply(this, a);
+      try {
+        const p = Store.plan(); if (!p) return o;
+        const now = Date.now(), live = new Set(p.tasks.map(keyOf)), cur = new Set((p.v46del || []).map(x => x.k)); let ch = false;
+        const rv = { ...(p.v46rev || {}) };
+        /* task quay lại nhờ Ctrl+Z / Ctrl+Y → "hồi sinh" */
+        live.forEach(k => { if (dead.has(k) || cur.has(k)) { rv[k] = now; ch = true; } });
+        /* task lại bị xóa nhờ Ctrl+Y → đóng dấu xóa mới */
+        (p.v46del || []).forEach(x => { if (!live.has(x.k) && (rv[x.k] || 0) >= x.at) { x.at = now + 1; ch = true; } });
+        if (ch) { p.v46rev = rv; Store.save(); }
+      } catch (e) { }
+      return o;
+    };
+  });
+}
+/* cloud: trước khi lưu, lấy danh sách đã xóa trên cloud gộp vào; khi nhận dữ liệu cloud, bỏ task mình đã xóa */
+function wrapCloud() {
+  /* chú ý: nếu thư viện Supabase không tải được, "sb" nằm trong vùng TDZ → typeof cũng báo lỗi */
+  try { if (typeof sb === 'undefined' || !sb || typeof cloudSave !== 'function' || typeof applyCloud !== 'function') return; }
+  catch (e) { console.warn('[v46] chưa có cloud – bỏ qua đồng bộ xóa'); return; }
+  const _ac = applyCloud;
+  applyCloud = function (d) {
+    try { if (d && Array.isArray(d.plans)) mergeDel(d.plans, Store.state.plans); } catch (e) { console.warn('[v46] applyCloud', e); }
+    return _ac.apply(this, arguments);
+  };
+  const _cs = cloudSave; let t = null;
+  cloudSave = function () {
+    if (loggedOut()) return _cs.apply(this, arguments);
+    clearTimeout(t);
+    t = setTimeout(async () => {
+      try {
+        const { data } = await sb.from('planner_state').select('data').eq('id', 1).maybeSingle();
+        const cp = data && data.data && data.data.plans;
+        if (cp && mergeDel(Store.state.plans, cp)) {
+          App.recompute(); App.render();
+          try { SafeStore.set(LS_KEY, JSON.stringify(Store.state)); } catch (e) { }
+        }
+      } catch (e) { console.warn('[v46] đọc cloud', e); }
+      _cs();
+    }, 500);
+  };
+}
+/* nút 🗑 trên dòng task (v45) + phím Delete → dùng hàm xóa mới */
+function bindDelete() {
+  Actions.deleteTask = id => delTasks([id]);
+  window.V46 = Object.assign(window.V46 || {}, { delTasks });
+  const c = document.getElementById('gcanvas');
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.v45-del'); if (!b) return;
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    delTasks([b.dataset.v45 || (b.closest('.grow[data-id]') || {}).dataset?.id]);
+  }, true);
+  if (c) c.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest('.v45-del')) e.stopPropagation(); }, true);
+}
+
+/* =====================================================================
+   2. ĐẶT GIỜ TASK (dùng chung cho kéo thả + mục 🕒 Giờ)
+   ===================================================================== */
+function descOf(id) {
+  try { return new Set([...Scheduler.descendants(plan(), id)].filter(x => x !== id)); } catch (e) { return new Set(); }
+}
+/**
+ * s, e: mốc ms. o.pin: true = ghim · false = bỏ ghim · undefined = tự quyết (sớm hơn task trước thì ghim)
+ * o.shift: số giờ dời các task phía sau (khi kéo cả thanh)
+ */
+function setTime(id, s, e, o = {}) {
+  const p = plan(), P = U.parseLocalISO(p.start), r = App.res && App.res.R.get(id), t0 = findT(id);
+  if (!t0) return false;
+  const dur = Math.max(1 / 60, roundMin((e - s) / MS_H));
+  s = Math.round(s / MIN) * MIN;
+  const req = r ? r.required : P;
+  const desc = o.shift ? descOf(id) : null;
+  let pinned = false;
+  const ok = Store.commit(o.label || 'Đặt giờ ' + t0.taskName, pl => {
+    const t = pl.tasks.find(x => x.id === id); if (!t) return false;
+    if (Math.abs(t.durationHours - dur) > 1e-6) t.durationHours = dur;
+    const off = (s - P) / MS_H;
+    if (t.executionMode === 'fixed') {
+      if (o.pin === false) { t.executionMode = (t.dependencyIds || []).length ? 'after_dependency' : 'parallel'; t.constraintType = 'ASAP'; t.constraintOffsetHours = null; t.pinned = false; }
+      else { t.constraintType = 'FIXED'; t.constraintOffsetHours = off; pinned = true; }
+    } else {
+      const pin = o.pin === true || (o.pin === undefined && (t.pinned || s < req - MIN));
+      if (pin) { t.pinned = true; t.constraintType = 'SNET'; t.constraintOffsetHours = off; pinned = true; }
+      else {
+        t.pinned = false;
+        if (s <= req + MIN) { t.constraintType = 'ASAP'; t.constraintOffsetHours = null; }
+        else { t.constraintType = 'SNET'; t.constraintOffsetHours = off; }
+      }
+    }
+    if (t.locked && o.unlock) t.locked = false;
+    if (t.normalRun) t.nrManual = true;
+    if (desc && desc.size && o.shift && (typeof Ext === 'undefined' || Ext.chainFollow !== false)) {
+      for (const x of pl.tasks) {
+        if (!desc.has(x.id) || x.locked || x.executionMode === 'fixed' || x.pinned) continue;
+        if (x.constraintType === 'SNET' && x.constraintOffsetHours !== null) x.constraintOffsetHours += o.shift;
+      }
+    }
+  });
+  return ok === false ? false : { pinned };
+}
+function unpin(id) {
+  const t0 = findT(id); if (!t0) return;
+  Store.commit('Bỏ ghim giờ ' + t0.taskName, pl => {
+    const t = pl.tasks.find(x => x.id === id); if (!t) return false;
+    if (t.executionMode === 'fixed') t.executionMode = (t.dependencyIds || []).length ? 'after_dependency' : 'sequential';
+    t.pinned = false; t.constraintType = 'ASAP'; t.constraintOffsetHours = null;
+  });
+}
+
+/* =====================================================================
+   3. KÉO THẢ TỰ DO (thay toàn bộ Drag cũ)
+   ===================================================================== */
+const SNAPM = { 0.5: 5, 1: 5, 2: 15, 4: 15, 24: 60 };
+function installDrag() {
+  Drag.start = function (e) {
+    const bar = e.target.closest && e.target.closest('.bar[data-id]'); if (!bar || e.button !== 0) return;
+    const id = bar.dataset.id;
+    if (loggedOut()) { e.preventDefault(); App.selectedId = id; Gantt.render(); Drawer.open(id); return; }
+    const t = findT(id), r = App.res && App.res.R.get(id); if (!t || !r) return;
+    const cl = e.target.classList, mode = cl.contains('handle') ? 'r' : cl.contains('v46-lh') ? 'l' : 'm';
+    this.active = { id, t, r, mode, x0: e.clientX, left0: parseFloat(bar.style.left) || 0, w0: parseFloat(bar.style.width) || 0, bar, moved: false, dh: 0, locked: !!t.locked };
+    const d = this.active;
+    if (mode === 'm' && !d.locked && (typeof Ext === 'undefined' || Ext.chainFollow !== false)) {
+      const ds = descOf(id);
+      d.chain = [...ds].map(x => ({ id: x, bar: document.querySelector(`#gcanvas .bar[data-id="${CSS.escape(x)}"]`) })).filter(c => c.bar);
+    }
+    try { bar.setPointerCapture(e.pointerId); } catch (err) { }
+    /* nghe trên window: dù bảng Gantt có vẽ lại giữa chừng vẫn nhận được lúc thả chuột */
+    const mv = ev => this.move(ev), up = ev => this.end(ev), cc = () => this.cancel();
+    d.off = () => { window.removeEventListener('pointermove', mv, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', cc, true); };
+    window.addEventListener('pointermove', mv, true); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', cc, true);
+    Tip.hide(); e.preventDefault();
+  };
+  Drag.move = function (e) {
+    const d = this.active; if (!d) return;
+    const dx = e.clientX - d.x0; if (Math.abs(dx) > 3) d.moved = true; if (!d.moved || d.locked) return;
+    const g = App.geo, snapH = (e.altKey ? 1 : (SNAPM[g.z] || 15)) / 60;
+    d.dh = Math.round(dx / g.pxH / snapH) * snapH;
+    const durH = (d.r.end - d.r.start) / MS_H;
+    d.bar.classList.add('v46-drag');
+    if (d.mode === 'm') {
+      d.s = d.r.start + d.dh * MS_H; d.e = d.r.end + d.dh * MS_H;
+      d.bar.style.left = (d.left0 + d.dh * g.pxH) + 'px';
+      if (d.chain) d.chain.forEach(c => { c.bar.style.transform = `translateX(${d.dh * g.pxH}px)`; c.bar.classList.add('chain-hl'); });
+    } else if (d.mode === 'r') {
+      const nd = Math.max(snapH, durH + d.dh); d.s = d.r.start; d.e = d.r.start + nd * MS_H;
+      d.bar.style.width = Math.max(3, nd * g.pxH) + 'px';
+    } else {
+      const nd = Math.max(snapH, durH - d.dh); d.e = d.r.end; d.s = d.r.end - nd * MS_H;
+      d.bar.style.left = (d.left0 + (durH - nd) * g.pxH) + 'px'; d.bar.style.width = Math.max(3, nd * g.pxH) + 'px';
+    }
+    const early = d.s < d.r.required - MIN && d.t.executionMode !== 'fixed' && !d.t.pinned;
+    Tip.text(`<b>${U.esc(d.t.taskName)}</b><br>${U.fmtDT(d.s)} → ${U.fmtDT(d.e)}<br>Thời lượng: ${U.fmtDur((d.e - d.s) / MS_H)}`
+      + (early ? `<br><span style="color:#fbbf24">📌 Sớm hơn task trước (xong ${U.fmtDT(d.r.required)}) → sẽ ghim đúng giờ này</span>` : '')
+      + (d.chain && d.chain.length && d.mode === 'm' ? `<br><span style="color:#ffd60a">⤷ ${d.chain.length} task phía sau dời theo</span>` : '')
+      + `<br><span style="opacity:.7">Giữ Alt để chỉnh từng phút</span>`, e);
+  };
+  Drag.end = function () {
+    const d = this.active; this.active = null; Tip.hide(); if (!d) return;
+    if (d.off) d.off();
+    if (d.chain) d.chain.forEach(c => { c.bar.style.transform = ''; c.bar.classList.remove('chain-hl'); });
+    this.justDragged = true; setTimeout(() => this.justDragged = false, 0);
+    if (!d.moved) { App.selectedId = d.id; Gantt.render(); Drawer.open(d.id); return; }
+    if (d.locked) { toast('Task đang khóa – mở khóa trong Chi tiết rồi kéo lại.', 'warn'); Gantt.render(); return; }
+    if (!d.dh || d.s == null) { Gantt.render(); return; }
+    const res = setTime(d.id, d.s, d.e, { shift: d.mode === 'm' ? d.dh : 0, label: (d.mode === 'm' ? 'Kéo task ' : 'Đổi giờ ') + d.t.taskName });
+    if (!res) { Gantt.render(); return; }
+    const nr = App.res.R.get(d.id);
+    toast(`"${d.t.taskName}": ${U.fmtDT(nr.start)} → ${U.fmtDT(nr.end)}${res.pinned ? ' · 📌 đã ghim giờ' : ''}`, 'ok');
+    if (App.drawerTaskId === d.id) reopen(d.id);
+  };
+  Drag.cancel = function () {
+    const d = this.active; this.active = null; Tip.hide();
+    if (d && d.off) d.off();
+    if (d && d.chain) d.chain.forEach(c => { c.bar.style.transform = ''; c.bar.classList.remove('chain-hl'); });
+    Gantt.render();
+  };
+  Drag.__v46 = true;
+}
+/* thêm mép kéo trái + đánh dấu task đã ghim */
+function decorateBars() {
+  const p = plan(); if (!p) return;
+  const pins = new Set(p.tasks.filter(t => t.pinned && t.executionMode !== 'fixed').map(t => t.id));
+  document.querySelectorAll('#gcanvas .bar[data-id]').forEach(b => {
+    b.classList.toggle('v46-pin', pins.has(b.dataset.id));
+    if (!b.classList.contains('locked') && !b.querySelector('.v46-lh')) { const h = document.createElement('div'); h.className = 'v46-lh'; h.title = 'Kéo để đổi giờ bắt đầu'; b.prepend(h); }
+  });
+}
+
+/* =====================================================================
+   4. MỤC "🕒 GIỜ" TRONG PANEL SỬA TASK
+   ===================================================================== */
+const iso = ms => U.toLocalISO(ms).slice(0, 16);
+function card(t, r) {
+  const fixed = t.executionMode === 'fixed', pin = fixed || !!t.pinned, dur = (r.end - r.start) / MS_H;
+  const H = Math.floor(dur + 1e-9), M = Math.round((dur - H) * 60);
+  const drv = { plan: 'bắt đầu từ đầu kế hoạch', dep: 'chờ task trước xong', chain: 'chờ task trước cùng process', snet: 'không sớm hơn mốc đã đặt', fixed: fixed ? 'cố định thời điểm' : t.locked ? 'đã khóa' : 'ghim đúng giờ' }[r.driver] || '';
+  const hasPrev = r.required > U.parseLocalISO(plan().start) + MIN;
+  return `<h5><i>🕒</i>Giờ bắt đầu – kết thúc<span class="v46-tag ${pin ? 'pin' : ''}">${pin ? '📌 Ghim giờ' : '⤷ Tự động'}</span></h5>
+    <div class="v46-g">
+      <label>Bắt đầu<input type="datetime-local" step="60" data-v46="s" value="${iso(r.start)}"></label>
+      <label>Kết thúc<input type="datetime-local" step="60" data-v46="e" value="${iso(r.end)}"></label>
+    </div>
+    <div class="v46-dur"><span>Thời lượng</span><input type="number" min="0" step="1" data-v46="dh" value="${H}"> giờ <input type="number" min="0" max="59" step="1" data-v46="dm" value="${M}"> phút</div>
+    <div class="v46-q"><span class="lbl">Dời cả task:</span><button type="button" data-v46b="-60">−1 giờ</button><button type="button" data-v46b="-15">−15 phút</button><button type="button" data-v46b="15">+15 phút</button><button type="button" data-v46b="60">+1 giờ</button></div>
+    <label class="v46-pinrow"><input type="checkbox" data-v46="pin" ${pin ? 'checked' : ''}><span><b>📌 Ghim đúng giờ này</b><small>Bật: task luôn chạy đúng giờ đã đặt, kể cả sớm hơn task trước. Tắt: task tự lùi theo task trước nếu task trước bị trễ.</small></span></label>
+    <div class="v46-info">Đang chạy: <b>${U.fmtDT(r.start)} → ${U.fmtDT(r.end)}</b> (${drv})${hasPrev ? `<br>Task trước xong lúc <b>${U.fmtDT(r.required)}</b>` : ''}${r.start < r.required - MIN ? '<br><span class="w">⚠ Đang bắt đầu sớm hơn task trước</span>' : ''}</div>
+    <div class="v46-err"></div>
+    <div class="v46-act"><button type="button" data-v46b="auto">↺ Tự động theo task trước</button><button type="button" class="danger" data-v46b="del">🗑 Xóa task</button></div>`;
+}
+function addTimeCard() {
+  const d = document.getElementById('drawer');
+  if (!d || d.classList.contains('hidden') || App.drawerIsNew || !App.drawerTaskId) return;
+  const body = d.querySelector('.drawer-b'); if (!body || body.querySelector('.v46-time')) return;
+  const t = findT(App.drawerTaskId), r = t && App.res && App.res.R.get(t.id); if (!r) return;
+  const box = document.createElement('div'); box.className = 'v46-time'; box.dataset.id = t.id; box.innerHTML = card(t, r);
+  const hero = body.querySelector('.v13-hero');
+  if (hero) { hero.after(box); setTimeout(() => { if (box.isConnected && hero.isConnected && box.previousElementSibling !== hero) hero.after(box); }, 0); } else { const nav = body.querySelector('.v13-nav'); if (nav) nav.after(box); else body.prepend(box); }
+  const seg = body.querySelector('.v13-seg');
+  if (seg && !seg.querySelector('[data-v46nav]')) {
+    const b = document.createElement('button'); b.type = 'button'; b.dataset.v46nav = '1'; b.innerHTML = '<b>🕒</b>Giờ';
+    const first = seg.querySelector('button'); if (first) first.after(b); else seg.appendChild(b);
+  }
+}
+function reopen(id, focusTime) {
+  const d = document.getElementById('drawer'), body = d && d.querySelector('.drawer-b'), y = body ? body.scrollTop : 0;
+  Drawer.open(id);
+  const b2 = document.querySelector('#drawer .drawer-b');
+  if (b2) requestAnimationFrame(() => {
+    const c = b2.querySelector('.v46-time'), nav = b2.querySelector('.v13-nav');
+    b2.scrollTop = focusTime && c ? Math.max(0, c.offsetTop - (nav ? nav.offsetHeight : 0) - 8) : y;
+  });
+}
+function readCard(box) {
+  const v = k => box.querySelector(`[data-v46="${k}"]`);
+  return { s: U.parseLocalISO(v('s').value), e: U.parseLocalISO(v('e').value), dh: U.num(v('dh').value, 0), dm: U.num(v('dm').value, 0), pin: v('pin').checked };
+}
+function cardChange(e) {
+  const f = e.target, box = f.closest('.v46-time'), id = box.dataset.id, k = f.dataset.v46;
+  const err = m => { box.querySelector('.v46-err').textContent = m; };
+  const t = findT(id), r = App.res.R.get(id); if (!t || !r) return;
+  const c = readCard(box);
+  let s = r.start, en = r.end, pin;
+  if (k === 's') { if (!isFinite(c.s)) return err('Giờ bắt đầu chưa đúng.'); s = c.s; en = s + (r.end - r.start); }
+  else if (k === 'e') { if (!isFinite(c.e)) return err('Giờ kết thúc chưa đúng.'); if (c.e <= r.start) return err('Giờ kết thúc phải sau giờ bắt đầu.'); en = c.e; }
+  else if (k === 'dh' || k === 'dm') { const h = c.dh + c.dm / 60; if (!(h > 0)) return err('Thời lượng phải lớn hơn 0.'); en = s + h * MS_H; }
+  else if (k === 'pin') pin = c.pin;
+  else return;
+  if (k === 's' && c.pin) pin = true;
+  const res = setTime(id, s, en, { pin, label: 'Đặt giờ ' + t.taskName });
+  if (!res) return;
+  const nr = App.res.R.get(id);
+  toast(`Đã đặt "${t.taskName}": ${U.fmtDT(nr.start)} → ${U.fmtDT(nr.end)}${res.pinned ? ' · 📌 ghim' : ''}`, 'ok');
+  if (nr.start > s + MIN) toast(`Task trước xong lúc ${U.fmtDT(nr.start)} nên task phải chờ – bật "📌 Ghim" nếu muốn chạy đúng ${U.fmtDT(s)}.`, 'warn');
+  reopen(id, true);
+}
+function cardClick(e) {
+  const nav = e.target.closest('[data-v46nav]');
+  if (nav) {
+    e.preventDefault(); e.stopPropagation();
+    const body = nav.closest('.drawer-b'), c = body && body.querySelector('.v46-time'), bar = body && body.querySelector('.v13-nav');
+    if (c) { body.scrollTo({ top: Math.max(0, c.offsetTop - (bar ? bar.offsetHeight : 0) - 8), behavior: 'smooth' }); c.classList.remove('v13-flash'); void c.offsetWidth; c.classList.add('v13-flash'); }
+    return;
+  }
+  const b = e.target.closest('.v46-time [data-v46b]'); if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  const box = b.closest('.v46-time'), id = box.dataset.id, k = b.dataset.v46b, t = findT(id), r = App.res.R.get(id); if (!t || !r) return;
+  if (k === 'del') { delTasks([id]); return; }
+  if (k === 'auto') { unpin(id); toast(`"${t.taskName}" tự động chạy theo task trước.`, 'ok'); reopen(id, true); return; }
+  const m = +k; if (!m) return;
+  const res = setTime(id, r.start + m * MIN, r.end + m * MIN, { shift: m / 60, label: 'Dời task ' + t.taskName });
+  if (res) reopen(id, true);
+}
+function bindCard() {
+  /* nghe ở "window" (chạy trước bộ tự lưu v40) – các ô của mục Giờ tự áp dụng, không qua form cũ */
+  window.addEventListener('input', e => { if (e.target.closest && e.target.closest('#drawer .v46-time')) e.stopImmediatePropagation(); }, true);
+  window.addEventListener('change', e => {
+    if (!(e.target.closest && e.target.closest('#drawer .v46-time'))) return;
+    e.stopImmediatePropagation();
+    if (loggedOut()) { toast('Cần đăng nhập để đổi giờ.', 'warn'); return; }
+    try { cardChange(e); } catch (x) { console.warn('[v46]', x); }
+  }, true);
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.closest && e.target.closest('#drawer .v46-time input')) { e.preventDefault(); e.target.blur(); }
+  }, true);
+  window.addEventListener('click', e => {
+    if (!(e.target.closest && e.target.closest('#drawer'))) return;
+    if (!e.target.closest('[data-v46nav], .v46-time [data-v46b]')) return;
+    if (loggedOut() && !e.target.closest('[data-v46nav]')) { e.stopPropagation(); toast('Cần đăng nhập để chỉnh sửa.', 'warn'); return; }
+    cardClick(e);
+  }, true);
+}
+
+/* =====================================================================
+   5. XUẤT ẢNH GANTT (PNG nét cao – đủ toàn bộ task, giống tab Gantt)
+   ===================================================================== */
+function cssText() {
+  let out = '';
+  for (const sh of document.styleSheets) {
+    try { for (const r of sh.cssRules) out += r.cssText + '\n'; }
+    catch (e) { if (sh.ownerNode && sh.ownerNode.textContent) out += sh.ownerNode.textContent + '\n'; }
+  }
+  return out.replace(/]]>/g, ']] >');
+}
+function banner(p) {
+  const res = App.res;
+  const end = res.windowEnd, hrs = (res.windowEnd - res.P) / MS_H;
+  const items = [['Bắt đầu Shutdown', U.fmtDT(res.P)], ['Kết thúc dự kiến', U.fmtDT(end)], ['Tổng thời gian', U.fmtDur(Math.max(0, hrs))], ['Số task', String(p.tasks.length)], ['Mục tiêu', p.targetHours ? p.targetHours + ' giờ' : '–']];
+  return `<div style="display:flex;align-items:center;gap:28px;padding:16px 24px;margin:0 0 12px;border-radius:18px;background:rgba(255,255,255,.88);border:1px solid rgba(15,23,42,.08);box-shadow:0 6px 20px rgba(15,23,42,.06);color:#0f172a;font-family:inherit">
+    <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700;color:#64748b;letter-spacing:.4px;text-transform:uppercase">Shutdown Planner · Gantt</div>
+    <div style="font-size:22px;font-weight:800;letter-spacing:-.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${U.esc(p.name || 'Kế hoạch')}</div></div>
+    ${items.map(([a, b]) => `<div style="white-space:nowrap"><div style="font-size:11.5px;color:#64748b;font-weight:600">${a}</div><div style="font-size:17px;font-weight:800">${U.esc(b)}</div></div>`).join('')}
+    <div style="white-space:nowrap;font-size:11.5px;color:#94a3b8;text-align:right">Xuất lúc<br><b style="color:#64748b">${U.fmtDT(Date.now())}</b></div></div>`;
+}
+const busy = msg => { let b = document.getElementById('v46Busy'); if (!msg) { if (b) b.remove(); return; } if (!b) { b = document.createElement('div'); b.id = 'v46Busy'; b.className = 'v46-busy'; document.body.appendChild(b); } b.innerHTML = `<div>${msg}</div>`; };
+const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 30)));
+async function renderImage(opt) {
+  if (App.view !== 'gantt') { App.switchView('gantt'); await nextFrame(); }
+  const ui = Store.ui(), saved = ui.collapsed, sel = App.selectedId;
+  if (opt.expand) ui.collapsed = {};
+  App.selectedId = null; Tip.hide();
+  try {
+    App.render(); await nextFrame();   // App.render: có đủ các phần trang trí của các khối khác (ô ✓, nhãn…)
+    const src = document.getElementById('gcanvas');
+    const cl = src.cloneNode(true);
+    cl.querySelectorAll('.v45-del, .v34-ck, .v20-add, .v46-lh, [data-v20add]').forEach(x => x.remove());
+    cl.querySelectorAll('.sel, .chain-hl, .v46-drag, .dragging').forEach(x => x.classList.remove('sel', 'chain-hl', 'v46-drag', 'dragging'));
+    const W = Math.ceil(src.scrollWidth || src.offsetWidth), Hc = Math.ceil(src.scrollHeight || src.offsetHeight);
+    /* dựng lại khung cha (để CSS dạng "#gscroll .x" vẫn đúng) nhưng bỏ cuộn / giới hạn chiều cao */
+    const chain = []; for (let a = src.parentElement; a && a !== document.body; a = a.parentElement) chain.unshift(a);
+    const PAD = 24, BAN = opt.title ? 96 : 0, TW = W + PAD * 2, TH = Hc + PAD * 2 + BAN;
+    const wrap = document.createElement('div'); let cur = wrap;
+    chain.forEach(a => { const n = document.createElement(a.tagName === 'BODY' ? 'div' : a.tagName.toLowerCase()); if (a.id) n.id = a.id; n.className = (a.getAttribute('class') || '') + ' v46-anc'; cur.appendChild(n); cur = n; });
+    cur.appendChild(cl);
+    cl.style.width = W + 'px';
+    const holder = document.createElement('div'); holder.className = 'v46-holder';
+    if (opt.title) holder.innerHTML = banner(plan());
+    holder.appendChild(wrap);
+    const inner = new XMLSerializer().serializeToString(holder);
+    const bodyCls = (document.body.getAttribute('class') || '').replace(/\b(v1[1-3]-open|wr-mode|admin-mode|op-mode)\b/g, '');
+    const extra = `.v46-anc{display:block!important;position:static!important;overflow:visible!important;height:auto!important;max-height:none!important;min-height:0!important;width:auto!important;max-width:none!important;flex:none!important;transform:none!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;border-radius:0!important}
+      .v46-anc.hidden{display:block!important}
+      .v46-root{margin:0!important;display:block!important;overflow:visible!important;width:${TW}px!important;height:${TH}px!important;min-height:0!important;padding:${PAD}px!important;box-sizing:border-box!important;background-attachment:scroll!important}
+      .v46-root #gcanvas{border-radius:16px;overflow:hidden;background:var(--panel,#fff);box-shadow:0 6px 20px rgba(15,23,42,.08)}
+      .v46-root .outlbl{white-space:nowrap}
+      *{animation:none!important;transition:none!important}`;
+    const css = cssText() + '\n' + extra;
+    let s = opt.scale;
+    const fits = k => TW * k <= 32000 && TH * k <= 32000 && TW * TH * k * k <= 220e6;
+    while (s > 1 && !fits(s)) s = Math.max(1, +(s - 0.5).toFixed(1));
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${TW * s}" height="${TH * s}" viewBox="0 0 ${TW} ${TH}"><style><![CDATA[${css}]]></style>`
+      + `<foreignObject x="0" y="0" width="${TW}" height="${TH}"><body xmlns="http://www.w3.org/1999/xhtml" class="${U.esc(bodyCls)} v46-root">${inner}</body></foreignObject></svg>`;
+    const img = new Image(); img.decoding = 'sync';
+    const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    await new Promise((ok, no) => { img.onload = ok; img.onerror = () => no(new Error('Không dựng được ảnh')); img.src = url; });
+    try { await img.decode(); } catch (e) { }
+    await new Promise(r => setTimeout(r, 120));
+    let blob = null;
+    for (; s >= 1 && !blob; s = s > 1.5 ? +(s - 0.5).toFixed(1) : 0) {
+      const cv = document.createElement('canvas'); cv.width = Math.round(TW * s); cv.height = Math.round(TH * s);
+      const ctx = cv.getContext('2d'); if (!ctx) continue;
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+      try { ctx.drawImage(img, 0, 0, cv.width, cv.height); blob = await new Promise(r => cv.toBlob(r, 'image/png')); if (blob) blob.dim = [cv.width, cv.height]; }
+      catch (e) { console.warn('[v46] canvas', e); blob = null; }
+      cv.width = cv.height = 0;
+      if (blob) break;
+    }
+    if (!blob) throw new Error('Ảnh quá lớn cho trình duyệt – hãy chọn chất lượng thấp hơn hoặc độ phân giải timeline lớn hơn.');
+    return blob;
+  } finally {
+    ui.collapsed = saved; App.selectedId = sel; App.render();
+  }
+}
+function exportDialog() {
+  if (App.view === 'home') { toast('Hãy mở 1 kế hoạch trước.', 'warn'); return; }
+  const m = openModal(`<div class="modal-h"><h3>🖼 Xuất ảnh Gantt</h3><button class="x" data-close>×</button></div>
+    <div class="modal-b v46-ex">
+      <label class="opt"><input type="radio" name="v46q" value="2"><span><b>Nét</b> · 2×<small>Ảnh nhẹ, gửi Zalo/Teams nhanh</small></span></label>
+      <label class="opt"><input type="radio" name="v46q" value="3" checked><span><b>Rất nét</b> · 3× (khuyên dùng)<small>Phóng to vẫn đọc rõ chữ – in A3/A2, dán PowerPoint</small></span></label>
+      <label class="opt"><input type="radio" name="v46q" value="4"><span><b>Siêu nét</b> · 4×<small>File lớn, xuất lâu hơn</small></span></label>
+      <label class="chk"><input type="checkbox" id="v46Exp" checked> Mở hết các nhánh / process đang thu gọn</label>
+      <label class="chk"><input type="checkbox" id="v46Tit" checked> Thêm tiêu đề (tên kế hoạch, giờ bắt đầu – kết thúc)</label>
+      <div class="note">Ảnh chụp <b>toàn bộ</b> bảng Gantt – kể cả phần phải cuộn mới thấy – đúng như tab Gantt đang hiển thị (bộ lọc + độ phân giải timeline hiện tại). Muốn ảnh gọn chiều ngang hãy chọn timeline “4 giờ” trước khi xuất.</div>
+    </div>
+    <div class="modal-f"><button class="btn" data-close>Hủy</button><button class="btn primary" id="v46Go">🖼 Xuất ảnh PNG</button></div>`, 'sm');
+  m.querySelector('#v46Go').onclick = async () => {
+    const opt = { scale: +m.querySelector('input[name="v46q"]:checked').value, expand: m.querySelector('#v46Exp').checked, title: m.querySelector('#v46Tit').checked };
+    closeModal(); busy('⏳ Đang dựng ảnh Gantt…');
+    try {
+      await nextFrame();
+      const blob = await renderImage(opt);
+      busy();
+      const name = `Gantt_${safeName(plan().name)}_${stamp()}.png`;
+      download(name, blob);
+      const u = URL.createObjectURL(blob), [w, h] = blob.dim || [0, 0];
+      const pm = openModal(`<div class="modal-h"><h3>✅ Đã xuất ảnh Gantt</h3><button class="x" data-close>×</button></div>
+        <div class="modal-b"><img class="v46-prev" src="${u}" alt="Gantt"><div class="muted small" style="margin-top:8px;text-align:center">${w} × ${h} px · ${(blob.size / 1048576).toFixed(1)} MB · đã tải về: <b>${U.esc(name)}</b></div></div>
+        <div class="modal-f"><button class="btn" id="v46Cp">📋 Copy ảnh</button><button class="btn" id="v46Open">🔍 Mở xem cỡ thật</button><button class="btn primary" id="v46Dl">⬇ Tải lại</button><span style="flex:1"></span><button class="btn" data-close>Đóng</button></div>`, 'lg');
+      pm.querySelector('#v46Dl').onclick = () => download(name, blob);
+      pm.querySelector('#v46Open').onclick = () => { const a = document.createElement('a'); a.href = u; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); };
+      pm.querySelector('#v46Cp').onclick = async () => {
+        try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); toast('Đã copy ảnh – dán (Ctrl+V) vào Teams / PowerPoint / Zalo.', 'ok'); }
+        catch (e) { toast('Trình duyệt không cho copy ảnh – dùng file đã tải về.', 'warn'); }
+      };
+    } catch (e) { busy(); console.error('[v46] xuất ảnh', e); toast('Xuất ảnh lỗi: ' + (e && e.message || e), 'err'); }
+  };
+}
+function addExportButtons() {
+  const menu = document.getElementById('menuExport');
+  if (menu && !menu.querySelector('[data-v46img]')) {
+    const b = document.createElement('button'); b.dataset.v46img = '1'; b.textContent = '🖼 Ảnh Gantt PNG (nét cao, đủ task)';
+    menu.insertBefore(b, menu.firstChild);
+    b.addEventListener('click', e => { e.stopPropagation(); menu.classList.add('hidden'); exportDialog(); });
+  }
+  const ex = document.getElementById('btnExport');
+  if (ex && !document.getElementById('v46Img')) {
+    const b = document.createElement('button'); b.className = 'tb-btn'; b.id = 'v46Img'; b.title = 'Xuất ảnh Gantt PNG nét cao – đủ toàn bộ task';
+    b.textContent = '🖼 Xuất ảnh'; b.onclick = exportDialog;
+    ex.closest('.dd').after(b);
+  }
+}
+
+/* =====================================================================
+   KHỞI ĐỘNG (sau tất cả các khối khác)
+   ===================================================================== */
+function boot() {
+  try {
+    wrapCommit();
+    try { wrapCloud(); } catch (e) { console.warn('[v46] cloud', e); }
+    bindDelete();
+    installDrag();
+    bindCard();
+    addExportButtons();
+    const _gr = Gantt.render;
+    /* đang kéo thì hoãn vẽ lại (tránh mất thanh đang kéo) – thả chuột xong sẽ vẽ */
+    Gantt.render = function (...a) { if (Drag.active) return; const o = _gr.apply(this, a); try { decorateBars(); } catch (e) { } return o; };
+    const _dr = Drawer.render;
+    Drawer.render = function (...a) { const o = _dr.apply(this, a); try { addTimeCard(); } catch (e) { console.warn('[v46] card', e); } return o; };
+    const _rf = Drawer.refreshCalc;
+    /* sau mỗi thay đổi (vd. đổi thời lượng ở ô khác) → cập nhật lại số giờ trong mục 🕒 Giờ */
+    if (_rf) Drawer.refreshCalc = function (...a) {
+      const o = _rf.apply(this, a);
+      try {
+        const c = document.querySelector('#drawer .v46-time');
+        if (c && !c.contains(document.activeElement)) { const t = findT(c.dataset.id), r = t && App.res.R.get(t.id); if (r) c.innerHTML = card(t, r); }
+      } catch (e) { }
+      return o;
+    };
+    window.V46 = Object.assign(window.V46 || {}, { delTasks, setTime, unpin, exportDialog, renderImage });
+    if (App.view === 'gantt') Gantt.render();
+    console.log('[v46] đã nạp – xóa task chắc chắn · kéo thả tự do + đặt giờ · xuất ảnh Gantt');
+  } catch (e) { console.error('[v46] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 6000)); else setTimeout(boot, 6000);
+})();
+</script>
+<!-- ===================== HẾT v46 ===================== -->
 
 </body>
 </html>
