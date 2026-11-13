@@ -11532,6 +11532,248 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 </script>
 <!-- ===================== HẾT v46 ===================== -->
 
+
+<!-- ===== CLOUD SYNC v2: dong bo realtime, gop thay doi tung truong, ghi co kiem tra phien ban (dat cuoi file, sau moi patch cu) ===== -->
+<script>
+(function () {
+'use strict';
+var ready = false;
+try { ready = typeof sb !== 'undefined' && typeof Store !== 'undefined' && typeof App !== 'undefined'; } catch (e) { }
+if (!ready) { console.warn('[sync2] Chưa có Supabase/Store – bỏ qua.'); return; }
+
+/* ================= 1. GỘP DỮ LIỆU 3 CHIỀU (base / local / remote) ================= */
+var cache = new WeakMap();
+function resetCache() { cache = new WeakMap(); }
+function canon(v) {                       // JSON "chuẩn hóa" (sắp key) – jsonb của Postgres đổi thứ tự key nên không so sánh chuỗi thô được
+  if (v === undefined) return 'u';
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  var c = cache.get(v); if (c !== undefined) return c;
+  var s;
+  if (Array.isArray(v)) s = '[' + v.map(canon).join(',') + ']';
+  else { var ks = Object.keys(v).sort(), p = []; for (var i = 0; i < ks.length; i++) { if (v[ks[i]] !== undefined) p.push(JSON.stringify(ks[i]) + ':' + canon(v[ks[i]])); } s = '{' + p.join(',') + '}'; }
+  cache.set(v, s); return s;
+}
+function isObj(v) { return v && typeof v === 'object' && !Array.isArray(v); }
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+/* Ai sửa trường nào thì giữ trường đó. Cùng sửa 1 trường → bản của máy mình thắng. */
+function merge3(b, l, r) {
+  var cl = canon(l), cr = canon(r);
+  if (cl === cr) return l;
+  var cb = canon(b);
+  if (cl === cb) return r;               // mình không đổi → lấy của người khác
+  if (cr === cb) return l;               // người khác không đổi → giữ của mình
+  if (isObj(l) && isObj(r) && (isObj(b) || b === undefined)) {
+    var bb = b || {}, out = {}, keys = {}, k;
+    for (k in l) keys[k] = 1; for (k in r) keys[k] = 1;
+    for (k in keys) { var v = merge3(bb[k], l[k], r[k]); if (v !== undefined) out[k] = v; }
+    return out;
+  }
+  return l;
+}
+function tkey(t) { return t.id != null ? String(t.id) : 'u:' + t.uid; }
+function mergeTasks(bt, lt, rt) {
+  var bm = {}, lm = {}, rm = {}, out = [];
+  bt.forEach(function (t) { bm[tkey(t)] = t; }); lt.forEach(function (t) { lm[tkey(t)] = t; }); rt.forEach(function (t) { rm[tkey(t)] = t; });
+  rt.forEach(function (r) {
+    var k = tkey(r), l = lm[k], b = bm[k];
+    if (l) out.push(merge3(b || {}, l, r));
+    else if (b) { /* mình đã xóa task này → giữ việc xóa */ }
+    else out.push(r);                                         // người khác thêm mới
+  });
+  lt.forEach(function (l) {
+    var k = tkey(l); if (rm[k]) return;
+    var b = bm[k];
+    if (!b || canon(l) !== canon(b)) out.push(l);             // mình thêm mới / mình đang sửa task mà người khác lỡ xóa → giữ lại
+  });
+  return out;
+}
+function mergePlan(b, l, r) {
+  var bb = b || {}, strip = function (p) { var x = Object.assign({}, p); delete x.tasks; return x; };
+  var out = merge3(strip(bb), strip(l), strip(r));
+  out = Object.assign({}, out);
+  out.tasks = mergeTasks(bb.tasks || [], l.tasks || [], r.tasks || []);
+  return out;
+}
+function mergePlans(B, L, R) {
+  var bm = {}, lm = {}, rm = {}, out = [];
+  B.forEach(function (p) { bm[p.id] = p; }); L.forEach(function (p) { lm[p.id] = p; }); R.forEach(function (p) { rm[p.id] = p; });
+  R.forEach(function (r) { var l = lm[r.id], b = bm[r.id]; if (l) out.push(mergePlan(b, l, r)); else if (!b) out.push(r); });
+  L.forEach(function (l) { if (rm[l.id]) return; var b = bm[l.id]; if (!b || canon(l) !== canon(b)) out.push(l); });
+  return out.length ? out : L;
+}
+
+/* ================= 2. TRẠNG THÁI ĐỒNG BỘ ================= */
+var base = null;                 // bản "cloud" mà máy này biết gần nhất (đã chuẩn hóa)
+var tok = { rev: null, savedAt: 0 };   // phiên bản của bản cloud đang nắm
+var loaded = false, haveRemote = false;
+var pushing = false, again = false, needPull = false, pulling = null, pullAgain = false;
+var pushT = null, retries = 0, lastToast = 0;
+
+function tokOf(d) { return { rev: d && d.rev != null ? +d.rev : null, savedAt: +(d && d.savedAt) || 0 }; }
+function tokStr(t) { return (t.rev == null ? 'x' : t.rev) + '|' + t.savedAt; }
+function canWrite() { return !(window.Auth && !Auth.ok) || document.body.classList.contains('op-mode'); }
+
+/* ---- thanh trạng thái nhỏ ---- */
+var st = document.createElement('style');
+st.textContent = '#csPill{position:fixed;left:14px;bottom:14px;z-index:250;display:none;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;font-size:12.5px;font-weight:600;background:var(--panel,#fff);color:var(--text,#222);border:1px solid var(--border,#ddd);box-shadow:0 8px 24px rgba(15,23,42,.18);cursor:pointer}' +
+  '#csPill.show{display:flex}#csPill i{width:9px;height:9px;border-radius:50%;background:#f59e0b;animation:csp 1.2s infinite}#csPill.ok i{background:#16a34a;animation:none}#csPill.err i{background:#dc2626}@keyframes csp{50%{opacity:.3}}';
+document.head.appendChild(st);
+var pill = document.createElement('div'); pill.id = 'csPill'; pill.title = 'Bấm để đồng bộ lại ngay';
+document.body.appendChild(pill);
+var pillT;
+function setPill(kind, text) { clearTimeout(pillT); if (!kind) { pill.className = ''; return; } pill.className = 'show ' + kind; pill.innerHTML = '<i></i>' + text; if (kind === 'ok') pillT = setTimeout(function () { pill.className = ''; }, 2000); }
+pill.onclick = function () { retries = 0; push(); pull(); };
+
+/* ---- vẽ lại giao diện sau khi nhận dữ liệu, giữ nguyên vị trí cuộn ---- */
+function refreshUI() {
+  var g = document.getElementById('gscroll'), v = g ? { x: g.scrollLeft, y: g.scrollTop } : null;
+  try {
+    if (!Store.state.plans.find(function (p) { return p.id === Store.state.activePlanId; })) Store.state.activePlanId = Store.state.plans[0].id;
+    App.recompute(); App.render();
+    if (App.drawerTaskId && !App.drawerIsNew) {
+      if (!Store.plan().tasks.find(function (t) { return t.id === App.drawerTaskId; })) { if (window.Drawer) Drawer.close(); }
+      else if (window.Drawer && Drawer.refreshCalc) Drawer.refreshCalc();
+    }
+  } catch (e) { console.warn('[sync2] vẽ lại lỗi', e); }
+  var g2 = document.getElementById('gscroll');
+  if (g2 && v) { g2.scrollLeft = v.x; g2.scrollTop = v.y; requestAnimationFrame(function () { g2.scrollLeft = v.x; g2.scrollTop = v.y; }); }
+}
+
+/* ================= 3. NHẬN DỮ LIỆU TỪ CLOUD ================= */
+function integrate(d, quiet, force) {
+  if (!d || !Array.isArray(d.plans) || !d.plans.length) return false;
+  var t = tokOf(d);
+  if (!force && loaded && tokStr(t) === tokStr(tok)) return false;                           // đã có bản này rồi
+  if (!force && loaded && t.rev != null && tok.rev != null && t.rev < tok.rev) return false;   // bản cũ hơn → bỏ
+  resetCache();
+  var R = Store.sanitize({ plans: clone(d.plans), activePlanId: Store.state.activePlanId, ui: {} }).plans;
+  var L = Store.state.plans;
+  var M = base ? mergePlans(base, L, R) : R;
+  var changed = canon(M) !== canon(L);
+  var unsaved = canon(M) !== canon(R);
+  base = clone(R); tok = t; loaded = true; haveRemote = true;
+  lastCloudAt = t.savedAt;
+  if (changed) {
+    Store.state.plans = M;
+    refreshUI();
+    try { Store.save(); } catch (e) { }
+    if (!quiet && Date.now() - lastToast > 6000) { lastToast = Date.now(); try { toast('🔄 Đã cập nhật thay đổi từ người khác', 'ok'); } catch (e) { } }
+  }
+  if (unsaved) schedulePush(300);                                                    // mình còn thay đổi chưa lưu → đẩy lại bản đã gộp
+  return changed;
+}
+
+function pull() {
+  if (pulling) { pullAgain = true; return pulling; }
+  pulling = (async function () {
+    try {
+      do {
+        pullAgain = false;
+        if (typeof Drag !== 'undefined' && Drag.active) { setTimeout(pull, 400); return; }   // đang kéo thả → đợi thả xong mới áp dụng
+        var res = await sb.from('planner_state').select('data').eq('id', 1).maybeSingle();
+        if (res.error) throw new Error(res.error.message);
+        var d = res.data && res.data.data;
+        if (!res.data) { haveRemote = false; loaded = true; if (!base) base = null; schedulePush(200); }
+        else if (!d || !Array.isArray(d.plans) || !d.plans.length) { haveRemote = true; tok = tokOf(d); loaded = true; schedulePush(200); }
+        else integrate(d);
+      } while (pullAgain);
+    } catch (e) { console.warn('[sync2] đọc cloud lỗi:', e && e.message); }
+    finally { pulling = null; }
+  })();
+  return pulling;
+}
+
+/* ================= 4. GHI LÊN CLOUD (có kiểm tra phiên bản, đụng nhau thì tự gộp) ================= */
+function schedulePush(ms) { clearTimeout(pushT); pushT = setTimeout(push, ms == null ? 450 : ms); }
+async function push() {
+  if (!loaded || !canWrite()) return;
+  if (pushing) { again = true; return; }
+  pushing = true; again = false; clearTimeout(pushT);
+  try {
+    for (var attempt = 0; attempt < 10; attempt++) {
+      resetCache();
+      if (base && canon(Store.state.plans) === canon(base)) { if (retries) { setPill('ok', 'Đã đồng bộ ✓'); } retries = 0; break; }
+      setPill('sync', 'Đang lưu…');
+      var snap = clone(Store.state.plans);
+      var payload = { plans: snap, savedAt: Date.now(), by: CLIENT_ID, rev: (tok.rev || 0) + 1 };
+      var row = { data: payload, updated_at: new Date().toISOString() }, res, conflict = false;
+      if (!haveRemote) {
+        res = await sb.from('planner_state').insert(Object.assign({ id: 1 }, row)).select('id');
+        if (res.error) { if (/duplicate|unique|23505/i.test((res.error.message || '') + (res.error.code || ''))) conflict = true; else throw new Error(res.error.message); }
+      } else {
+        var q = sb.from('planner_state').update(row).eq('id', 1);
+        q = tok.rev != null ? q.eq('data->>rev', String(tok.rev)) : q.is('data->>rev', null);   // chỉ ghi nếu cloud CHƯA bị ai đổi
+        res = await q.select('id');
+        if (res.error) throw new Error(res.error.message);
+        if (!res.data || !res.data.length) conflict = true;
+      }
+      if (conflict) {                                       // người khác vừa ghi → lấy bản mới, gộp, thử lại
+        var cur = await sb.from('planner_state').select('data').eq('id', 1).maybeSingle();
+        if (cur.error) throw new Error(cur.error.message);
+        if (!cur.data) { haveRemote = false; continue; }
+        var cd = cur.data.data;
+        if (cd && Array.isArray(cd.plans) && cd.plans.length) integrate(cd, true, true);
+        else { haveRemote = true; tok = tokOf(cd); }
+        continue;
+      }
+      base = snap; tok = { rev: payload.rev, savedAt: payload.savedAt }; haveRemote = true; lastCloudAt = payload.savedAt; retries = 0;
+    }
+    if (pill.classList.contains('sync')) setPill('ok', 'Đã đồng bộ ✓');
+  } catch (e) {
+    retries++;
+    var wait = [2, 5, 10, 20, 40][Math.min(retries - 1, 4)];
+    console.warn('[sync2] lưu cloud lỗi lần ' + retries + ':', e && e.message);
+    setPill('err', 'Chưa lưu được lên cloud – thử lại sau ' + wait + 's (dữ liệu vẫn nằm trên máy)');
+    schedulePush(wait * 1000);
+  } finally {
+    pushing = false;
+    if (again) schedulePush(300);
+    if (needPull) { needPull = false; pull(); }
+  }
+}
+
+/* ================= 5. NHẬN THAY ĐỔI REALTIME + DỰ PHÒNG POLL ================= */
+function onRemoteEvent(p) {
+  var row = p && p.new; if (!row || (row.id != null && +row.id !== 1)) return;
+  if (row.data && row.data.by === CLIENT_ID) return;       // tiếng vọng của chính mình
+  if (pushing) { needPull = true; return; }
+  pull();
+}
+function subscribe() {
+  try {
+    sb.channel('planner-sync-' + CLIENT_ID)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'planner_state' }, onRemoteEvent)
+      .subscribe(function (s) { if (s === 'SUBSCRIBED') pull(); });
+  } catch (e) { console.warn('[sync2] realtime lỗi:', e); }
+}
+setInterval(async function () {                              // phòng khi realtime rớt / payload quá lớn
+  if (!loaded || pushing || pulling || document.hidden) return;
+  try {
+    var r = await sb.from('planner_state').select('rev:data->>rev,sa:data->>savedAt').eq('id', 1).maybeSingle();
+    if (r.error || !r.data) return;
+    var t = { rev: r.data.rev == null ? null : +r.data.rev, savedAt: +r.data.sa || 0 };
+    if (tokStr(t) !== tokStr(tok)) pull();
+  } catch (e) { }
+}, 4000);
+document.addEventListener('visibilitychange', function () { if (document.hidden) push(); else pull(); });
+window.addEventListener('online', function () { retries = 0; push(); pull(); });
+window.addEventListener('pagehide', function () { push(); });
+
+/* ================= 6. THAY THẾ HÀM CŨ ================= */
+function myApply(d) { return integrate(d); }
+function mySave() { if (!canWrite()) return; schedulePush(450); }
+function install() {            // các patch cũ (v9, v46, perf…) có thể ghi đè lại → luôn giữ bản mới này
+  try { if (applyCloud !== myApply) applyCloud = myApply; } catch (e) { }
+  try { if (cloudSave !== mySave) cloudSave = mySave; } catch (e) { }
+}
+install(); setInterval(install, 1000);
+try { var rm = sb.removeAllChannels && sb.removeAllChannels(); Promise.resolve(rm).then(subscribe, subscribe); } catch (e) { subscribe(); }
+window.CloudSync = { pull: pull, push: push, state: function () { return { loaded: loaded, tok: tok, pushing: pushing }; }, _merge: mergePlans };
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pull); else pull();
+console.log('[sync2] đồng bộ realtime (gộp từng trường) đã bật');
+})();
+</script>
 </body>
 </html>
 
