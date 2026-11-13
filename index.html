@@ -11533,7 +11533,7 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 <!-- ===================== HẾT v46 ===================== -->
 
 
-<!-- ===== CLOUD SYNC v2: dong bo realtime, gop thay doi tung truong, ghi co kiem tra phien ban (dat cuoi file, sau moi patch cu) ===== -->
+<!-- ===== CLOUD SYNC v2 + PRESENCE ===== -->
 <script>
 (function () {
 'use strict';
@@ -11609,6 +11609,10 @@ var tok = { rev: null, savedAt: 0 };   // phiên bản của bản cloud đang n
 var loaded = false, haveRemote = false;
 var pushing = false, again = false, needPull = false, pulling = null, pullAgain = false;
 var pushT = null, retries = 0, lastToast = 0;
+var userDirty = false, lastLabel = '', inAuto = false;     // phân biệt thao tác của NGƯỜI vs app tự dọn dữ liệu
+var feed = [], lastChange = null, autoPushes = [];         // nhật ký hoạt động + lần ghi gần nhất
+function esc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function meName() { var n = ''; try { n = (window.Auth && Auth.user) || (typeof SafeStore !== 'undefined' && SafeStore.get('op.name')) || ''; } catch (e) { } return n || (canWrite() ? 'Người dùng' : 'Khách'); }
 
 function tokOf(d) { return { rev: d && d.rev != null ? +d.rev : null, savedAt: +(d && d.savedAt) || 0 }; }
 function tokStr(t) { return (t.rev == null ? 'x' : t.rev) + '|' + t.savedAt; }
@@ -11654,13 +11658,22 @@ function integrate(d, quiet, force) {
   var unsaved = canon(M) !== canon(R);
   base = clone(R); tok = t; loaded = true; haveRemote = true;
   lastCloudAt = t.savedAt;
+  var human = !!(d.u && d.by !== CLIENT_ID);
+  if (d.by && d.by !== CLIENT_ID) lastChange = { who: d.who || 'Ai đó', at: Date.now(), lab: d.lab || '', rev: t.rev };
   if (changed) {
     Store.state.plans = M;
     refreshUI();
     try { Store.save(); } catch (e) { }
-    if (!quiet && Date.now() - lastToast > 6000) { lastToast = Date.now(); try { toast('🔄 Đã cập nhật thay đổi từ người khác', 'ok'); } catch (e) { } }
+    if (human) {
+      feed.unshift({ who: d.who || 'Ai đó', lab: d.lab || 'Cập nhật kế hoạch', at: Date.now() }); feed.length = Math.min(feed.length, 12);
+      if (Date.now() - lastToast > 3500) { lastToast = Date.now(); try { toast('🔄 ' + (d.who || 'Ai đó') + ' vừa cập nhật' + (d.lab ? ': ' + d.lab : ''), 'ok'); } catch (e) { } }
+      if (window.__csPulse) window.__csPulse();
+    }
   }
-  if (unsaved) schedulePush(300);                                                    // mình còn thay đổi chưa lưu → đẩy lại bản đã gộp
+  if (unsaved) {                                                                      // mình còn thay đổi chưa lưu → đẩy lại bản đã gộp
+    var nowT = Date.now(); autoPushes = autoPushes.filter(function (x) { return nowT - x < 60000; }); autoPushes.push(nowT);
+    schedulePush(autoPushes.length > 5 ? 15000 : 300);                                // chống vòng lặp 2 máy cứ đẩy qua đẩy lại
+  }
   return changed;
 }
 
@@ -11685,6 +11698,7 @@ function pull() {
 }
 
 /* ================= 4. GHI LÊN CLOUD (có kiểm tra phiên bản, đụng nhau thì tự gộp) ================= */
+var _lastSentU = false; function sentU0() { return _lastSentU; }
 function schedulePush(ms) { clearTimeout(pushT); pushT = setTimeout(push, ms == null ? 450 : ms); }
 async function push() {
   if (!loaded || !canWrite()) return;
@@ -11696,7 +11710,8 @@ async function push() {
       if (base && canon(Store.state.plans) === canon(base)) { if (retries) { setPill('ok', 'Đã đồng bộ ✓'); } retries = 0; break; }
       setPill('sync', 'Đang lưu…');
       var snap = clone(Store.state.plans);
-      var payload = { plans: snap, savedAt: Date.now(), by: CLIENT_ID, rev: (tok.rev || 0) + 1 };
+      var sentU = userDirty, sentLab = lastLabel; _lastSentU = sentU; userDirty = false;
+      var payload = { plans: snap, savedAt: Date.now(), by: CLIENT_ID, rev: (tok.rev || 0) + 1, who: meName(), u: sentU, lab: sentLab };
       var row = { data: payload, updated_at: new Date().toISOString() }, res, conflict = false;
       if (!haveRemote) {
         res = await sb.from('planner_state').insert(Object.assign({ id: 1 }, row)).select('id');
@@ -11717,10 +11732,11 @@ async function push() {
         else { haveRemote = true; tok = tokOf(cd); }
         continue;
       }
-      base = snap; tok = { rev: payload.rev, savedAt: payload.savedAt }; haveRemote = true; lastCloudAt = payload.savedAt; retries = 0;
+      base = snap; tok = { rev: payload.rev, savedAt: payload.savedAt }; haveRemote = true; lastCloudAt = payload.savedAt; retries = 0; lastChange = { who: 'Bạn', at: Date.now(), lab: sentLab, rev: payload.rev, me: true };
     }
     if (pill.classList.contains('sync')) setPill('ok', 'Đã đồng bộ ✓');
   } catch (e) {
+    userDirty = userDirty || !!sentU0();
     retries++;
     var wait = [2, 5, 10, 20, 40][Math.min(retries - 1, 4)];
     console.warn('[sync2] lưu cloud lỗi lần ' + retries + ':', e && e.message);
@@ -11740,13 +11756,141 @@ function onRemoteEvent(p) {
   if (pushing) { needPull = true; return; }
   pull();
 }
+var ch = null, wsUp = false;
 function subscribe() {
   try {
-    sb.channel('planner-sync-' + CLIENT_ID)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'planner_state' }, onRemoteEvent)
-      .subscribe(function (s) { if (s === 'SUBSCRIBED') pull(); });
+    ch = sb.channel('planner-presence', { config: { presence: { key: CLIENT_ID } } });
+    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'planner_state' }, onRemoteEvent);
+    try { ch.on('presence', { event: 'sync' }, function () { renderBox(); }); } catch (e) { }
+    ch.subscribe(function (s) { wsUp = (s === 'SUBSCRIBED'); if (wsUp) { pull(); trackNow(true); } renderBox(); });
   } catch (e) { console.warn('[sync2] realtime lỗi:', e); }
 }
+/* ================= 5b. AI ĐANG ONLINE – HỘP THEO DÕI THIẾT BỊ ================= */
+var joinedAt = Date.now(), lastInput = Date.now(), lastEditAt = 0, lastTracked = '', lastTrackAt = 0;
+['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) { window.addEventListener(ev, function () { lastInput = Date.now(); }, { passive: true, capture: true }); });
+var DEV = (function () {
+  var ua = navigator.userAgent || '';
+  var os = /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'Khác';
+  var br = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Trình duyệt';
+  var mob = /Android.+Mobile|iPhone|iPod/.test(ua), tab = /iPad|Android(?!.*Mobile)/.test(ua);
+  return { os: os, br: br, type: mob ? 'mobile' : tab ? 'tablet' : 'desktop' };
+})();
+function viewLabel() {
+  var c = document.body.classList;
+  if (c.contains('op-mode')) return 'Ca trực';
+  if (c.contains('admin-mode')) return 'Admin';
+  if (c.contains('wr-mode')) return 'Work request';
+  if (c.contains('db-mode')) return 'Routine';
+  return { gantt: 'Gantt', dash: 'Dashboard', home: 'Trang chủ' }[App.view] || 'Ứng dụng';
+}
+function meta() {
+  var task = '', open = false;
+  try { if (App.drawerTaskId) { open = true; var t = Store.plan().tasks.find(function (x) { return x.id === App.drawerTaskId; }); task = t ? t.taskName : (App.drawerIsNew ? 'task mới' : ''); } } catch (e) { }
+  var idle = Date.now() - lastInput > 120000, recent = Date.now() - lastEditAt < 45000;
+  var state = idle ? 'idle' : (canWrite() && (open || recent)) ? 'edit' : 'view';
+  var plan = ''; try { plan = Store.plan().name || ''; } catch (e) { }
+  return { id: CLIENT_ID, name: meName(), write: canWrite(), os: DEV.os, br: DEV.br, dt: DEV.type, since: joinedAt, state: state, view: viewLabel(), plan: plan, task: open ? task : '', idleAt: idle ? lastInput : 0 };
+}
+function trackNow(force) {
+  if (!ch || !ch.track || !wsUp) return;
+  var m = meta(), key = JSON.stringify(m), now = Date.now();
+  if (!force && key === lastTracked && now - lastTrackAt < 25000) return;
+  lastTracked = key; lastTrackAt = now;
+  try { var r = ch.track(m); if (r && r.catch) r.catch(function () { }); } catch (e) { }
+}
+function peers() {
+  var out = [];
+  try { var ps = ch && ch.presenceState ? ch.presenceState() : {}; Object.keys(ps).forEach(function (k) { var a = ps[k]; if (a && a.length) out.push(a[a.length - 1]); }); } catch (e) { }
+  if (!out.some(function (p) { return p.id === CLIENT_ID; })) out.push(meta());      // luôn có "Bạn" kể cả khi mất realtime
+  var rank = { edit: 0, view: 1, idle: 2 };
+  out.sort(function (a, b) { return (a.id === CLIENT_ID ? -1 : 0) - (b.id === CLIENT_ID ? -1 : 0) || (rank[a.state] - rank[b.state]) || (a.since - b.since); });
+  return out;
+}
+function ago(ts) { var s = Math.max(0, Math.round((Date.now() - ts) / 1000)); if (s < 10) return 'vừa xong'; if (s < 60) return s + ' giây trước'; var m = Math.round(s / 60); if (m < 60) return m + ' phút trước'; var h = Math.floor(m / 60); return h + 'g' + (m % 60 ? ' ' + (m % 60) + 'p' : '') + ' trước'; }
+function dur(ts) { var m = Math.max(0, Math.round((Date.now() - ts) / 60000)); if (m < 1) return '<1 phút'; if (m < 60) return m + ' phút'; return Math.floor(m / 60) + 'g ' + (m % 60) + 'p'; }
+function hue(str) { var h = 0; for (var i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360; return h; }
+function initials(n) { var p = String(n || '?').trim().split(/\s+/); return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase(); }
+function avatar(p, big) { var c = hue(p.name + (p.id || '')); return '<span class="cs-av' + (big ? ' cs-avl' : '') + ' st-' + p.state + '" style="background:linear-gradient(135deg,hsl(' + c + ',70%,52%),hsl(' + (c + 40) + ',70%,42%))">' + esc(initials(p.name)) + (big ? '<span class="cs-sd"></span>' : '') + '</span>'; }
+var DI = { desktop: '🖥️', tablet: '📱', mobile: '📱' };
+function stateText(p) {
+  if (p.state === 'idle') return '<span class="s-idle">💤 Rảnh ' + dur(p.idleAt || p.since) + '</span>';
+  if (p.state === 'edit') return '<span class="s-edit">✏️ ' + (p.task ? 'Đang sửa: <b>' + esc(p.task) + '</b>' : 'Đang chỉnh sửa') + '</span>';
+  return '<span class="s-view">👁️ Đang xem ' + esc(p.view) + (p.plan ? ' · ' + esc(p.plan) : '') + '</span>';
+}
+
+var cssP = document.createElement('style');
+cssP.textContent = '#csBox{position:relative;margin-left:8px}' +
+'#csBtn{display:flex;align-items:center;gap:8px;padding:4px 11px 4px 6px;border-radius:999px;border:1px solid var(--border,#dbe2ea);background:var(--panel2,#f8fafc);color:var(--text,#1e293b);font-weight:600;font-size:12.5px;cursor:pointer;transition:all .2s}' +
+'#csBtn:hover{filter:brightness(.97);box-shadow:0 2px 10px rgba(15,23,42,.12)}#csBtn.cs-pulse{animation:csPulse 1.4s ease-out}' +
+'@keyframes csPulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,.8)}100%{box-shadow:0 0 0 14px rgba(52,211,153,0)}}' +
+'#csBtn .cs-stack{display:flex}#csBtn .cs-stack .cs-av{margin-left:-7px;border:2px solid var(--panel,#fff)}#csBtn .cs-stack .cs-av:first-child{margin-left:0}' +
+'#csBtn .cs-dot{width:8px;height:8px;border-radius:50%;background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.25);animation:csBlink 2s infinite}#csBtn.cs-off .cs-dot{background:#f87171;box-shadow:0 0 0 3px rgba(248,113,113,.25);animation:none}' +
+'@keyframes csBlink{50%{box-shadow:0 0 0 6px rgba(52,211,153,0)}}' +
+'.cs-av{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;position:relative;flex:none}' +
+'.cs-av.cs-avl{width:38px;height:38px;font-size:13px}.cs-av.cs-avl .cs-sd{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;border:2px solid var(--panel,#fff);background:#94a3b8}' +
+'.cs-av.cs-avl.st-edit .cs-sd{background:#f59e0b}.cs-av.cs-avl.st-view .cs-sd{background:#22c55e}.cs-av.cs-avl.st-idle .cs-sd{background:#94a3b8}' +
+'#csPop{position:fixed;z-index:400;width:372px;max-width:calc(100vw - 16px);max-height:calc(100vh - 80px);overflow:auto;background:var(--panel,#fff);color:var(--text,#1e293b);border:1px solid var(--border,#dbe2ea);border-radius:16px;box-shadow:0 24px 60px rgba(15,23,42,.35);display:none;font-size:12.5px}' +
+'#csPop.open{display:block;animation:csIn .18s ease-out}@keyframes csIn{from{opacity:0;transform:translateY(-6px)}}' +
+'#csPop .cs-hd{padding:16px 16px 12px;background:linear-gradient(135deg,var(--navy,#0f2a4a),var(--navy2,#173a63));color:#fff;border-radius:16px 16px 0 0}' +
+'#csPop .cs-hnum{display:flex;align-items:baseline;gap:8px}#csPop .cs-hnum b{font-size:32px;line-height:1}#csPop .cs-hnum span{opacity:.85}' +
+'#csPop .cs-bar{display:flex;height:7px;border-radius:99px;overflow:hidden;margin:12px 0 8px;background:rgba(255,255,255,.18)}#csPop .cs-bar span{display:block;transition:width .4s}' +
+'#csPop .cs-leg{display:flex;gap:12px;font-size:11.5px;opacity:.92;flex-wrap:wrap}#csPop .cs-leg em{font-style:normal;display:inline-flex;align-items:center;gap:5px}#csPop .cs-leg em:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--c)}' +
+'#csPop .cs-sec{padding:10px 16px 4px;font-size:10.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted,#64748b)}' +
+'#csPop .cs-row{display:flex;gap:11px;align-items:center;padding:9px 16px;border-top:1px solid var(--grid,#edf1f5)}#csPop .cs-row:hover{background:var(--panel2,#f8fafc)}' +
+'#csPop .cs-row .cs-tx{flex:1;min-width:0}#csPop .cs-row .cs-n{font-weight:700;display:flex;gap:6px;align-items:center}' +
+'#csPop .cs-chip{font-size:10px;padding:1px 7px;border-radius:99px;font-weight:700}#csPop .cs-chip.cs-me{background:var(--accent-soft,#e0ebff);color:var(--accent,#2563eb)}#csPop .cs-chip.cs-w{background:rgba(22,163,74,.14);color:#15803d}#csPop .cs-chip.cs-r{background:rgba(100,116,139,.18);color:var(--muted,#64748b)}' +
+'#csPop .cs-dv{color:var(--muted,#64748b);font-size:11.5px;margin-top:1px}#csPop .cs-stt{margin-top:2px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#csPop .s-edit{color:#b45309}#csPop .s-view{color:#15803d}#csPop .s-idle{color:var(--muted,#64748b)}body.dark #csPop .s-edit{color:#fbbf24}body.dark #csPop .s-view{color:#4ade80}' +
+'#csPop .cs-tm{font-size:11px;color:var(--muted,#64748b);text-align:right;white-space:nowrap}' +
+'#csPop .cs-fd{display:flex;gap:9px;padding:6px 16px;align-items:flex-start;font-size:12px}#csPop .cs-fd:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent,#2563eb);margin-top:5px;flex:none}#csPop .cs-fd small{color:var(--muted,#64748b);margin-left:auto;white-space:nowrap;padding-left:8px}' +
+'#csPop .cs-ft{display:flex;align-items:center;gap:8px;padding:11px 16px;border-top:1px solid var(--border,#dbe2ea);background:var(--panel2,#f8fafc);border-radius:0 0 16px 16px;font-size:11.5px;color:var(--muted,#64748b)}#csPop .cs-ft button{margin-left:auto;border:1px solid var(--border,#dbe2ea);background:var(--panel,#fff);color:var(--text,#222);border-radius:8px;padding:5px 10px;cursor:pointer;font-weight:600}' +
+'#csPop .cs-empty{padding:8px 16px 12px;color:var(--muted,#64748b)}';
+document.head.appendChild(cssP);
+
+var box = document.createElement('div'); box.id = 'csBox';
+box.innerHTML = '<button id="csBtn" title="Ai đang dùng ứng dụng này"><span class="cs-dot"></span><span class="cs-stack"></span><span class="cs-lb"></span></button>';
+var pop = document.createElement('div'); pop.id = 'csPop'; document.body.appendChild(pop);
+function mount() { var sp = document.querySelector('.topbar .spacer'); if (sp && !box.parentNode) sp.after(box); else if (!box.parentNode) { var tb = document.querySelector('.topbar'); if (tb) tb.appendChild(box); } }
+mount();
+var btn = box.querySelector('#csBtn');
+function placePop() { var r = btn.getBoundingClientRect(); var w = Math.min(372, window.innerWidth - 16); pop.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + 'px'; pop.style.top = (r.bottom + 8) + 'px'; }
+btn.addEventListener('click', function (e) { e.stopPropagation(); var o = pop.classList.toggle('open'); if (o) { renderPop(); placePop(); } });
+document.addEventListener('click', function (e) { if (!pop.contains(e.target) && !box.contains(e.target)) pop.classList.remove('open'); });
+window.addEventListener('resize', function () { if (pop.classList.contains('open')) placePop(); });
+window.__csPulse = function () { btn.classList.remove('pulse'); void btn.offsetWidth; btn.classList.add('pulse'); };
+
+function renderBox() {
+  mount(); var ps = peers();
+  var stack = box.querySelector('.cs-stack'), lb = box.querySelector('.cs-lb');
+  stack.innerHTML = ps.slice(0, 3).map(function (p) { return avatar(p); }).join('') + (ps.length > 3 ? '<span class="cs-av" style="background:#475569">+' + (ps.length - 3) + '</span>' : '');
+  lb.textContent = ps.length + ' online';
+  btn.classList.toggle('off', !wsUp);
+  btn.title = wsUp ? ps.length + ' thiết bị đang mở ứng dụng – bấm để xem chi tiết' : 'Mất kết nối realtime – đang dùng chế độ kiểm tra định kỳ';
+  if (pop.classList.contains('open')) renderPop();
+}
+function renderPop() {
+  var ps = peers(), n = ps.length, ed = ps.filter(function (p) { return p.state === 'edit'; }).length, vw = ps.filter(function (p) { return p.state === 'view'; }).length, id = n - ed - vw;
+  var people = {}; ps.forEach(function (p) { people[p.name] = 1; });
+  var pc = function (x) { return n ? (x / n * 100).toFixed(1) + '%' : '0%'; };
+  var h = '<div class="cs-hd"><div class="cs-hnum"><b>' + n + '</b><span>thiết bị đang online · ' + Object.keys(people).length + ' người</span></div>' +
+    '<div class="cs-bar"><span style="width:' + pc(ed) + ';background:#f59e0b"></span><span style="width:' + pc(vw) + ';background:#34d399"></span><span style="width:' + pc(id) + ';background:#94a3b8"></span></div>' +
+    '<div class="cs-leg"><em style="--c:#f59e0b">' + ed + ' đang sửa</em><em style="--c:#34d399">' + vw + ' đang xem</em><em style="--c:#94a3b8">' + id + ' rảnh</em></div></div>';
+  h += '<div class="cs-sec">Thiết bị</div>';
+  ps.forEach(function (p) {
+    var me = p.id === CLIENT_ID;
+    h += '<div class="cs-row">' + avatar(p, true) + '<div class="cs-tx"><div class="cs-n">' + esc(p.name) + (me ? '<span class="cs-chip cs-me">Bạn</span>' : '') + '<span class="cs-chip ' + (p.write ? 'cs-w' : 'cs-r') + '">' + (p.write ? 'Chỉnh sửa' : 'Chỉ xem') + '</span></div>' +
+      '<div class="cs-dv">' + (DI[p.dt] || '🖥️') + ' ' + esc(p.br) + ' · ' + esc(p.os) + '</div><div class="cs-stt">' + stateText(p) + '</div></div><div class="cs-tm">online<br><b>' + dur(p.since) + '</b></div></div>';
+  });
+  h += '<div class="cs-sec">Hoạt động gần đây</div>';
+  h += feed.length ? feed.slice(0, 6).map(function (f) { return '<div class="cs-fd"><span><b>' + esc(f.who) + '</b> · ' + esc(f.lab) + '</span><small>' + ago(f.at) + '</small></div>'; }).join('') : '<div class="cs-empty">Chưa có ai khác chỉnh sửa trong phiên này.</div>';
+  var lc = lastChange;
+  h += '<div class="cs-ft"><span>' + (!wsUp ? '⚠️ Mất realtime · ' : '') + (lc ? '✓ Lưu gần nhất: <b>' + esc(lc.who) + '</b> ' + ago(lc.at) : '✓ Đã đồng bộ') + (tok.rev != null ? ' · v' + tok.rev : '') + '</span><button id="csSync">Đồng bộ ngay</button></div>';
+  pop.innerHTML = h;
+  var b = pop.querySelector('#csSync'); if (b) b.onclick = function () { retries = 0; push(); pull(); b.textContent = 'Đang đồng bộ…'; setTimeout(renderPop, 900); };
+}
+setInterval(function () { trackNow(false); renderBox(); }, 4000);
+document.addEventListener('visibilitychange', function () { trackNow(true); });
+
 setInterval(async function () {                              // phòng khi realtime rớt / payload quá lớn
   if (!loaded || pushing || pulling || document.hidden) return;
   try {
@@ -11763,7 +11907,13 @@ window.addEventListener('pagehide', function () { push(); });
 /* ================= 6. THAY THẾ HÀM CŨ ================= */
 function myApply(d) { return integrate(d); }
 function mySave() { if (!canWrite()) return; schedulePush(450); }
-function install() {            // các patch cũ (v9, v46, perf…) có thể ghi đè lại → luôn giữ bản mới này
+function wrapCommits() {
+  if (!Store.commit.__cs) { var _c = Store.commit; Store.commit = function (label) { var r = _c.apply(this, arguments); if (!inAuto && r !== false) { userDirty = true; lastLabel = String(label || ''); lastEditAt = Date.now(); } return r; }; Store.commit.__cs = 1; }
+  if (!Store.autoCommit.__cs) { var _a = Store.autoCommit; Store.autoCommit = function () { var o = inAuto; inAuto = true; try { return _a.apply(this, arguments); } finally { inAuto = o; } }; Store.autoCommit.__cs = 1; }
+  ['doUndo', 'doRedo'].forEach(function (k) { if (Store[k] && !Store[k].__cs) { var f = Store[k]; Store[k] = function () { var r = f.apply(this, arguments); userDirty = true; lastLabel = k === 'doUndo' ? 'Hoàn tác' : 'Làm lại'; lastEditAt = Date.now(); return r; }; Store[k].__cs = 1; } });
+}
+function install() {
+  try { wrapCommits(); } catch (e) { }            // các patch cũ (v9, v46, perf…) có thể ghi đè lại → luôn giữ bản mới này
   try { if (applyCloud !== myApply) applyCloud = myApply; } catch (e) { }
   try { if (cloudSave !== mySave) cloudSave = mySave; } catch (e) { }
 }
