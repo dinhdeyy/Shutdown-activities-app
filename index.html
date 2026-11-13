@@ -10644,6 +10644,192 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 })();
 </script>
 
+<!-- =====================================================================
+     v44 – (1) ĐIỀU KIỆN MỚI: "Task A chạy được x phút thì task B bắt đầu"
+           (2) BỎ TOÀN BỘ PPE
+     DÁN NGAY TRƯỚC dòng </body> (sau khối v43 / perf-smooth-patch)
+     ===================================================================== -->
+<style id="v44-style">
+/* ---------- bỏ PPE ---------- */
+.c-ppe,#drawer .ppegrid,#drawer #x_ppe,#drawer #x_ppeNew,#drawer [data-v13="ppe"],.wr-ppe,.v44-noppe{display:none!important}
+/* ---------- khung "bắt đầu theo phút" ---------- */
+.v43-ss.v42-dur{display:block;margin-top:10px;padding:14px;border-radius:18px;background:var(--glass-row,#fff);border:1.5px solid rgba(94,92,230,.35)}
+.v43-ss h5{margin:0 0 4px;font-size:14px;display:flex;align-items:center;gap:8px}
+.v43-ss .sub{font-size:12.5px;color:var(--muted);line-height:1.5;margin-bottom:10px}
+.v43-ss .rule{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:8px;align-items:center;padding:10px;margin-bottom:8px;border-radius:14px;background:rgba(94,92,230,.07);font-size:13.5px}
+.v43-ss .rule select{width:100%;min-width:0}
+.v43-ss .rule input{width:74px;text-align:center;font-weight:700}
+.v43-ss .rule .x{border:0;background:rgba(255,59,48,.14);color:#d70015;width:28px;height:28px;border-radius:50%;cursor:pointer;font-weight:800}
+.v43-ss .res{grid-column:1/-1;font-size:12.5px;color:#4338ca;font-weight:600}
+.v43-ss .res.warn{color:#b45309}
+.v43-ss .add{border:1.5px dashed rgba(94,92,230,.6);background:transparent;color:#4338ca;border-radius:12px;padding:9px 14px;font-weight:700;cursor:pointer;width:100%}
+.v43-ss .add:disabled{opacity:.4;cursor:not-allowed}
+.v43-ss .note{margin-top:8px;font-size:12px;color:var(--muted)}
+.v44-chip{display:inline-block;margin-right:5px;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:700;font-style:normal;background:rgba(94,92,230,.16);color:#4338ca;white-space:nowrap}
+@media (max-width:640px){.v43-ss .rule{grid-template-columns:1fr 1fr}.v43-ss .rule select{grid-column:1/-1}}
+</style>
+<script>
+(function () {
+'use strict';
+const esc = s => U.esc(s ?? '');
+const canEdit = () => !(window.Auth && !Auth.ok);
+const num = v => { const n = parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : 0; };
+
+/* =====================================================================
+   1. ENGINE: thêm cạnh "bắt đầu sau khi A chạy được x phút"
+      B.start >= A.start + x phút  ⇔  B.start >= A.end + (x/60 − thời lượng A)
+   ===================================================================== */
+function patchGraph() {
+  const _bg = Scheduler.buildGraph;
+  if (_bg.__v44) return;
+  Scheduler.buildGraph = function (plan) {
+    const g = _bg.call(this, plan);
+    try {
+      for (const t of plan.tasks) {
+        if (!Array.isArray(t.ssDeps)) continue;
+        for (const s of t.ssDeps) {
+          const a = g.byId.get(s.id);
+          if (!a || a === t || !g.inn.has(t.id)) continue;
+          const e = { from: a.id, to: t.id, lag: Math.max(0, num(s.min)) / 60 - (+a.durationHours || 0), kind: 'dep' };
+          g.edges.push(e); g.out.get(a.id).push(e); g.inn.get(t.id).push(e);
+        }
+      }
+    } catch (x) { console.warn('[v44] graph', x); }
+    return g;
+  };
+  Scheduler.buildGraph.__v44 = true;
+}
+
+/* =====================================================================
+   2. GIAO DIỆN trong panel "Sửa task"
+   ===================================================================== */
+function mutate(id, fn) {
+  Store.commit('Điều kiện bắt đầu theo phút', () => {
+    const t = Store.plan().tasks.find(x => x.id === id); if (!t) return false;
+    t.ssDeps = (t.ssDeps || []).map(x => ({ ...x }));
+    fn(t.ssDeps, t);
+    if (!t.ssDeps.length) delete t.ssDeps;
+    if (t.ssDeps && !(t.dependencyIds || []).length && t.executionMode === 'sequential') t.executionMode = 'parallel';
+  });
+}
+function draw(id) {
+  const d = document.getElementById('drawer'); if (!d) return;
+  const p = Store.plan(), t = p.tasks.find(x => x.id === id); if (!t) return;
+  let box = d.querySelector('.v43-ss');
+  if (!box) {
+    box = document.createElement('div'); box.className = 'v43-ss v42-dur';
+    const anchor = d.querySelector('.v36-box') || d.querySelector('.v13-hero');
+    if (anchor) anchor.after(box); else { const b = d.querySelector('.drawer-b'); if (!b) return; b.prepend(box); }
+  }
+  const res = App.res, ro = !canEdit();
+  let blocked = new Set([id]); try { blocked = Scheduler.descendants(p, id); } catch (e) { }
+  const cand = p.tasks.filter(x => !blocked.has(x.id) && !x.hold).sort((a, b) => a.order - b.order);
+  const rules = t.ssDeps || [];
+  const hasFS = (t.dependencyIds || []).length > 0;
+  box.innerHTML = `<h5>⏱ Bắt đầu khi task khác chạy được vài phút</h5>
+    <div class="sub">Không cần chờ task kia xong. Ví dụ: <b>task A chạy được 30 phút</b> thì task này bắt đầu luôn. Nếu kéo task A, task này dời theo.</div>
+    ${rules.map((r, i) => {
+      const a = p.tasks.find(x => x.id === r.id), ra = a && res && res.R.get(a.id), rb = res && res.R.get(t.id);
+      const aMin = a ? Math.round((a.durationHours || 0) * 60) : 0, over = a && num(r.min) > aMin;
+      return `<div class="rule" data-i="${i}"><span>Khi</span>
+        <select data-ss="id" ${ro ? 'disabled' : ''}>${[a, ...cand.filter(x => !a || x.id !== a.id)].filter(Boolean).map(x => `<option value="${esc(x.id)}" ${a && x.id === a.id ? 'selected' : ''}>#${x.order} ${esc(x.taskName.slice(0, 48))} (${esc(x.process)})</option>`).join('')}</select>
+        <input type="number" min="0" step="5" value="${num(r.min)}" data-ss="min" ${ro ? 'disabled' : ''}><span>phút</span>
+        ${ro ? '' : `<button type="button" class="x" data-ss="del" title="Xóa điều kiện">✕</button>`}
+        <div class="res ${over ? 'warn' : ''}">${ra ? `Task kia bắt đầu ${U.fmtHM(ra.start)} và chạy ${aMin} phút → task này bắt đầu sớm nhất <b>${U.fmtHM(ra.start + num(r.min) * 60000)}</b>${rb ? ` (hiện đang xếp lúc ${U.fmtHM(rb.start)})` : ''}.` : ''}
+          ${over ? `<br>⚠ Task kia chỉ dài ${aMin} phút – task này sẽ bắt đầu sau khi task kia xong + ${num(r.min) - aMin} phút.` : ''}</div></div>`;
+    }).join('')}
+    ${ro ? '<div class="note">🔒 Đăng nhập để chỉnh.</div>' : `<button type="button" class="add" data-ss="add" ${cand.length ? '' : 'disabled'}>＋ Thêm điều kiện</button>`}
+    ${rules.length && hasFS ? '<div class="note">Task này vẫn phải chờ các task chọn ở mục “Sau task cụ thể” – phải thỏa tất cả điều kiện mới bắt đầu.</div>' : ''}`;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('.v43-ss [data-ss]'); if (!b || !App.drawerTaskId) return;
+  const id = App.drawerTaskId, k = b.dataset.ss;
+  if (k === 'add') {
+    e.preventDefault(); e.stopPropagation();
+    const p = Store.plan(), t = p.tasks.find(x => x.id === id); let blocked = new Set([id]); try { blocked = Scheduler.descendants(p, id); } catch (x) { }
+    const used = new Set((t.ssDeps || []).map(r => r.id));
+    const first = p.tasks.filter(x => !blocked.has(x.id) && !x.hold && !used.has(x.id)).sort((a, c) => {
+      const pa = a.process === t.process ? 0 : 1, pc = c.process === t.process ? 0 : 1; return pa - pc || a.order - c.order; })[0] ||
+      p.tasks.find(x => !blocked.has(x.id) && !x.hold);
+    if (!first) return;
+    mutate(id, l => l.push({ id: first.id, min: 30 })); draw(id);
+  }
+  if (k === 'del') { e.preventDefault(); e.stopPropagation(); const i = +b.closest('.rule').dataset.i; mutate(id, l => l.splice(i, 1)); draw(id); }
+}, true);
+document.addEventListener('change', e => {
+  const f = e.target.closest && e.target.closest('.v43-ss [data-ss]'); if (!f || !App.drawerTaskId) return;
+  const id = App.drawerTaskId, i = +f.closest('.rule').dataset.i;
+  if (f.dataset.ss === 'id') mutate(id, l => { if (l[i]) l[i].id = f.value; });
+  if (f.dataset.ss === 'min') mutate(id, l => { if (l[i]) l[i].min = Math.max(0, num(f.value)); });
+  draw(id);
+}, true);
+
+/* =====================================================================
+   3. GANTT: nhãn "⏱ sau A + x'"
+   ===================================================================== */
+function patchGantt() {
+  const _tr = Gantt.taskRow;
+  Gantt.taskRow = function (t, g, p) {
+    let h = _tr.call(this, t, g, p);
+    if (!Array.isArray(t.ssDeps) || !t.ssDeps.length) return h;
+    const lab = t.ssDeps.map(s => { const a = p.tasks.find(x => x.id === s.id); return a ? `#${a.order} +${num(s.min)}'` : ''; }).filter(Boolean).join(', ');
+    return h.replace(/(<span class="c-name"[^>]*>)/, `$1<i class="v44-chip" title="Bắt đầu khi task kia chạy được số phút này">⏱ ${esc(lab)}</i>`);
+  };
+}
+
+/* =====================================================================
+   4. BỎ PPE
+   ===================================================================== */
+function stripPPE(t) {
+  if (!t) return false; let ch = false;
+  if (Array.isArray(t.ppe) && t.ppe.length) { t.ppe = []; ch = true; }
+  if (t.wr && Array.isArray(t.wr.ppeItems) && t.wr.ppeItems.length) { t.wr = { ...t.wr, ppeItems: [] }; ch = true; }
+  if (t.wrChecks && t.wrChecks.ppe) { const w = { ...t.wrChecks }; delete w.ppe; t.wrChecks = w; ch = true; }
+  return ch;
+}
+function hidePPEInDrawer() {
+  const d = document.getElementById('drawer'); if (!d) return;
+  d.querySelectorAll('.xs-h').forEach(h => {
+    if (!/ppe/i.test(h.textContent) || h.dataset.v44) return; h.dataset.v44 = 1;
+    h.classList.add('v44-noppe'); let n = h.nextElementSibling;
+    while (n && !n.classList.contains('xs-h')) { n.classList.add('v44-noppe'); n = n.nextElementSibling; }
+  });
+}
+function patchPPE() {
+  const _n = window.normalizeTask;
+  window.normalizeTask = normalizeTask = function (t) { const x = _n(t); stripPPE(x); return x; };
+  if (window.Tip && Tip.show) { const _s = Tip.show; Tip.show = function (...a) { const o = _s.apply(this, a); document.querySelectorAll('#tip tr').forEach(tr => { if (/^PPE/.test(tr.textContent.trim())) tr.remove(); }); return o; }; }
+  if (typeof EXPORT_HEAD !== 'undefined') { const i = EXPORT_HEAD.indexOf('PPE'); if (i >= 0) EXPORT_HEAD.splice(i, 1); }
+  if (window.IO && IO.tableRows) { const _t = IO.tableRows; IO.tableRows = function (...a) { return _t.apply(this, a).map(r => r.length > 20 ? r.slice(0, 20) : r); }; }
+  const _dr = Drawer.render;
+  Drawer.render = function (t) { if (t) stripPPE(t); const o = _dr.apply(this, arguments); try { hidePPEInDrawer(); if (t && t.id && !App.drawerIsNew) draw(t.id); } catch (e) { console.warn('[v44]', e); } return o; };
+  const _ar = App.render;
+  App.render = function (...a) {
+    const o = _ar.apply(this, a);
+    try {
+      let ch = false; Store.state.plans.forEach(p => p.tasks.forEach(t => { if (stripPPE(t)) ch = true; }));
+      if (ch) Store.save();
+      hidePPEInDrawer();
+      const d = document.getElementById('drawer');
+      if (d && App.drawerTaskId && !App.drawerIsNew && !d.querySelector('.v43-ss .rule input:focus, .v43-ss .rule select:focus')) draw(App.drawerTaskId);
+    } catch (e) { }
+    return o;
+  };
+}
+
+function boot() {
+  try {
+    patchGraph(); patchGantt(); patchPPE();
+    Store.state.plans.forEach(p => p.tasks.forEach(stripPPE));
+    if (App.res) { App.recompute(); App.render(); }
+    console.log('[v44] đã nạp – bắt đầu theo phút + bỏ PPE');
+  } catch (e) { console.error('[v44] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 5200)); else setTimeout(boot, 5200);
+})();
+</script>
+<!-- ===================== HẾT v44 ===================== -->
+
   
 </body>
 </html>
