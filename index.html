@@ -10598,6 +10598,53 @@ html.perf-boot *,html.perf-boot *::before,html.perf-boot *::after{
   setTimeout(function(){document.documentElement.classList.remove('perf-boot');},5500);
 })();
 </script>
+
+<!-- =====================================================================
+     v43 – KÉO THẢ GIỜ CHO TẤT CẢ TASK (kể cả Normal run của Changeover)
+       - Normal run: kéo / đổi độ dài xong được giữ nguyên, không bị tự tính lại
+       - Task kéo sớm hơn giờ task trước kết thúc: chuyển sang "Cố định thời điểm" tại chỗ thả
+     DÁN NGAY TRƯỚC dòng </body> (sau khối perf-smooth-patch)
+     ===================================================================== -->
+<script>
+(function () {
+'use strict';
+function boot() {
+  try {
+    if (typeof Drag === 'undefined' || !Drag.end || Drag.__v43) return;
+    Drag.__v43 = true;
+    const _end = Drag.end;
+    Drag.end = function (...a) {
+      const d = this.active;                         // lưu lại trước khi hàm gốc xóa
+      const out = _end.apply(this, a);
+      try {
+        if (!d || !d.moved) return out;
+        const p = Store.plan(), t = p.tasks.find(x => x.id === d.id);
+        if (!t) return out;
+        /* 1. Normal run chỉnh tay → khóa, không cho tự tính lại */
+        if (t.normalRun && !t.nrManual) { t.nrManual = true; Store.save(); }
+        /* 2. Kéo sớm hơn giờ cho phép → đặt cố định tại chỗ thả */
+        if (d.mode === 'move' && d.dh !== 0 && !t.locked && t.executionMode !== 'fixed') {
+          const want = d.r.start + d.dh * MS_H, got = App.res.R.get(d.id);
+          if (got && got.start > want + MS_MIN) {
+            const P = App.res.P;
+            Store.commit('Kéo task (tự do): ' + t.taskName, () => {
+              const x = Store.plan().tasks.find(k => k.id === d.id); if (!x) return false;
+              x.executionMode = 'fixed'; x.constraintType = 'FIXED'; x.constraintOffsetHours = (want - P) / MS_H;
+            });
+            toast('Đã đặt "' + t.taskName + '" cố định lúc ' + U.fmtDT(want) + ' (sớm hơn task trước – có thể có cảnh báo).', 'warn');
+          }
+        }
+      } catch (e) { console.warn('[v43]', e); }
+      return out;
+    };
+    console.log('[v43] đã nạp – kéo thả giờ cho tất cả task');
+  } catch (e) { console.error('[v43] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 5000)); else setTimeout(boot, 5000);
+})();
+</script>
+
+  
 </body>
 </html>
 
