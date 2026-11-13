@@ -10553,7 +10553,9 @@ html.perf-boot *,html.perf-boot *::before,html.perf-boot *::after{
   animation:none!important;transition:none!important;scroll-behavior:auto!important
 }
 /* Isolate the large app surfaces so a small update does not repaint the whole page. */
-#ganttView,#dashView,#homeView,#drawer,#modalRoot{contain:layout paint style}
+#ganttView,#dashView,#homeView,#drawer{contain:layout paint style}
+/* #modalRoot KHÔNG được dùng contain: nó rỗng (cao 0) nên làm mọi hộp thoại position:fixed bị cắt mất → hộp xác nhận xóa vô hình */
+#modalRoot{contain:none!important}
 </style>
 <script id="perf-smooth-patch">
 (function(){
