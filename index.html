@@ -868,6 +868,15 @@ const Store = {
     this.redo = []; this.dirty = true;
     App.afterChange(); return true;
   },
+  /** Commit TỰ ĐỘNG (app tự sắp xếp / tự tạo lại – không phải thao tác của người dùng): không để lại mục Undo, giữ nguyên Redo.
+   *  Nhờ vậy Ctrl+Z lùi đúng về trước thao tác của người dùng (vd. trước khi xóa task). */
+  autoCommit(label, fn) {
+    const top = this.undo[this.undo.length - 1], redo = this.redo;
+    const r = this.commit(label, fn);
+    if (this.undo[this.undo.length - 1] !== top) this.undo.pop();
+    this.redo = redo;
+    return r;
+  },
   doUndo() { const u = this.undo.pop(); if (!u) return; this.redo.push({ snap: this.snap(), label: u.label }); this.restore(u.snap); App.afterChange(); toast('Hoàn tác: ' + u.label); },
   doRedo() { const r = this.redo.pop(); if (!r) return; this.undo.push({ snap: this.snap(), label: r.label }); this.restore(r.snap); App.afterChange(); toast('Làm lại: ' + r.label); },
   plan() { return this.state.plans.find(p => p.id === this.state.activePlanId); },
@@ -1095,7 +1104,7 @@ const Actions = {
     const p = Store.plan(), t = p.tasks.find(x => x.id === id); if (!t) return;
     const deps = p.tasks.filter(x => x.dependencyIds.includes(id));
     if (!(await confirmBox('Xóa task', `Xóa task <b>${U.esc(t.taskName)}</b>?${deps.length ? `<br><br>${deps.length} task đang chạy sau task này sẽ được gỡ liên kết.` : ''}`, 'Xóa', true))) return;
-    Store.commit('Xóa task ' + t.taskName, p => { p.tasks = p.tasks.filter(x => x.id !== id); p.tasks.forEach(x => x.dependencyIds = x.dependencyIds.filter(d => d !== id)); });
+    Store.commit('Xóa task ' + t.taskName, p => { if (window.NRSkip) NRSkip.mark(p, [t]); p.tasks = p.tasks.filter(x => x.id !== id); p.tasks.forEach(x => x.dependencyIds = x.dependencyIds.filter(d => d !== id)); });
     if (App.drawerTaskId === id) Drawer.close();
     if (App.selectedId === id) App.selectedId = null;
     toast('Đã xóa task (Ctrl+Z để hoàn tác)');
@@ -8021,18 +8030,35 @@ function wanted(p) {
   return out;
 }
 const sig = a => a.map(x => `${x.proc}|${Math.round(x.s / MS_MIN)}|${Math.round(x.e / MS_MIN)}`).sort().join(';');
+/* Khóa 1 đoạn Normal run theo phút kể từ đầu kế hoạch (đổi giờ bắt đầu Shutdown vẫn khớp) */
+const nrKey = (P, proc, s, e) => `${proc}|${Math.round((s - P) / MS_MIN)}|${Math.round((e - P) / MS_MIN)}`;
+/* Khi người dùng xóa Normal run: ghi nhớ để syncNR KHÔNG tự tạo lại. Gọi bên trong Store.commit để Ctrl+Z hoàn tác được. */
+window.NRSkip = {
+  mark(p, tasks) {
+    const nr = (tasks || []).filter(isNR); if (!nr.length) return;
+    const P = U.parseLocalISO(p.start), set = new Set(p.nrSkip || []);
+    let want = []; try { want = wanted(p); } catch (e) { }
+    nr.forEach(t => {
+      const s = P + (t.constraintOffsetHours || 0) * MS_H, e = s + t.durationHours * MS_H;
+      set.add(nrKey(P, t.process, s, e));
+      want.forEach(w => { if (w.proc === t.process && w.s < e - MS_MIN && w.e > s + MS_MIN) set.add(nrKey(P, w.proc, w.s, w.e)); });
+    });
+    p.nrSkip = [...set];
+  },
+};
 let syncing = false;
 function syncNR() {
   if (syncing || !canEdit() || document.body.classList.contains('op-mode')) return;
   const p = Store.plan(); if (!p) return;
   const man = new Set(p.tasks.filter(t => isNR(t) && t.nrManual).map(t => t.process));
-  const P = U.parseLocalISO(p.start), want = wanted(p).filter(w => !man.has(w.proc));
+  const P = U.parseLocalISO(p.start), skip = new Set(p.nrSkip || []);
+  const want = wanted(p).filter(w => !man.has(w.proc) && !skip.has(nrKey(P, w.proc, w.s, w.e)));
   const have = p.tasks.filter(t => isNR(t) && !man.has(t.process)).map(t => ({ proc: t.process, s: P + (t.constraintOffsetHours || 0) * MS_H, e: P + ((t.constraintOffsetHours || 0) + t.durationHours) * MS_H }));
   if (sig(want) === sig(have)) return;
   syncing = true;
   try {
     const keep = new Map(p.tasks.filter(isNR).map(t => [t.process + '|' + Math.round((t.constraintOffsetHours || 0) * 60), t.assignee]));
-    Store.commit('Cập nhật Normal run', pl => {
+    Store.autoCommit('Cập nhật Normal run', pl => {
       const tmp = { tasks: pl.tasks.filter(t => !isNR(t) || man.has(t.process)) };
       want.forEach(w => {
         const off = (w.s - P) / MS_H, dur = (w.e - w.s) / MS_H;
@@ -8053,7 +8079,7 @@ function assignNR() {
   try {
     const pl = Store.plan(), dk = LDC.dayKey(U.parseLocalISO(pl.start)); LDC.planDay = dk; if (LDC.autoPick) LDC.autoPick(dk);
     const sug = LDC.suggest(pl, { overwrite: false, allowHC: false, anyTeam: false }).filter(x => isNR(x.t) && !x.t.assignee && x.names.length);
-    if (sug.length) Store.commit('Gán người Normal run theo LDC', q => sug.forEach(x => { const t = q.tasks.find(k => k.id === x.t.id); if (t) t.assignee = x.names.join(' + '); }));
+    if (sug.length) Store.autoCommit('Gán người Normal run theo LDC', q => sug.forEach(x => { const t = q.tasks.find(k => k.id === x.t.id); if (t) t.assignee = x.names.join(' + '); }));
   } catch (e) { console.warn('[v23] LDC', e); }
 }
 /* Normal run không tính vào thống kê / cảnh báo trùng người */
@@ -9660,12 +9686,14 @@ function bar() {
   if (!b) { b = document.createElement('div'); b.id = 'v34Bar'; document.body.appendChild(b); }
   b.innerHTML = `<span>Đã chọn <b>${SEL.size}</b> task</span><button class="gh" data-v34b="all">Chọn tất cả</button><button class="gh" data-v34b="clr">Bỏ chọn</button><button class="del" data-v34b="del">🗑 Xóa ${SEL.size} task</button>`;
 }
-function delSelected() {
+async function delSelected() {
   if (needLogin() || !SEL.size) return;
-  if (!confirm(`Xóa ${SEL.size} task đã chọn? (Ctrl+Z để hoàn tác)`)) return;
+  if (!(await confirmBox('Xóa nhiều task', `Xóa <b>${SEL.size}</b> task đã chọn?<br><span class="muted small">Có thể hoàn tác bằng Ctrl+Z.</span>`, 'Xóa', true))) return;
+  if (!SEL.size) return;
   const ids = new Set(SEL), n = ids.size;
   Store.commit(`Xóa ${n} task`, () => {
     const p = Store.plan(); const gone = p.tasks.filter(t => ids.has(t.id));
+    if (window.NRSkip) NRSkip.mark(p, gone);
     p.tasks = p.tasks.filter(t => !ids.has(t.id));
     p.tasks.forEach(t => { if (!Array.isArray(t.dependencyIds)) return;
       const nd = [...new Set(t.dependencyIds.flatMap(d => ids.has(d) ? ((gone.find(g => g.id === d) || {}).dependencyIds || []).filter(x => !ids.has(x)) : [d]))];
@@ -9758,7 +9786,7 @@ function renumber() {
     r.st(a) - r.st(b) || (a.order || 0) - (b.order || 0));
   if (want.every((t, i) => t.order === i + 1)) return;
   busy = true;
-  try { Store.commit('Sắp task theo thứ tự thực hiện', () => { const q = Store.plan(), m = new Map(want.map((t, i) => [t.id, i + 1])); q.tasks.forEach(t => { t.order = m.get(t.id) || t.order; }); }); }
+  try { Store.autoCommit('Sắp task theo thứ tự thực hiện', () => { const q = Store.plan(), m = new Map(want.map((t, i) => [t.id, i + 1])); q.tasks.forEach(t => { t.order = m.get(t.id) || t.order; }); }); }
   finally { busy = false; }
 }
 
@@ -10831,6 +10859,52 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 <!-- ===================== HẾT v44 ===================== -->
 
   
+<!-- =====================================================================
+     v45 – XÓA TASK
+       - Nút 🗑 trên từng dòng task (rê chuột vào dòng; trên điện thoại luôn hiện)
+       - Xóa nhiều task: dùng hộp xác nhận của app (window.confirm bị chặn trong sandbox nên trước đây bấm không có tác dụng)
+       - Normal run đã xóa không bị tự tạo lại
+     ===================================================================== -->
+<style id="v45-style">
+.v45-del{position:absolute;right:6px;top:50%;transform:translateY(-50%) scale(.85);width:26px;height:26px;border-radius:8px;border:1px solid rgba(220,38,38,.35);
+  background:var(--glass-row,#fff);color:#dc2626;font-size:13px;line-height:1;padding:0;opacity:0;transition:opacity .15s,transform .25s;z-index:4;cursor:pointer;display:grid;place-items:center}
+.grow:hover .v45-del,.grow.sel .v45-del,.v45-del:focus{opacity:1;transform:translateY(-50%) scale(1)}
+.v45-del:hover{background:#dc2626;color:#fff;border-color:#dc2626}
+@media (hover:none){.v45-del{opacity:.8;transform:translateY(-50%)}}
+body.ro .v45-del{display:none}
+@media print{.v45-del{display:none}}
+</style>
+<script>
+(function () {
+'use strict';
+function decorate() {
+  document.querySelectorAll('#gcanvas .grow[data-id]').forEach(row => {
+    const host = row.querySelector('.gleft'); if (!host || host.querySelector('.v45-del')) return;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'v45-del'; b.dataset.v45 = row.dataset.id;
+    b.title = 'Xóa task này'; b.setAttribute('aria-label', 'Xóa task'); b.textContent = '🗑';
+    host.appendChild(b);
+  });
+}
+function boot() {
+  try {
+    const c = document.getElementById('gcanvas');
+    if (c) c.addEventListener('click', e => {
+      const b = e.target.closest && e.target.closest('.v45-del'); if (!b) return;
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      if (window.Auth && !Auth.ok) { toast('Cần đăng nhập để xóa task.', 'warn'); return; }
+      Actions.deleteTask(b.dataset.v45);
+    }, true);
+    const _gr = Gantt.render;
+    Gantt.render = function (...a) { const o = _gr.apply(this, a); try { decorate(); } catch (e) { } return o; };
+    decorate();
+    console.log('[v45] đã nạp – nút xóa task');
+  } catch (e) { console.error('[v45] lỗi:', e); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 5600)); else setTimeout(boot, 5600);
+})();
+</script>
+<!-- ===================== HẾT v45 ===================== -->
+
 </body>
 </html>
 
