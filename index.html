@@ -4948,7 +4948,7 @@ const SUPABASE_URL = "https://vetbxnrkfgxrgsnribwe.supabase.co";
 const SUPABASE_KEY = "sb_publishable_RJdYFvL3wniwLQ9iOp11zg_AcBFeQ-n";
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const CLIENT_ID = (typeof U !== 'undefined' && U.uid) ? U.uid() : ('c' + Date.now() + Math.random().toString(36).slice(2));
+const CLIENT_ID = (function(){ try { var k=sessionStorage.getItem('planner_kick_session'); if(!k){k=(typeof U !== 'undefined' && U.uid) ? U.uid() : ('c'+Date.now()+Math.random().toString(36).slice(2));sessionStorage.setItem('planner_kick_session',k);} return k; }catch(e){return (typeof U !== 'undefined' && U.uid) ? U.uid() : ('c'+Date.now()+Math.random().toString(36).slice(2));} })();
 let lastCloudAt = 0, cloudTimer;
 
 function cloudToast(msg, type) {
@@ -11759,7 +11759,7 @@ function onRemoteEvent(p) {
 var ch = null, wsUp = false;
 /* ================= 5a. KICK USER RA KHỎI MÀN HÌNH ================= */
 var KICK_PASSWORD = '12345678';
-var kickKey = 'planner_kicked_' + CLIENT_ID;
+var kickKey = 'planner_kicked_' + (function(){ try { var k=sessionStorage.getItem('planner_kick_session'); if(!k){k=CLIENT_ID;sessionStorage.setItem('planner_kick_session',k);} return k; } catch(e){return CLIENT_ID;} })();
 var kickOverlay = null, kickTimer = null;
 function readKick() { try { return JSON.parse(localStorage.getItem(kickKey) || 'null'); } catch (e) { return null; } }
 function saveKick(info) { try { localStorage.setItem(kickKey, JSON.stringify(info)); } catch (e) { } }
@@ -11803,8 +11803,7 @@ async function requestKick(targetId, targetName) {
   } catch (e) { window.alert('Chưa thể kick user vì kết nối realtime đang lỗi. Vui lòng thử lại.'); }
 }
 (function addKickStyle(){
-  var st=document.createElement('style'); st.textContent='\
-.cs-kick{margin-left:8px;border:0;border-radius:9px;padding:7px 10px;background:#fee2e2;color:#b91c1c;font-weight:800;cursor:pointer;white-space:nowrap}.cs-kick:hover{background:#fecaca}.cs-kick:focus{outline:3px solid rgba(239,68,68,.28);outline-offset:2px}#kickLockScreen{position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.96);display:grid;place-items:center;padding:20px;color:#0f172a}.kick-card{width:min(440px,100%);background:#fff;border-radius:22px;padding:30px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.45)}.kick-icon{font-size:46px}.kick-card h2{margin:10px 0;font-size:24px}.kick-card p{margin:0 0 16px;color:#475569}.kick-count{margin:14px 0;padding:12px;border-radius:12px;background:#fef2f2;color:#b91c1c;font-weight:800}.kick-card small{color:#64748b}@media(max-width:520px){.cs-row{align-items:flex-start}.cs-kick{padding:6px 8px;font-size:12px}}'; document.head.appendChild(st);
+  var st=document.createElement('style'); st.textContent='.cs-kick{display:inline-flex!important;align-items:center;justify-content:center;flex-shrink:0;margin-left:4px;border:1px solid #fca5a5!important;border-radius:9px;padding:8px 12px;background:#fee2e2;color:#b91c1c;font-weight:800;cursor:pointer;white-space:nowrap}.cs-kick:hover{background:#fecaca}.cs-kick:focus{outline:3px solid rgba(239,68,68,.28);outline-offset:2px}#csPop .cs-row{flex-wrap:wrap}#csPop .cs-kick{margin-left:auto;min-width:60px;z-index:2}#csPop .cs-row .cs-tx{min-width:110px}#csPop{overflow-x:hidden}#kickLockScreen{position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.96);display:grid;place-items:center;padding:20px;color:#0f172a}.kick-card{width:min(440px,100%);background:#fff;border-radius:22px;padding:30px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.45)}.kick-icon{font-size:46px}.kick-card h2{margin:10px 0;font-size:24px}.kick-card p{margin:0 0 16px;color:#475569}.kick-count{margin:14px 0;padding:12px;border-radius:12px;background:#fef2f2;color:#b91c1c;font-weight:800}.kick-card small{color:#64748b}@media(max-width:520px){.cs-row{align-items:flex-start}.cs-kick{padding:6px 8px;font-size:12px}}'; document.head.appendChild(st);
 })();
 var oldKick = readKick(); if (oldKick) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ showKicked(oldKick); }); else showKicked(oldKick); }
 function subscribe() {
