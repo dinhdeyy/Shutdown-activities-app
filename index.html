@@ -11757,10 +11757,61 @@ function onRemoteEvent(p) {
   pull();
 }
 var ch = null, wsUp = false;
+/* ================= 5a. KICK USER RA KHỎI MÀN HÌNH ================= */
+var KICK_PASSWORD = '12345678';
+var kickKey = 'planner_kicked_' + CLIENT_ID;
+var kickOverlay = null, kickTimer = null;
+function readKick() { try { return JSON.parse(localStorage.getItem(kickKey) || 'null'); } catch (e) { return null; } }
+function saveKick(info) { try { localStorage.setItem(kickKey, JSON.stringify(info)); } catch (e) { } }
+function showKicked(info) {
+  if (!info) return;
+  saveKick(info);
+  try { if (ch && ch.untrack) ch.untrack(); } catch (e) { }
+  if (!kickOverlay) {
+    kickOverlay = document.createElement('div'); kickOverlay.id = 'kickLockScreen';
+    kickOverlay.innerHTML = '<div class="kick-card"><div class="kick-icon">⛔</div><h2>Bạn đã bị đưa ra khỏi ứng dụng</h2><p id="kickMsg"></p><div id="kickCountdown" class="kick-count"></div><small>Quyền xem trên thiết bị này đã bị khóa.</small></div>';
+    document.body.appendChild(kickOverlay);
+  }
+  var who = (info.byName || 'Quản trị viên');
+  kickOverlay.querySelector('#kickMsg').textContent = who + ' đã kick bạn ra khỏi màn hình này.';
+  var left = Math.max(0, Math.ceil(((info.at || Date.now()) + 5000 - Date.now()) / 1000));
+  clearInterval(kickTimer);
+  function tick() {
+    var el = kickOverlay.querySelector('#kickCountdown');
+    if (left > 0) { el.textContent = 'Màn hình sẽ khóa sau ' + left + ' giây…'; left--; }
+    else { el.textContent = 'Bạn không thể tiếp tục xem nội dung.'; clearInterval(kickTimer); }
+  }
+  tick(); kickTimer = setInterval(tick, 1000);
+}
+function receiveKick(payload) {
+  var d = payload && payload.payload ? payload.payload : payload;
+  if (!d || d.targetId !== CLIENT_ID) return;
+  showKicked({ byId: d.byId, byName: d.byName || 'Quản trị viên', at: d.at || Date.now() });
+}
+async function requestKick(targetId, targetName) {
+  if (!targetId || targetId === CLIENT_ID) return;
+  var ok = window.confirm('Bạn muốn kick user "' + targetName + '" ra khỏi màn hình?');
+  if (!ok) return;
+  var password = window.prompt('Nhập mật khẩu để xác nhận kick user này:');
+  if (password === null) return;
+  if (password !== KICK_PASSWORD) { window.alert('Mật khẩu không đúng. Không thể kick user.'); return; }
+  var data = { targetId: targetId, targetName: targetName, byId: CLIENT_ID, byName: meName(), at: Date.now() };
+  try {
+    if (!ch || !ch.send) throw new Error('Realtime chưa sẵn sàng');
+    await ch.send({ type: 'broadcast', event: 'kick-user', payload: data });
+    window.alert('Đã kick ' + targetName + ' ra khỏi màn hình.');
+  } catch (e) { window.alert('Chưa thể kick user vì kết nối realtime đang lỗi. Vui lòng thử lại.'); }
+}
+(function addKickStyle(){
+  var st=document.createElement('style'); st.textContent='\
+.cs-kick{margin-left:8px;border:0;border-radius:9px;padding:7px 10px;background:#fee2e2;color:#b91c1c;font-weight:800;cursor:pointer;white-space:nowrap}.cs-kick:hover{background:#fecaca}.cs-kick:focus{outline:3px solid rgba(239,68,68,.28);outline-offset:2px}#kickLockScreen{position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.96);display:grid;place-items:center;padding:20px;color:#0f172a}.kick-card{width:min(440px,100%);background:#fff;border-radius:22px;padding:30px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.45)}.kick-icon{font-size:46px}.kick-card h2{margin:10px 0;font-size:24px}.kick-card p{margin:0 0 16px;color:#475569}.kick-count{margin:14px 0;padding:12px;border-radius:12px;background:#fef2f2;color:#b91c1c;font-weight:800}.kick-card small{color:#64748b}@media(max-width:520px){.cs-row{align-items:flex-start}.cs-kick{padding:6px 8px;font-size:12px}}'; document.head.appendChild(st);
+})();
+var oldKick = readKick(); if (oldKick) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ showKicked(oldKick); }); else showKicked(oldKick); }
 function subscribe() {
   try {
     ch = sb.channel('planner-presence', { config: { presence: { key: CLIENT_ID } } });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'planner_state' }, onRemoteEvent);
+    try { ch.on('broadcast', { event: 'kick-user' }, receiveKick); } catch (e) { }
     try { ch.on('presence', { event: 'sync' }, function () { renderBox(); }); } catch (e) { }
     ch.subscribe(function (s) { wsUp = (s === 'SUBSCRIBED'); if (wsUp) { pull(); trackNow(true); } renderBox(); });
   } catch (e) { console.warn('[sync2] realtime lỗi:', e); }
@@ -11879,7 +11930,7 @@ function renderPop() {
   ps.forEach(function (p) {
     var me = p.id === CLIENT_ID;
     h += '<div class="cs-row">' + avatar(p, true) + '<div class="cs-tx"><div class="cs-n">' + esc(p.name) + (me ? '<span class="cs-chip cs-me">Bạn</span>' : '') + '<span class="cs-chip ' + (p.write ? 'cs-w' : 'cs-r') + '">' + (p.write ? 'Chỉnh sửa' : 'Chỉ xem') + '</span></div>' +
-      '<div class="cs-dv">' + (DI[p.dt] || '🖥️') + ' ' + esc(p.br) + ' · ' + esc(p.os) + '</div><div class="cs-stt">' + stateText(p) + '</div></div><div class="cs-tm">online<br><b>' + dur(p.since) + '</b></div></div>';
+      '<div class="cs-dv">' + (DI[p.dt] || '🖥️') + ' ' + esc(p.br) + ' · ' + esc(p.os) + '</div><div class="cs-stt">' + stateText(p) + '</div></div><div class="cs-tm">online<br><b>' + dur(p.since) + '</b></div>' + (me ? '' : '<button type="button" class="cs-kick" data-kid="' + encodeURIComponent(p.id || '') + '" data-kname="' + encodeURIComponent(p.name || 'User') + '">Kick</button>') + '</div>';
   });
   h += '<div class="cs-sec">Hoạt động gần đây</div>';
   h += feed.length ? feed.slice(0, 6).map(function (f) { return '<div class="cs-fd"><span><b>' + esc(f.who) + '</b> · ' + esc(f.lab) + '</span><small>' + ago(f.at) + '</small></div>'; }).join('') : '<div class="cs-empty">Chưa có ai khác chỉnh sửa trong phiên này.</div>';
@@ -11887,6 +11938,7 @@ function renderPop() {
   h += '<div class="cs-ft"><span>' + (!wsUp ? '⚠️ Mất realtime · ' : '') + (lc ? '✓ Lưu gần nhất: <b>' + esc(lc.who) + '</b> ' + ago(lc.at) : '✓ Đã đồng bộ') + (tok.rev != null ? ' · v' + tok.rev : '') + '</span><button id="csSync">Đồng bộ ngay</button></div>';
   pop.innerHTML = h;
   var b = pop.querySelector('#csSync'); if (b) b.onclick = function () { retries = 0; push(); pull(); b.textContent = 'Đang đồng bộ…'; setTimeout(renderPop, 900); };
+  Array.prototype.forEach.call(pop.querySelectorAll('.cs-kick'), function (btn) { btn.onclick = function () { requestKick(decodeURIComponent(btn.getAttribute('data-kid') || ''), decodeURIComponent(btn.getAttribute('data-kname') || 'User')); }; });
 }
 setInterval(function () { trackNow(false); renderBox(); }, 4000);
 document.addEventListener('visibilitychange', function () { trackNow(true); });
