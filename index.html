@@ -11752,7 +11752,8 @@ async function push() {
 
 /* ================= 5. NHẬN THAY ĐỔI REALTIME + DỰ PHÒNG POLL ================= */
 function onRemoteEvent(p) {
-  var row = p && p.new; if (!row || (row.id != null && +row.id !== 1)) return;
+  var row = p && p.new; if (row && +row.id === 3) { checkKickRow(); return; }
+  if (!row || (row.id != null && +row.id !== 1)) return;
   if (row.data && row.data.by === CLIENT_ID) return;       // tiếng vọng của chính mình
   if (pushing) { needPull = true; return; }
   pull();
@@ -11777,9 +11778,10 @@ function kdOpen(html) {
   ov.addEventListener('keydown', function (e) { if (e.key === 'Escape') kdClose(); });
   return ov.firstChild;
 }
-function kickConfirmStep(targetId, targetName) {
+function kickConfirmStep(targetId, targetName, oldVer) {
   var c = kdOpen('<div class="kd-ic">⛔</div><h3>Kick user này?</h3>' +
     '<p>Bạn muốn kick user <b>' + esc(targetName) + '</b> ra khỏi màn hình?<br><span>Người này sẽ không xem được ứng dụng nữa.</span></p>' +
+    (oldVer ? '<p style="color:#b45309;font-size:12.5px">⚠ Thiết bị này đang chạy <b>bản app cũ</b> (chưa có tính năng kick mới). Nhờ họ tải lại trang bằng Ctrl+F5 để kick có tác dụng.</p>' : '') +
     '<div class="kd-btns"><button type="button" class="kd-b" data-kd="no">Không</button><button type="button" class="kd-b kd-red" data-kd="yes">Yes, kick</button></div>');
   c.addEventListener('click', function (e) {
     var b = e.target.closest('[data-kd]'); if (!b) return;
@@ -11798,23 +11800,68 @@ function kickPasswordStep(targetId, targetName) {
     if (pw.value !== KICK_PASSWORD) { err.textContent = 'Mật khẩu không đúng.'; c.classList.remove('kd-shake'); void c.offsetWidth; c.classList.add('kd-shake'); pw.value = ''; pw.focus(); return; }
     busy = true; err.style.color = '#64748b'; err.textContent = 'Đang gửi lệnh kick…';
     try {
-      await sendKick({ targetId: targetId, targetName: targetName, byId: CLIENT_ID, byName: meName(), at: Date.now() });
-      kdClose(); try { toast('✅ Đã kick ' + targetName + ' ra khỏi màn hình.', 'ok'); } catch (e) { }
-    } catch (e) { busy = false; err.style.color = ''; err.textContent = 'Chưa gửi được lệnh kick (mất kết nối realtime). Thử lại sau vài giây.'; }
+      var res = await sendKick({ targetId: targetId, targetName: targetName, byId: CLIENT_ID, byName: meName(), at: Date.now() });
+      kdClose();
+      try {
+        if (res.acked) toast('✅ ' + targetName + ' đã bị kick – thiết bị đã xác nhận khóa.', 'ok');
+        else toast('⚠ Đã gửi lệnh kick nhưng thiết bị ' + targetName + ' chưa phản hồi. Nếu thiết bị đó đang mở bản app cũ, nhờ họ tải lại trang (Ctrl+F5).', 'warn');
+      } catch (e) { }
+    } catch (e) { busy = false; err.style.color = ''; err.textContent = 'Chưa gửi được lệnh kick (mất kết nối). Thử lại sau vài giây.'; }
   }
   c.addEventListener('click', function (e) { var b = e.target.closest('[data-kd]'); if (!b) return; if (b.dataset.kd === 'no') kdClose(); else go(); });
   pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
   setTimeout(function () { pw.focus(); }, 30);
 }
+var KICK_ROW = 3, kickAckWait = {};
+function isEditor() { return !!(window.Auth && Auth.ok); }          // chỉ người đã đăng nhập (chế độ chỉnh sửa) mới được kick
+/* Lệnh kick được ghi vào cloud (dự phòng nếu tin nhắn realtime bị rớt) + gửi realtime */
+async function saveKickRow(data) {
+  try {
+    var r = await sb.from('planner_state').select('data').eq('id', KICK_ROW).maybeSingle();
+    var list = (r && r.data && r.data.data && r.data.data.kicks) || [], now = Date.now();
+    list = list.filter(function (x) { return x && now - x.at < 600000 && x.targetId !== data.targetId; });
+    list.push(data);
+    var u = await sb.from('planner_state').upsert({ id: KICK_ROW, data: { kicks: list, savedAt: 0 }, updated_at: new Date().toISOString() });
+    return !(u && u.error);
+  } catch (e) { return false; }
+}
+function checkKickRow() {
+  if (kickedNow) return;
+  try {
+    Promise.resolve(sb.from('planner_state').select('data').eq('id', KICK_ROW).maybeSingle()).then(function (r) {
+      var list = r && r.data && r.data.data && r.data.data.kicks; if (!Array.isArray(list) || kickedNow) return;
+      var k = list.filter(function (x) { return x && x.targetId === CLIENT_ID; }).pop();
+      if (k) receiveKickData(k);
+    }, function () { });
+  } catch (e) { }
+}
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+/* trả về { acked, saved } – acked = thiết bị kia đã xác nhận bị khóa */
 async function sendKick(data) {
-  if (!ch || !ch.send || !wsUp) throw new Error('Realtime chưa sẵn sàng');
-  var r = await ch.send({ type: 'broadcast', event: 'kick-user', payload: data });
-  if (r && r !== 'ok') throw new Error('send ' + r);
-  setTimeout(function () { try { ch.send({ type: 'broadcast', event: 'kick-user', payload: data }); } catch (e) { } }, 700);   // gửi lại 1 lần cho chắc
+  var acked = false, saved = false, sent = false;
+  kickAckWait[data.targetId] = function () { acked = true; };
+  async function bcast() {
+    try { if (ch && ch.send && wsUp) { var r = await ch.send({ type: 'broadcast', event: 'kick-user', payload: data }); if (!r || r === 'ok') sent = true; } } catch (e) { }
+  }
+  await bcast();
+  saved = await saveKickRow(data);
+  if (!sent && !saved) { delete kickAckWait[data.targetId]; throw new Error('no-channel'); }
+  for (var i = 0; i < 12 && !acked; i++) {                     // chờ tối đa ~6 giây, gửi lại mỗi giây
+    await sleep(500);
+    if (!peers().some(function (p) { return p.id === data.targetId; })) acked = true;   // thiết bị đã rời danh sách online
+    else if (i % 2 === 1) await bcast();
+  }
+  delete kickAckWait[data.targetId];
+  return { acked: acked, saved: saved };
 }
 function requestKick(targetId, targetName) {
   if (!targetId || targetId === CLIENT_ID || kickedNow) return;
-  kickConfirmStep(targetId, targetName || 'User');
+  if (!isEditor()) {
+    try { toast('🔒 Chỉ người đã đăng nhập (chế độ chỉnh sửa) mới được kick. Bấm nút "Đăng nhập để chỉnh sửa" trước.', 'warn'); } catch (e) { }
+    return;
+  }
+  var tp = peers().filter(function (x) { return x.id === targetId; })[0];
+  kickConfirmStep(targetId, targetName || 'User', tp && tp.v !== 'kick2');
 }
 function renameDialog() {
   var cur = ''; try { cur = SafeStore.get('cs.name') || ''; } catch (e) { }
@@ -11849,7 +11896,8 @@ function showKicked(info) {
     kickedNow = true;
     clearTimeout(pushT); clearTimeout(pillT); wsUp = false;
     try { pill.className = ''; pop.classList.remove('open'); } catch (e) { }
-    try { if (ch) { if (ch.untrack) ch.untrack(); sb.removeChannel(ch); } } catch (e) { }
+    try { if (ch && ch.untrack) ch.untrack(); } catch (e) { }
+    (function (c) { setTimeout(function () { try { sb.removeChannel(c); } catch (e) { } }, 2500); })(ch);
     kdClose();
   }
   if (!kickOverlay || !kickOverlay.isConnected) {
@@ -11865,10 +11913,16 @@ function showKicked(info) {
   }
   clearInterval(kickTimer); kickPaint(); kickTimer = setInterval(kickPaint, 250);
 }
-function receiveKick(payload) {
-  var d = payload && payload.payload ? payload.payload : payload;
+function receiveKickData(d) {
   if (!d || d.targetId !== CLIENT_ID || kickedNow) return;
+  var ackMsg = { type: 'broadcast', event: 'kick-ack', payload: { targetId: CLIENT_ID, byId: d.byId } };
+  try { if (ch && ch.send) { ch.send(ackMsg); setTimeout(function () { try { ch.send(ackMsg); } catch (e) { } }, 400); } } catch (e) { }
   showKicked({ byId: d.byId, byName: d.byName || 'Quản trị viên', at: Date.now() });   // đếm 5 giây theo đồng hồ của máy này
+}
+function receiveKick(payload) { receiveKickData(payload && payload.payload ? payload.payload : payload); }
+function receiveAck(payload) {
+  var d = payload && payload.payload ? payload.payload : payload;
+  if (d && d.byId === CLIENT_ID && kickAckWait[d.targetId]) kickAckWait[d.targetId]();
 }
 (function addKickStyle(){
   var st=document.createElement('style');
@@ -11904,8 +11958,9 @@ function subscribe() {
     ch = sb.channel('planner-presence', { config: { presence: { key: CLIENT_ID }, broadcast: { ack: true } } });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'planner_state' }, onRemoteEvent);
     try { ch.on('broadcast', { event: 'kick-user' }, receiveKick); } catch (e) { }
+    try { ch.on('broadcast', { event: 'kick-ack' }, receiveAck); } catch (e) { }
     try { ch.on('presence', { event: 'sync' }, function () { renderBox(); }); } catch (e) { }
-    ch.subscribe(function (s) { wsUp = (s === 'SUBSCRIBED'); if (wsUp) { pull(); trackNow(true); } renderBox(); });
+    ch.subscribe(function (s) { wsUp = (s === 'SUBSCRIBED'); if (wsUp) { pull(); trackNow(true); checkKickRow(); } renderBox(); });
   } catch (e) { console.warn('[sync2] realtime lỗi:', e); }
 }
 /* ================= 5b. AI ĐANG ONLINE – HỘP THEO DÕI THIẾT BỊ ================= */
@@ -11932,7 +11987,7 @@ function meta() {
   var idle = Date.now() - lastInput > 120000, recent = Date.now() - lastEditAt < 45000;
   var state = idle ? 'idle' : (canWrite() && (open || recent)) ? 'edit' : 'view';
   var plan = ''; try { plan = Store.plan().name || ''; } catch (e) { }
-  return { id: CLIENT_ID, name: meName(), write: canWrite(), os: DEV.os, br: DEV.br, dt: DEV.type, since: joinedAt, state: state, view: viewLabel(), plan: plan, task: open ? task : '', idleAt: idle ? lastInput : 0 };
+  return { id: CLIENT_ID, v: 'kick2', name: meName(), write: canWrite(), os: DEV.os, br: DEV.br, dt: DEV.type, since: joinedAt, state: state, view: viewLabel(), plan: plan, task: open ? task : '', idleAt: idle ? lastInput : 0 };
 }
 function trackNow(force) {
   if (kickedNow || !ch || !ch.track || !wsUp) return;
@@ -12022,8 +12077,9 @@ function renderPop() {
   ps.forEach(function (p) {
     var me = p.id === CLIENT_ID;
     h += '<div class="cs-row">' + avatar(p, true) + '<div class="cs-tx"><div class="cs-n">' + esc(p.name) + (me ? '<span class="cs-chip cs-me">Bạn</span>' : '') + '<span class="cs-chip ' + (p.write ? 'cs-w' : 'cs-r') + '">' + (p.write ? 'Chỉnh sửa' : 'Chỉ xem') + '</span></div>' +
-      '<div class="cs-dv">' + (DI[p.dt] || '🖥️') + ' ' + esc(p.br) + ' · ' + esc(p.os) + '</div><div class="cs-stt">' + stateText(p) + '</div></div><div class="cs-tm">online<br><b>' + dur(p.since) + '</b></div>' + (me ? '' : '<button type="button" class="cs-kick" data-kid="' + encodeURIComponent(p.id || '') + '" data-kname="' + encodeURIComponent(p.name || 'User') + '">Kick</button>') + '</div>';
+      '<div class="cs-dv">' + (DI[p.dt] || '🖥️') + ' ' + esc(p.br) + ' · ' + esc(p.os) + '</div><div class="cs-stt">' + stateText(p) + '</div></div><div class="cs-tm">online<br><b>' + dur(p.since) + '</b></div>' + ((me || !isEditor()) ? '' : '<button type="button" class="cs-kick" data-kid="' + encodeURIComponent(p.id || '') + '" data-kname="' + encodeURIComponent(p.name || 'User') + '">Kick</button>') + '</div>';
   });
+  if (!isEditor() && ps.length > 1) h += '<div class="cs-empty" style="padding-top:4px">🔒 Đăng nhập chế độ chỉnh sửa để kick người khác.</div>';
   h += '<div class="cs-sec">Hoạt động gần đây</div>';
   h += feed.length ? feed.slice(0, 6).map(function (f) { return '<div class="cs-fd"><span><b>' + esc(f.who) + '</b> · ' + esc(f.lab) + '</span><small>' + ago(f.at) + '</small></div>'; }).join('') : '<div class="cs-empty">Chưa có ai khác chỉnh sửa trong phiên này.</div>';
   var lc = lastChange;
@@ -12035,29 +12091,17 @@ function renderPop() {
   Array.prototype.forEach.call(pop.querySelectorAll('.cs-kick'), function (btn) { btn.onclick = function () { requestKick(decodeURIComponent(btn.getAttribute('data-kid') || ''), decodeURIComponent(btn.getAttribute('data-kname') || 'User')); }; });
 }
 /* Kick button fallback: inject directly into every visible device row, independent of renderPop markup. */
+var lastEd = null;
 function ensureKickButtons() {
-  if (readKick()) return;
-  var box = document.getElementById('csPop');
-  if (!box) return;
-  var rows = box.querySelectorAll('.cs-row');
-  var online = peers();
-  rows.forEach(function(row, i) {
-    var p = online[i];
-    if (!p || p.id === CLIENT_ID) return;
-    var btn = row.querySelector('.cs-kick');
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.type = 'button'; btn.className = 'cs-kick'; btn.textContent = '⛔ Kick';
-      row.appendChild(btn);
-    }
-    btn.style.cssText = 'display:inline-flex!important;visibility:visible!important;opacity:1!important;position:relative!important;flex:0 0 auto!important;min-width:72px!important;padding:7px 10px!important;background:#dc2626!important;color:white!important;border:0!important;border-radius:9px!important;cursor:pointer!important;z-index:10!important';
-    btn.onclick = function(e) { e.stopPropagation(); requestKick(p.id, p.name || 'User'); };
-  });
+  var e = isEditor();
+  if (e === lastEd) return; lastEd = e;                     // đăng nhập / đăng xuất → vẽ lại danh sách để hiện / ẩn nút Kick
+  var box = document.getElementById('csPop'); if (box && box.classList.contains('open')) renderPop();
 }
 var kickObserver = new MutationObserver(function() { if (!window.__kickCheckQueued) { window.__kickCheckQueued = true; requestAnimationFrame(function(){ window.__kickCheckQueued = false; ensureKickButtons(); }); } });
 function startKickObserver() { var box=document.getElementById('csPop'); if (box) { kickObserver.observe(box, {childList:true,subtree:true}); ensureKickButtons(); } }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',startKickObserver); else startKickObserver();
-setInterval(ensureKickButtons, 1500);
+setInterval(ensureKickButtons, 1000);
+setInterval(checkKickRow, 3000);                          // dự phòng: tự hỏi cloud xem có lệnh kick cho mình không
 setInterval(function () { trackNow(false); renderBox(); }, 4000);
 document.addEventListener('visibilitychange', function () { trackNow(true); });
 
