@@ -9233,7 +9233,8 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
      DÁN NGAY TRƯỚC dòng </body> (sau tất cả các khối khác)
      ===================================================================== -->
 <style id="v31-style">
-.v31-nt{display:inline-flex!important;align-items:center;gap:3px;margin-left:6px!important;padding:1px 8px 1px 5px!important;border-radius:999px!important;
+.v31-nt{display:none!important}
+.v31-nt-old{display:inline-flex!important;align-items:center;gap:3px;margin-left:6px!important;padding:1px 8px 1px 5px!important;border-radius:999px!important;
   font-size:11px!important;font-weight:700!important;font-style:normal!important;line-height:16px!important;white-space:nowrap;
   background:linear-gradient(135deg,#fde68a,#fbbf24)!important;color:#7c2d12!important;box-shadow:0 1px 3px rgba(180,83,9,.3)!important;vertical-align:1px;width:auto!important;height:auto!important}
 .v31-nt b{font-weight:800;font-size:11px}
@@ -9253,7 +9254,7 @@ function ntCount(t) {
   return /nha thau|\bnt\b/.test(txt) ? 1 : 0;
 }
 const already = t => /nha thau|\bnt\b/.test(N(t.assignee));
-const chip = n => `<i class="v31-nt" title="Task cần nhà thầu">👷 <b>${n > 1 ? n + ' ' : ''}Nhà thầu</b></i>`;
+const chip = n => '';   /* đã bỏ icon Nhà thầu */
 
 function patchGantt() {
   const _tr = Gantt.taskRow;
