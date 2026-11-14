@@ -3526,7 +3526,7 @@ body.admin-mode>*:not(#adView):not(#toasts):not(#modalRoot):not(#tip){display:no
    Mật khẩu KHÔNG lưu dạng chữ – chỉ lưu mã băm SHA-256 của "decaf-planner|user|pass".
    Đổi tài khoản: tạo mã băm mới rồi thay vào AUTH_HASH.
    ===================================================================== */
-const AUTH_HASH = 'e710f3cafdaede8961a9e626bbbcf6a0e6435ac8e63691b7629774ba7039ba07';
+const AUTH_HASH = 'cf108c1216fcca52adffc8ade7301b02fa56e661a36101770c1978221d3339d0';
 const AUTH_KEY = 'sp.auth.v1';
 const START_HASH = location.hash;   // nhớ hash ban đầu (trang Ca trực có thể tự đổi hash trên điện thoại)
 
@@ -6628,8 +6628,8 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 800));
 (function () {
 'use strict';
 const LDC_LINK = 'https://nestle.sharepoint.com/:x:/r/teams/TAF_SCHEDULE_DATA/_layouts/15/Doc.aspx?sourcedoc=%7BB01C8F64-EB26-490C-83BE-5F493A25B47E%7D&file=LDC.xlsx&action=default&mobileredirect=true&DefaultItemOpen=1';
-const PASS_HASH = '2a5ba88771725d671b484dbda5d08dac1adc1092f9b942864babf40f2e068150';   // sha256('decaf-planner|123456')
-const OLD_AUTH_HASH = 'e710f3cafdaede8961a9e626bbbcf6a0e6435ac8e63691b7629774ba7039ba07';
+const PASS_HASH = '5d5fe0e3b4bd95f79c8c44a2ce39a0331f962fee773d48f14b4cccc7ca2e9c22';   // sha256('decaf-planner|' + mật khẩu chỉnh sửa)
+const OLD_AUTH_HASH = 'cf108c1216fcca52adffc8ade7301b02fa56e661a36101770c1978221d3339d0';
 const NV = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
 const esc = s => (window.U ? U.esc(s ?? '') : String(s ?? ''));
 const SVG = {
@@ -6657,7 +6657,7 @@ if (window.Auth) {
   };
   new MutationObserver(() => {
     const p = document.getElementById('auP'); if (!p || p.dataset.v14) return;
-    p.dataset.v14 = 1; p.placeholder = 'Nhập mật khẩu'; p.inputMode = 'numeric';
+    p.dataset.v14 = 1; p.placeholder = 'Nhập mật khẩu'; p.inputMode = 'text';
     const e = document.getElementById('auE'); if (e) e.textContent = '';
     setTimeout(() => p.focus(), 60);
   }).observe(document.getElementById('modalRoot') || document.body, { childList: true, subtree: true });
@@ -11761,7 +11761,7 @@ function onRemoteEvent(p) {
 }
 var ch = null, wsUp = false;
 /* ================= 5a. KICK USER RA KHỎI MÀN HÌNH ================= */
-var KICK_PASSWORD = '12345678';
+var KICK_PASSWORD = '123DCF4567';
 var KICK_SECONDS = 5;      // đếm ngược cảnh báo
 var KICK_BAN = 30;          // sau đó bị chặn thêm 30 giây rồi tự vào lại được
 var kickDoneKey = 'planner_kickdone_' + (function(){ try { return sessionStorage.getItem('planner_kick_session') || ''; } catch(e){ return ''; } })();
@@ -11797,7 +11797,7 @@ function kickConfirmStep(targetId, targetName, oldVer) {
 function kickPasswordStep(targetId, targetName) {
   var c = kdOpen('<div class="kd-ic">🔒</div><h3>Nhập mật khẩu</h3>' +
     '<p>Nhập mật khẩu để xác nhận kick <b>' + esc(targetName) + '</b>.</p>' +
-    '<input id="kdPw" type="password" inputmode="numeric" autocomplete="off" placeholder="Mật khẩu"><div id="kdErr" class="kd-err"></div>' +
+    '<input id="kdPw" type="password" autocomplete="off" placeholder="Mật khẩu"><div id="kdErr" class="kd-err"></div>' +
     '<div class="kd-btns"><button type="button" class="kd-b" data-kd="no">Hủy</button><button type="button" class="kd-b kd-red" data-kd="ok">Xác nhận</button></div>');
   var pw = c.querySelector('#kdPw'), err = c.querySelector('#kdErr'), busy = false;
   async function go() {
