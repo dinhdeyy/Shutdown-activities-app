@@ -11761,7 +11761,11 @@ function onRemoteEvent(p) {
 var ch = null, wsUp = false;
 /* ================= 5a. KICK USER RA KHỎI MÀN HÌNH ================= */
 var KICK_PASSWORD = '12345678';
-var KICK_SECONDS = 5;
+var KICK_SECONDS = 5;      // đếm ngược cảnh báo
+var KICK_BAN = 30;          // sau đó bị chặn thêm 30 giây rồi tự vào lại được
+var kickDoneKey = 'planner_kickdone_' + (function(){ try { return sessionStorage.getItem('planner_kick_session') || ''; } catch(e){ return ''; } })();
+function kickDoneAt() { try { return +localStorage.getItem(kickDoneKey) || 0; } catch (e) { return 0; } }
+var kickObs = null;
 var kickKey = 'planner_kicked_' + (function(){ try { var k=sessionStorage.getItem('planner_kick_session'); if(!k){k=CLIENT_ID;sessionStorage.setItem('planner_kick_session',k);} return k; } catch(e){return CLIENT_ID;} })();
 var kickedNow = false, kickOverlay = null, kickTimer = null, kickInfo = null;
 function readKick() { try { return JSON.parse(localStorage.getItem(kickKey) || 'null'); } catch (e) { return null; } }
@@ -11875,22 +11879,37 @@ function renameDialog() {
 }
 
 /* ---------- màn hình của người bị kick ---------- */
+function kickEnd() {
+  clearInterval(kickTimer);
+  try { localStorage.setItem(kickDoneKey, String(kickInfo && kickInfo.srcAt || Date.now())); localStorage.removeItem(kickKey); } catch (e) { }
+  try { localStorage.removeItem('sp.auth.v1'); } catch (e) { } try { if (window.Auth) { Auth.ok = false; Auth.user = ''; } } catch (e) { }   // hết án: vào lại như người mới, cần đăng nhập nếu muốn chỉnh sửa
+  try { if (kickObs) kickObs.disconnect(); } catch (e) { }
+  try { document.documentElement.classList.remove('kicked'); if (kickOverlay) kickOverlay.remove(); } catch (e) { }
+  kickOverlay = null; kickedNow = false;
+  location.reload();
+}
 function kickPaint() {
   if (!kickOverlay) return;
   var who = kickInfo.byName || 'Quản trị viên';
-  var left = Math.max(0, Math.ceil((kickInfo.at + KICK_SECONDS * 1000 - Date.now()) / 1000));
+  var now = Date.now(), warnEnd = kickInfo.at + KICK_SECONDS * 1000, banEnd = warnEnd + KICK_BAN * 1000;
+  if (now >= banEnd) { kickEnd(); return; }
   kickOverlay.querySelector('#kickMsg').innerHTML = 'Bạn đã bị <b>' + esc(who) + '</b> kick ra khỏi màn hình này.';
-  var el = kickOverlay.querySelector('#kickCountdown');
-  if (left > 0) { kickOverlay.className = 'kick-counting'; el.innerHTML = '<span class="kick-num">' + left + '</span>Màn hình sẽ khóa sau ' + left + ' giây…'; }
-  else {
+  var el = kickOverlay.querySelector('#kickCountdown'), sm = kickOverlay.querySelector('small');
+  if (now < warnEnd) {
+    var left = Math.ceil((warnEnd - now) / 1000);
+    kickOverlay.className = 'kick-counting';
+    el.innerHTML = '<span class="kick-num">' + left + '</span>Màn hình sẽ khóa sau ' + left + ' giây…';
+    sm.textContent = 'Bạn sẽ bị chặn tạm thời ' + KICK_BAN + ' giây.';
+  } else {
+    var wait = Math.ceil((banEnd - now) / 1000);
     kickOverlay.className = 'kick-locked'; document.documentElement.classList.add('kicked');
-    el.textContent = 'Bạn không thể tiếp tục xem nội dung. Tải lại trang cũng sẽ vẫn bị khóa.';
-    clearInterval(kickTimer);
+    el.innerHTML = '<span class="kick-num">' + wait + '</span>Có thể vào lại sau ' + wait + ' giây';
+    sm.textContent = 'Hết thời gian chặn, trang sẽ tự tải lại để bạn vào xem bình thường.';
   }
 }
 function showKicked(info) {
   if (!info || !document.body) return;
-  kickInfo = { byId: info.byId, byName: info.byName || 'Quản trị viên', at: +info.at || Date.now() };
+  kickInfo = { byId: info.byId, byName: info.byName || 'Quản trị viên', at: +info.at || Date.now(), srcAt: info.srcAt || 0 };
   saveKick(kickInfo);
   if (!kickedNow) {
     kickedNow = true;
@@ -11902,22 +11921,25 @@ function showKicked(info) {
   }
   if (!kickOverlay || !kickOverlay.isConnected) {
     kickOverlay = document.createElement('div'); kickOverlay.id = 'kickLockScreen';
-    kickOverlay.innerHTML = '<div class="kick-card"><div class="kick-icon">⛔</div><h2>Bạn đã bị kick</h2><p id="kickMsg"></p><div id="kickCountdown" class="kick-count"></div><small>Quyền xem trên thiết bị này đã bị khóa.</small></div>';
+    kickOverlay.innerHTML = '<div class="kick-card"><div class="kick-icon">⛔</div><h2>Bạn đã bị kick</h2><p id="kickMsg"></p><div id="kickCountdown" class="kick-count"></div><small></small></div>';
     document.body.appendChild(kickOverlay);
     /* nếu ai đó xóa màn hình khóa bằng công cụ trình duyệt → dựng lại */
-    new MutationObserver(function () {
-      if (!kickedNow) return;
+    if (kickObs) kickObs.disconnect();
+    kickObs = new MutationObserver(function () {
+      if (!kickedNow || !kickOverlay) return;
       if (!kickOverlay.isConnected) document.body.appendChild(kickOverlay);
       if (kickOverlay.className === 'kick-locked' && !document.documentElement.classList.contains('kicked')) document.documentElement.classList.add('kicked');
-    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    });
+    kickObs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   }
   clearInterval(kickTimer); kickPaint(); kickTimer = setInterval(kickPaint, 250);
 }
 function receiveKickData(d) {
   if (!d || d.targetId !== CLIENT_ID || kickedNow) return;
+  if (d.at && +d.at <= kickDoneAt()) return;               // lệnh kick này đã hết án rồi
   var ackMsg = { type: 'broadcast', event: 'kick-ack', payload: { targetId: CLIENT_ID, byId: d.byId } };
   try { if (ch && ch.send) { ch.send(ackMsg); setTimeout(function () { try { ch.send(ackMsg); } catch (e) { } }, 400); } } catch (e) { }
-  showKicked({ byId: d.byId, byName: d.byName || 'Quản trị viên', at: Date.now() });   // đếm 5 giây theo đồng hồ của máy này
+  showKicked({ byId: d.byId, byName: d.byName || 'Quản trị viên', at: Date.now(), srcAt: +d.at || 0 });   // đếm theo đồng hồ của máy này
 }
 function receiveKick(payload) { receiveKickData(payload && payload.payload ? payload.payload : payload); }
 function receiveAck(payload) {
@@ -11951,7 +11973,11 @@ function receiveAck(payload) {
   '@media(max-width:520px){.cs-row{align-items:flex-start}.cs-kick{padding:6px 8px;font-size:12px}}';
   document.head.appendChild(st);
 })();
-var oldKick = readKick(); if (oldKick) showKicked(oldKick);   // tải lại trang: vẫn bị khóa (còn trong 5 giây thì đếm tiếp)
+var oldKick = readKick();
+if (oldKick) {
+  if (Date.now() < (+oldKick.at || 0) + (KICK_SECONDS + KICK_BAN) * 1000) showKicked(oldKick);   // tải lại trang khi còn trong án: tiếp tục đếm
+  else { try { localStorage.removeItem(kickKey); localStorage.setItem(kickDoneKey, String(oldKick.srcAt || Date.now())); } catch (e) { } }
+}
 function subscribe() {
   if (kickedNow) return;
   try {
