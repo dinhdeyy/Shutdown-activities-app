@@ -11612,7 +11612,7 @@ var pushT = null, retries = 0, lastToast = 0;
 var userDirty = false, lastLabel = '', inAuto = false;     // phân biệt thao tác của NGƯỜI vs app tự dọn dữ liệu
 var feed = [], lastChange = null, autoPushes = [];         // nhật ký hoạt động + lần ghi gần nhất
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-function meName() { var n = ''; try { n = (window.Auth && Auth.user) || (typeof SafeStore !== 'undefined' && SafeStore.get('op.name')) || ''; } catch (e) { } return n || (canWrite() ? 'Người dùng' : 'Khách'); }
+function meName() { var n = ''; try { n = (typeof SafeStore !== 'undefined' && SafeStore.get('cs.name')) || (window.Auth && Auth.user) || (typeof SafeStore !== 'undefined' && SafeStore.get('op.name')) || ''; } catch (e) { } return n || (canWrite() ? 'Người dùng' : 'Khách'); }
 
 function tokOf(d) { return { rev: d && d.rev != null ? +d.rev : null, savedAt: +(d && d.savedAt) || 0 }; }
 function tokStr(t) { return (t.rev == null ? 'x' : t.rev) + '|' + t.savedAt; }
@@ -11678,6 +11678,7 @@ function integrate(d, quiet, force) {
 }
 
 function pull() {
+  if (kickedNow) return;
   if (pulling) { pullAgain = true; return pulling; }
   pulling = (async function () {
     try {
@@ -11701,7 +11702,7 @@ function pull() {
 var _lastSentU = false; function sentU0() { return _lastSentU; }
 function schedulePush(ms) { clearTimeout(pushT); pushT = setTimeout(push, ms == null ? 450 : ms); }
 async function push() {
-  if (!loaded || !canWrite()) return;
+  if (kickedNow || !loaded || !canWrite()) return;
   if (pushing) { again = true; return; }
   pushing = true; again = false; clearTimeout(pushT);
   try {
@@ -11759,56 +11760,148 @@ function onRemoteEvent(p) {
 var ch = null, wsUp = false;
 /* ================= 5a. KICK USER RA KHỎI MÀN HÌNH ================= */
 var KICK_PASSWORD = '12345678';
+var KICK_SECONDS = 5;
 var kickKey = 'planner_kicked_' + (function(){ try { var k=sessionStorage.getItem('planner_kick_session'); if(!k){k=CLIENT_ID;sessionStorage.setItem('planner_kick_session',k);} return k; } catch(e){return CLIENT_ID;} })();
-var kickOverlay = null, kickTimer = null;
+var kickedNow = false, kickOverlay = null, kickTimer = null, kickInfo = null;
 function readKick() { try { return JSON.parse(localStorage.getItem(kickKey) || 'null'); } catch (e) { return null; } }
 function saveKick(info) { try { localStorage.setItem(kickKey, JSON.stringify(info)); } catch (e) { } }
+
+/* ---------- hộp thoại riêng của app (window.confirm / prompt bị chặn trong khung xem trước nên không dùng) ---------- */
+function kdClose() { var o = document.getElementById('kickDlg'); if (o) o.remove(); }
+function kdOpen(html) {
+  kdClose();
+  var ov = document.createElement('div'); ov.id = 'kickDlg';
+  ov.innerHTML = '<div class="kd-card" role="dialog" aria-modal="true">' + html + '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('mousedown', function (e) { if (e.target === ov) kdClose(); });
+  ov.addEventListener('keydown', function (e) { if (e.key === 'Escape') kdClose(); });
+  return ov.firstChild;
+}
+function kickConfirmStep(targetId, targetName) {
+  var c = kdOpen('<div class="kd-ic">⛔</div><h3>Kick user này?</h3>' +
+    '<p>Bạn muốn kick user <b>' + esc(targetName) + '</b> ra khỏi màn hình?<br><span>Người này sẽ không xem được ứng dụng nữa.</span></p>' +
+    '<div class="kd-btns"><button type="button" class="kd-b" data-kd="no">Không</button><button type="button" class="kd-b kd-red" data-kd="yes">Yes, kick</button></div>');
+  c.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-kd]'); if (!b) return;
+    if (b.dataset.kd === 'no') kdClose(); else kickPasswordStep(targetId, targetName);
+  });
+  setTimeout(function () { var y = c.querySelector('[data-kd="yes"]'); if (y) y.focus(); }, 30);
+}
+function kickPasswordStep(targetId, targetName) {
+  var c = kdOpen('<div class="kd-ic">🔒</div><h3>Nhập mật khẩu</h3>' +
+    '<p>Nhập mật khẩu để xác nhận kick <b>' + esc(targetName) + '</b>.</p>' +
+    '<input id="kdPw" type="password" inputmode="numeric" autocomplete="off" placeholder="Mật khẩu"><div id="kdErr" class="kd-err"></div>' +
+    '<div class="kd-btns"><button type="button" class="kd-b" data-kd="no">Hủy</button><button type="button" class="kd-b kd-red" data-kd="ok">Xác nhận</button></div>');
+  var pw = c.querySelector('#kdPw'), err = c.querySelector('#kdErr'), busy = false;
+  async function go() {
+    if (busy) return;
+    if (pw.value !== KICK_PASSWORD) { err.textContent = 'Mật khẩu không đúng.'; c.classList.remove('kd-shake'); void c.offsetWidth; c.classList.add('kd-shake'); pw.value = ''; pw.focus(); return; }
+    busy = true; err.style.color = '#64748b'; err.textContent = 'Đang gửi lệnh kick…';
+    try {
+      await sendKick({ targetId: targetId, targetName: targetName, byId: CLIENT_ID, byName: meName(), at: Date.now() });
+      kdClose(); try { toast('✅ Đã kick ' + targetName + ' ra khỏi màn hình.', 'ok'); } catch (e) { }
+    } catch (e) { busy = false; err.style.color = ''; err.textContent = 'Chưa gửi được lệnh kick (mất kết nối realtime). Thử lại sau vài giây.'; }
+  }
+  c.addEventListener('click', function (e) { var b = e.target.closest('[data-kd]'); if (!b) return; if (b.dataset.kd === 'no') kdClose(); else go(); });
+  pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+  setTimeout(function () { pw.focus(); }, 30);
+}
+async function sendKick(data) {
+  if (!ch || !ch.send || !wsUp) throw new Error('Realtime chưa sẵn sàng');
+  var r = await ch.send({ type: 'broadcast', event: 'kick-user', payload: data });
+  if (r && r !== 'ok') throw new Error('send ' + r);
+  setTimeout(function () { try { ch.send({ type: 'broadcast', event: 'kick-user', payload: data }); } catch (e) { } }, 700);   // gửi lại 1 lần cho chắc
+}
+function requestKick(targetId, targetName) {
+  if (!targetId || targetId === CLIENT_ID || kickedNow) return;
+  kickConfirmStep(targetId, targetName || 'User');
+}
+function renameDialog() {
+  var cur = ''; try { cur = SafeStore.get('cs.name') || ''; } catch (e) { }
+  var c = kdOpen('<div class="kd-ic">✏️</div><h3>Tên hiển thị của bạn</h3><p>Mọi người sẽ thấy tên này trong danh sách online.</p>' +
+    '<input id="kdNm" type="text" maxlength="40" placeholder="VD: Trần Lộc" value="' + esc(cur) + '"><div class="kd-btns"><button type="button" class="kd-b" data-kd="no">Hủy</button><button type="button" class="kd-b kd-blue" data-kd="ok">Lưu</button></div>');
+  var inp = c.querySelector('#kdNm');
+  function save() { var v = inp.value.trim(); try { SafeStore.set('cs.name', v); } catch (e) { } kdClose(); trackNow(true); renderBox(); }
+  c.addEventListener('click', function (e) { var b = e.target.closest('[data-kd]'); if (!b) return; if (b.dataset.kd === 'no') kdClose(); else save(); });
+  inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') save(); });
+  setTimeout(function () { inp.focus(); inp.select(); }, 30);
+}
+
+/* ---------- màn hình của người bị kick ---------- */
+function kickPaint() {
+  if (!kickOverlay) return;
+  var who = kickInfo.byName || 'Quản trị viên';
+  var left = Math.max(0, Math.ceil((kickInfo.at + KICK_SECONDS * 1000 - Date.now()) / 1000));
+  kickOverlay.querySelector('#kickMsg').innerHTML = 'Bạn đã bị <b>' + esc(who) + '</b> kick ra khỏi màn hình này.';
+  var el = kickOverlay.querySelector('#kickCountdown');
+  if (left > 0) { kickOverlay.className = 'kick-counting'; el.innerHTML = '<span class="kick-num">' + left + '</span>Màn hình sẽ khóa sau ' + left + ' giây…'; }
+  else {
+    kickOverlay.className = 'kick-locked'; document.documentElement.classList.add('kicked');
+    el.textContent = 'Bạn không thể tiếp tục xem nội dung. Tải lại trang cũng sẽ vẫn bị khóa.';
+    clearInterval(kickTimer);
+  }
+}
 function showKicked(info) {
-  if (!info) return;
-  saveKick(info);
-  try { if (ch && ch.untrack) ch.untrack(); } catch (e) { }
-  if (!kickOverlay) {
+  if (!info || !document.body) return;
+  kickInfo = { byId: info.byId, byName: info.byName || 'Quản trị viên', at: +info.at || Date.now() };
+  saveKick(kickInfo);
+  if (!kickedNow) {
+    kickedNow = true;
+    clearTimeout(pushT); clearTimeout(pillT); wsUp = false;
+    try { pill.className = ''; pop.classList.remove('open'); } catch (e) { }
+    try { if (ch) { if (ch.untrack) ch.untrack(); sb.removeChannel(ch); } } catch (e) { }
+    kdClose();
+  }
+  if (!kickOverlay || !kickOverlay.isConnected) {
     kickOverlay = document.createElement('div'); kickOverlay.id = 'kickLockScreen';
-    kickOverlay.innerHTML = '<div class="kick-card"><div class="kick-icon">⛔</div><h2>Bạn đã bị đưa ra khỏi ứng dụng</h2><p id="kickMsg"></p><div id="kickCountdown" class="kick-count"></div><small>Quyền xem trên thiết bị này đã bị khóa.</small></div>';
+    kickOverlay.innerHTML = '<div class="kick-card"><div class="kick-icon">⛔</div><h2>Bạn đã bị kick</h2><p id="kickMsg"></p><div id="kickCountdown" class="kick-count"></div><small>Quyền xem trên thiết bị này đã bị khóa.</small></div>';
     document.body.appendChild(kickOverlay);
+    /* nếu ai đó xóa màn hình khóa bằng công cụ trình duyệt → dựng lại */
+    new MutationObserver(function () {
+      if (!kickedNow) return;
+      if (!kickOverlay.isConnected) document.body.appendChild(kickOverlay);
+      if (kickOverlay.className === 'kick-locked' && !document.documentElement.classList.contains('kicked')) document.documentElement.classList.add('kicked');
+    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   }
-  var who = (info.byName || 'Quản trị viên');
-  kickOverlay.querySelector('#kickMsg').textContent = who + ' đã kick bạn ra khỏi màn hình này.';
-  var left = Math.max(0, Math.ceil(((info.at || Date.now()) + 5000 - Date.now()) / 1000));
-  clearInterval(kickTimer);
-  function tick() {
-    var el = kickOverlay.querySelector('#kickCountdown');
-    if (left > 0) { el.textContent = 'Màn hình sẽ khóa sau ' + left + ' giây…'; left--; }
-    else { el.textContent = 'Bạn không thể tiếp tục xem nội dung.'; clearInterval(kickTimer); }
-  }
-  tick(); kickTimer = setInterval(tick, 1000);
+  clearInterval(kickTimer); kickPaint(); kickTimer = setInterval(kickPaint, 250);
 }
 function receiveKick(payload) {
   var d = payload && payload.payload ? payload.payload : payload;
-  if (!d || d.targetId !== CLIENT_ID) return;
-  showKicked({ byId: d.byId, byName: d.byName || 'Quản trị viên', at: d.at || Date.now() });
-}
-async function requestKick(targetId, targetName) {
-  if (!targetId || targetId === CLIENT_ID) return;
-  var ok = window.confirm('Bạn muốn kick user "' + targetName + '" ra khỏi màn hình?');
-  if (!ok) return;
-  var password = window.prompt('Nhập mật khẩu để xác nhận kick user này:');
-  if (password === null) return;
-  if (password !== KICK_PASSWORD) { window.alert('Mật khẩu không đúng. Không thể kick user.'); return; }
-  var data = { targetId: targetId, targetName: targetName, byId: CLIENT_ID, byName: meName(), at: Date.now() };
-  try {
-    if (!ch || !ch.send) throw new Error('Realtime chưa sẵn sàng');
-    await ch.send({ type: 'broadcast', event: 'kick-user', payload: data });
-    window.alert('Đã kick ' + targetName + ' ra khỏi màn hình.');
-  } catch (e) { window.alert('Chưa thể kick user vì kết nối realtime đang lỗi. Vui lòng thử lại.'); }
+  if (!d || d.targetId !== CLIENT_ID || kickedNow) return;
+  showKicked({ byId: d.byId, byName: d.byName || 'Quản trị viên', at: Date.now() });   // đếm 5 giây theo đồng hồ của máy này
 }
 (function addKickStyle(){
-  var st=document.createElement('style'); st.textContent='.cs-kick{display:inline-flex!important;align-items:center;justify-content:center;flex-shrink:0;margin-left:4px;border:1px solid #fca5a5!important;border-radius:9px;padding:8px 12px;background:#fee2e2;color:#b91c1c;font-weight:800;cursor:pointer;white-space:nowrap}.cs-kick:hover{background:#fecaca}.cs-kick:focus{outline:3px solid rgba(239,68,68,.28);outline-offset:2px}#csPop .cs-row{flex-wrap:wrap}#csPop .cs-kick{margin-left:auto;min-width:60px;z-index:2}#csPop .cs-row .cs-tx{min-width:110px}#csPop{overflow-x:hidden}#kickLockScreen{position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.96);display:grid;place-items:center;padding:20px;color:#0f172a}.kick-card{width:min(440px,100%);background:#fff;border-radius:22px;padding:30px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.45)}.kick-icon{font-size:46px}.kick-card h2{margin:10px 0;font-size:24px}.kick-card p{margin:0 0 16px;color:#475569}.kick-count{margin:14px 0;padding:12px;border-radius:12px;background:#fef2f2;color:#b91c1c;font-weight:800}.kick-card small{color:#64748b}@media(max-width:520px){.cs-row{align-items:flex-start}.cs-kick{padding:6px 8px;font-size:12px}}'; document.head.appendChild(st);
+  var st=document.createElement('style');
+  st.textContent=
+  '.cs-kick{display:inline-flex!important;align-items:center;justify-content:center;flex-shrink:0;margin-left:4px;border:1px solid #fca5a5!important;border-radius:9px;padding:8px 12px;background:#fee2e2;color:#b91c1c;font-weight:800;cursor:pointer;white-space:nowrap}.cs-kick:hover{background:#fecaca}.cs-kick:focus{outline:3px solid rgba(239,68,68,.28);outline-offset:2px}' +
+  '#csPop .cs-row{flex-wrap:wrap}#csPop .cs-kick{margin-left:auto;min-width:60px;z-index:2}#csPop .cs-row .cs-tx{min-width:110px}#csPop{overflow-x:hidden}' +
+  '.cs-ren{border:0;background:transparent;color:var(--accent,#2563eb);font-size:11px;font-weight:700;cursor:pointer;padding:0 4px}.cs-ren:hover{text-decoration:underline}' +
+  /* hộp thoại */
+  '#kickDlg{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;padding:16px;background:rgba(15,23,42,.55);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:kdF .2s ease}' +
+  'html body>#kickDlg#kickDlg#kickDlg#kickDlg#kickDlg#kickDlg{display:grid!important}' +
+  '.kd-card{width:min(400px,100%);padding:26px 24px 20px;border-radius:22px;text-align:center;background:var(--panel,#fff);color:var(--text,#1e293b);box-shadow:0 30px 80px rgba(0,0,0,.45);animation:kdP .35s cubic-bezier(.22,1.2,.36,1)}' +
+  '.kd-ic{font-size:40px;line-height:1}.kd-card h3{margin:10px 0 6px;font-size:20px}.kd-card p{margin:0 0 14px;color:var(--muted,#64748b);font-size:14px;line-height:1.55}.kd-card p b{color:var(--text,#1e293b)}.kd-card p span{font-size:12.5px}' +
+  '.kd-card input{width:100%;font-size:18px;padding:12px 14px;border-radius:12px;text-align:center;letter-spacing:2px}.kd-card input[type=text]{letter-spacing:0;font-size:16px}' +
+  '.kd-err{min-height:20px;margin-top:8px;color:#dc2626;font-size:13px;font-weight:600}' +
+  '.kd-btns{display:flex;gap:10px;margin-top:14px}.kd-b{flex:1;border:1px solid var(--border,#dbe2ea);border-radius:12px;padding:12px;font-size:15px;font-weight:700;background:var(--panel2,#f1f5f9);color:var(--text,#1e293b);cursor:pointer}' +
+  '.kd-b.kd-red{background:#dc2626;border-color:#dc2626;color:#fff}.kd-b.kd-red:hover{background:#b91c1c}.kd-b.kd-blue{background:#2563eb;border-color:#2563eb;color:#fff}.kd-b:focus{outline:3px solid rgba(37,99,235,.35);outline-offset:2px}' +
+  '.kd-shake{animation:kdS .4s}@keyframes kdS{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}@keyframes kdF{from{opacity:0}}@keyframes kdP{from{opacity:0;transform:translateY(14px) scale(.95)}}' +
+  /* màn hình người bị kick */
+  '#kickLockScreen{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;color:#0f172a;transition:background .4s}' +
+  'html body>#kickLockScreen#kickLockScreen#kickLockScreen#kickLockScreen#kickLockScreen#kickLockScreen{display:grid!important}' +
+  '#kickLockScreen.kick-counting{background:rgba(15,23,42,.62);-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px)}' +
+  '#kickLockScreen.kick-locked{background:#0f172a}' +
+  'html.kicked body>*:not(#kickLockScreen){display:none!important}' +
+  '.kick-card{width:min(440px,100%);background:#fff;border-radius:22px;padding:30px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.45);animation:kdP .4s cubic-bezier(.22,1.2,.36,1)}.kick-icon{font-size:46px}.kick-card h2{margin:10px 0;font-size:24px}.kick-card p{margin:0 0 16px;color:#475569;font-size:15px;line-height:1.5}.kick-card p b{color:#0f172a}' +
+  '.kick-count{margin:14px 0;padding:14px;border-radius:14px;background:#fef2f2;color:#b91c1c;font-weight:700;font-size:14px}.kick-num{display:block;font-size:44px;line-height:1;font-weight:900;margin-bottom:6px;font-variant-numeric:tabular-nums}.kick-locked .kick-count{background:#fee2e2}.kick-card small{color:#64748b}' +
+  '@media(max-width:520px){.cs-row{align-items:flex-start}.cs-kick{padding:6px 8px;font-size:12px}}';
+  document.head.appendChild(st);
 })();
-var oldKick = readKick(); if (oldKick) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ showKicked(oldKick); }); else showKicked(oldKick); }
+var oldKick = readKick(); if (oldKick) showKicked(oldKick);   // tải lại trang: vẫn bị khóa (còn trong 5 giây thì đếm tiếp)
 function subscribe() {
+  if (kickedNow) return;
   try {
-    ch = sb.channel('planner-presence', { config: { presence: { key: CLIENT_ID } } });
+    ch = sb.channel('planner-presence', { config: { presence: { key: CLIENT_ID }, broadcast: { ack: true } } });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'planner_state' }, onRemoteEvent);
     try { ch.on('broadcast', { event: 'kick-user' }, receiveKick); } catch (e) { }
     try { ch.on('presence', { event: 'sync' }, function () { renderBox(); }); } catch (e) { }
@@ -11842,7 +11935,7 @@ function meta() {
   return { id: CLIENT_ID, name: meName(), write: canWrite(), os: DEV.os, br: DEV.br, dt: DEV.type, since: joinedAt, state: state, view: viewLabel(), plan: plan, task: open ? task : '', idleAt: idle ? lastInput : 0 };
 }
 function trackNow(force) {
-  if (!ch || !ch.track || !wsUp) return;
+  if (kickedNow || !ch || !ch.track || !wsUp) return;
   var m = meta(), key = JSON.stringify(m), now = Date.now();
   if (!force && key === lastTracked && now - lastTrackAt < 25000) return;
   lastTracked = key; lastTrackAt = now;
@@ -11936,6 +12029,8 @@ function renderPop() {
   var lc = lastChange;
   h += '<div class="cs-ft"><span>' + (!wsUp ? '⚠️ Mất realtime · ' : '') + (lc ? '✓ Lưu gần nhất: <b>' + esc(lc.who) + '</b> ' + ago(lc.at) : '✓ Đã đồng bộ') + (tok.rev != null ? ' · v' + tok.rev : '') + '</span><button id="csSync">Đồng bộ ngay</button></div>';
   pop.innerHTML = h;
+  var mine = pop.querySelector('.cs-row .cs-chip.cs-me');
+  if (mine) { var rb = document.createElement('button'); rb.type = 'button'; rb.className = 'cs-ren'; rb.textContent = '✏️ Đổi tên'; rb.onclick = function (e) { e.stopPropagation(); renameDialog(); }; mine.parentNode.appendChild(rb); }
   var b = pop.querySelector('#csSync'); if (b) b.onclick = function () { retries = 0; push(); pull(); b.textContent = 'Đang đồng bộ…'; setTimeout(renderPop, 900); };
   Array.prototype.forEach.call(pop.querySelectorAll('.cs-kick'), function (btn) { btn.onclick = function () { requestKick(decodeURIComponent(btn.getAttribute('data-kid') || ''), decodeURIComponent(btn.getAttribute('data-kname') || 'User')); }; });
 }
