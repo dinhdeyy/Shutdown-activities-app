@@ -11156,11 +11156,11 @@ function setTime(id, s, e, o = {}) {
       if (o.pin === false) { t.executionMode = (t.dependencyIds || []).length ? 'after_dependency' : 'parallel'; t.constraintType = 'ASAP'; t.constraintOffsetHours = null; t.pinned = false; }
       else { t.constraintType = 'FIXED'; t.constraintOffsetHours = off; pinned = true; }
     } else {
-      const pin = o.pin === true || (o.pin === undefined && (t.pinned || s < req - MIN));
+      const pin = o.pin === true || (o.pin === undefined && (t.pinned || s < req - 1000));
       if (pin) { t.pinned = true; t.constraintType = 'SNET'; t.constraintOffsetHours = off; pinned = true; }
       else {
         t.pinned = false;
-        if (s <= req + MIN) { t.constraintType = 'ASAP'; t.constraintOffsetHours = null; }
+        if (s <= req + 1000) { t.constraintType = 'ASAP'; t.constraintOffsetHours = null; }
         else { t.constraintType = 'SNET'; t.constraintOffsetHours = off; }
       }
     }
