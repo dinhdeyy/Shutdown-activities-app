@@ -11187,7 +11187,9 @@ function unpin(id) {
 /* =====================================================================
    3. KÉO THẢ TỰ DO (thay toàn bộ Drag cũ)
    ===================================================================== */
-const SNAPM = { 0.5: 5, 1: 5, 2: 15, 4: 15, 24: 60 };
+/* Kéo/dời luôn làm tròn 5 phút. Chỉ nhập trực tiếp trong panel mới giữ phút lẻ. */
+const DRAG_SNAP_MIN = 5;
+const SNAPM = { 0.5: DRAG_SNAP_MIN, 1: DRAG_SNAP_MIN, 2: DRAG_SNAP_MIN, 4: DRAG_SNAP_MIN, 24: DRAG_SNAP_MIN };
 function installDrag() {
   Drag.start = function (e) {
     const bar = e.target.closest && e.target.closest('.bar[data-id]'); if (!bar || e.button !== 0) return;
@@ -11211,7 +11213,7 @@ function installDrag() {
   Drag.move = function (e) {
     const d = this.active; if (!d) return;
     const dx = e.clientX - d.x0; if (Math.abs(dx) > 3) d.moved = true; if (!d.moved || d.locked) return;
-    const g = App.geo, snapH = (e.altKey ? 1 : (SNAPM[g.z] || 15)) / 60;
+    const g = App.geo, snapH = (SNAPM[g.z] || DRAG_SNAP_MIN) / 60;
     d.dh = Math.round(dx / g.pxH / snapH) * snapH;
     const durH = (d.r.end - d.r.start) / MS_H;
     d.bar.classList.add('v46-drag');
@@ -11275,8 +11277,8 @@ function card(t, r) {
   const hasPrev = r.required > U.parseLocalISO(plan().start) + MIN;
   return `<h5><i>🕒</i>Giờ bắt đầu – kết thúc<span class="v46-tag ${pin ? 'pin' : ''}">${pin ? '📌 Ghim giờ' : '⤷ Tự động'}</span></h5>
     <div class="v46-g">
-      <label>Bắt đầu<input type="datetime-local" step="60" data-v46="s" value="${iso(r.start)}"></label>
-      <label>Kết thúc<input type="datetime-local" step="60" data-v46="e" value="${iso(r.end)}"></label>
+      <label>Bắt đầu<input type="datetime-local" step="1" data-v46="s" value="${iso(r.start)}"></label>
+      <label>Kết thúc<input type="datetime-local" step="1" data-v46="e" value="${iso(r.end)}"></label>
     </div>
     <div class="v46-dur"><span>Thời lượng</span><input type="number" min="0" step="1" data-v46="dh" value="${H}"> giờ <input type="number" min="0" max="59" step="1" data-v46="dm" value="${M}"> phút</div>
     <div class="v46-q"><span class="lbl">Dời cả task:</span><button type="button" data-v46b="-60">−1 giờ</button><button type="button" data-v46b="-15">−15 phút</button><button type="button" data-v46b="15">+15 phút</button><button type="button" data-v46b="60">+1 giờ</button></div>
@@ -12165,6 +12167,10 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 console.log('[sync2] đồng bộ realtime (gộp từng trường) đã bật');
 })();
 </script>
+
+<style id="v47-snap-style">
+.v46-time::after{content:"Kéo thả: làm tròn 5 phút · Nhập giờ: giữ phút chính xác";display:block;margin-top:7px;color:var(--muted);font-size:11.5px}
+</style>
 </body>
 </html>
 
