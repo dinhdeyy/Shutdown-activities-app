@@ -11232,7 +11232,7 @@ function installDrag() {
     Tip.text(`<b>${U.esc(d.t.taskName)}</b><br>${U.fmtDT(d.s)} → ${U.fmtDT(d.e)}<br>Thời lượng: ${U.fmtDur((d.e - d.s) / MS_H)}`
       + (early ? `<br><span style="color:#fbbf24">📌 Sớm hơn task trước (xong ${U.fmtDT(d.r.required)}) → sẽ ghim đúng giờ này</span>` : '')
       + (d.chain && d.chain.length && d.mode === 'm' ? `<br><span style="color:#ffd60a">⤷ ${d.chain.length} task phía sau dời theo</span>` : '')
-      + `<br><span style="opacity:.7">Giữ Alt để chỉnh từng phút</span>`, e);
+      + `<br><span style="opacity:.7">Kéo theo bước 5 phút · Nhập trực tiếp để giữ phút lẻ</span>`, e);
   };
   Drag.end = function () {
     const d = this.active; this.active = null; Tip.hide(); if (!d) return;
