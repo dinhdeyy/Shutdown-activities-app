@@ -856,7 +856,7 @@ const Store = {
     s.ui = Object.assign({ zoom: 2, dark: false, collapsed: {}, filtersOpen: false }, s.ui || {});
     return s;
   },
-  save() { clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => this.flush(), 250); },
+  save() { clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => this.flush(), 3000); },
   flush() { clearTimeout(this.saveTimer); this.state.savedAt = Date.now(); SafeStore.set(LS_KEY, JSON.stringify(this.state)); },
   snap() { return JSON.stringify({ plans: this.state.plans, activePlanId: this.state.activePlanId }); },
   restore(snap) { const s = JSON.parse(snap); this.state.plans = s.plans; this.state.activePlanId = s.activePlanId; },
@@ -10310,7 +10310,7 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 <script>
 (function () {
 'use strict';
-const DELAY = 600;
+const DELAY = 3000;
 let timer = null, saving = false;
 function drawer() { return document.getElementById('drawer'); }
 function saveBtn(d) {
@@ -10351,7 +10351,7 @@ function schedule(e) {
   if (!/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.target.type === 'file') return;
   if (e.target.closest('.wf-pick, .v36-box, .v14-ord, .v42-dur')) return;     // các khối này đã tự lưu riêng
   status(d, 'ing', '… đang lưu');
-  clearTimeout(timer); timer = setTimeout(autosave, e.type === 'change' ? 150 : DELAY);
+  clearTimeout(timer); timer = setTimeout(autosave, DELAY);
 }
 function boot() {
   try {
@@ -10360,7 +10360,7 @@ function boot() {
     /* bấm chọn task phụ thuộc / PPE / Song song… (nút, không phải ô nhập) */
     document.addEventListener('click', e => {
       const d = drawer(); if (!d || !d.contains(e.target) || App.drawerIsNew) return;
-      if (e.target.closest('.v10-opts button, .v10-it, [data-v10rm], .ppe, [data-ppe], .segc button')) { status(d, 'ing', '… đang lưu'); clearTimeout(timer); timer = setTimeout(autosave, 300); }
+      if (e.target.closest('.v10-opts button, .v10-it, [data-v10rm], .ppe, [data-ppe], .segc button')) { status(d, 'ing', '… đang lưu'); clearTimeout(timer); timer = setTimeout(autosave, DELAY); }
     }, true);
     /* đóng panel khi còn thay đổi chưa lưu → lưu luôn */
     const _c = Drawer.close;
@@ -12171,6 +12171,90 @@ console.log('[sync2] đồng bộ realtime (gộp từng trường) đã bật')
 <style id="v47-snap-style">
 .v46-time::after{content:"Kéo thả: làm tròn 5 phút · Nhập giờ: giữ phút chính xác";display:block;margin-top:7px;color:var(--muted);font-size:11.5px}
 </style>
+
+<!-- v47: clean toolbar, 3-state completion, compact legend -->
+<style id="v47-clean-style">
+/* Remove the controls requested by the user. Export image remains visible. */
+#btnAddTask,#btnImport,#btnExport,#btnAuto,#auAdmin,#wrTop,#v34Top,#v36Cnt,#v24Btn,#rtTop,#v35Btn,
+.topbar .dd:has(#btnExport),.addchild,[data-addchild],#legend{display:none!important}
+/* Remove separators that no longer separate anything. */
+.topbar>.tb-sep{display:none!important}
+/* Cleaner compact header. */
+.topbar{gap:7px!important;padding:9px 12px!important;min-height:58px;align-items:center;flex-wrap:wrap}
+.topbar .brand{font-size:17px!important;margin-right:5px;white-space:nowrap}
+.topbar .tb-btn,.topbar select{min-height:38px;padding:8px 12px!important;border-radius:13px!important;white-space:nowrap}
+.topbar #planSelect{min-width:185px;max-width:250px}
+.topbar #btnUndo,.topbar #btnRedo{width:38px;padding:0!important}
+.topbar #v46Img{background:linear-gradient(135deg,#0a84ff,#5e5ce6)!important;color:#fff!important;border:0!important;font-weight:800}
+/* Status dot is now a clear completion control. */
+.v47-state{width:19px;height:19px;flex:0 0 19px;border-radius:6px;border:0;display:inline-grid;place-items:center;
+  color:#fff;font-size:12px;font-weight:900;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);transition:transform .15s,box-shadow .15s}
+.v47-state:hover{transform:scale(1.13);box-shadow:0 0 0 4px rgba(10,132,255,.14)}
+.v47-state.future{background:#94a3b8}.v47-state.pending{background:#ef4444}.v47-state.done{background:#22c55e}
+.v47-state:disabled{cursor:default;opacity:.75}
+/* Hide the previous round state marker/check so there is only one status icon. */
+.grow .stdot,.grow .v36-ck{display:none!important}
+#v47Done{font-weight:800!important}
+#v47Done.done-filter{background:rgba(34,197,94,.15)!important;color:#15803d!important;border-color:rgba(34,197,94,.4)!important}
+#v47Done.todo-filter{background:rgba(239,68,68,.13)!important;color:#dc2626!important;border-color:rgba(239,68,68,.4)!important}
+.v47-save-note{font-size:11.5px;color:var(--muted);white-space:nowrap}
+@media(max-width:1100px){.topbar #planSelect{min-width:150px;max-width:190px}.topbar{gap:5px!important}.topbar .tb-btn,.topbar select{padding:7px 9px!important}}
+</style>
+<script id="v47-clean-script">
+(function(){
+'use strict';
+const SAVE_DELAY=3000;
+const oldTaskRow=Gantt.taskRow;
+function taskState(t,r){
+  if((t.progress||0)>=100) return {k:'done',icon:'✓',title:'Đã hoàn thành – bấm để chuyển về chưa xong'};
+  if(Date.now() < r.start) return {k:'future',icon:'',title:'Chưa tới giờ thực hiện – bấm để đánh dấu hoàn thành'};
+  return {k:'pending',icon:'!',title:(Date.now()>r.end?'Đã trễ, chưa hoàn thành':'Đã tới giờ, chưa hoàn thành')+' – bấm để đánh dấu hoàn thành'};
+}
+Gantt.taskRow=function(t,g,p){
+  let h=oldTaskRow.apply(this,arguments);
+  if(t.normalRun||t.hold) return h;
+  const r=App.res&&App.res.R.get(t.id); if(!r) return h;
+  const st=taskState(t,r);
+  const ctl=`<button type="button" class="v47-state ${st.k}" data-v47done="${U.esc(t.id)}" title="${U.esc(st.title)}" aria-label="${U.esc(st.title)}">${st.icon}</button>`;
+  return h.replace(/<span class="stdot"[^>]*><\/span>/,ctl);
+};
+function toggleDone(id){
+  if(window.Auth&&!Auth.ok){const b=document.getElementById('auBadge');if(b)b.click();return;}
+  Store.commit('Cập nhật hoàn thành task',p=>{
+    const t=p.tasks.find(x=>x.id===id);if(!t)return false;
+    if((t.progress||0)>=100){t.progress=0;delete t.doneAt;delete t.doneBy;}
+    else{t.progress=100;t.doneAt=Date.now();t.doneBy=(window.SafeStore&&(SafeStore.get('op.name')||SafeStore.get('lead.name')))||'';}
+  });
+}
+document.addEventListener('pointerdown',e=>{if(e.target.closest&&e.target.closest('[data-v47done]'))e.stopPropagation();},true);
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-v47done]');if(!b)return;
+  e.preventDefault();e.stopPropagation();toggleDone(b.dataset.v47done);
+},true);
+function doneButton(){
+  const sp=document.querySelector('.topbar .spacer');if(!sp)return;
+  let b=document.getElementById('v47Done');
+  if(!b){b=document.createElement('button');b.id='v47Done';b.className='tb-btn';b.title='Bấm để lọc: tất cả → chưa xong → đã xong';sp.parentNode.insertBefore(b,sp);b.onclick=()=>{
+    const f=App.filters.status||'';
+    App.filters.status=f===''?'todo':f==='todo'?'done':'';
+    const sel=document.getElementById('fStatus');if(sel)sel.value=App.filters.status;
+    App.render();
+  };}
+  const p=Store.plan();if(!p)return;
+  const list=p.tasks.filter(t=>!t.normalRun&&!t.hold),done=list.filter(t=>(t.progress||0)>=100).length;
+  b.textContent=`✓ ${done}/${list.length}`;
+  b.classList.toggle('done-filter',App.filters.status==='done');
+  b.classList.toggle('todo-filter',App.filters.status==='todo');
+  b.title=App.filters.status==='done'?'Đang xem task đã xong – bấm để xem tất cả':App.filters.status==='todo'?'Đang xem task chưa xong – bấm để xem task đã xong':'Bấm để xem task chưa xong';
+}
+const oldRender=App.render;
+App.render=function(){const x=oldRender.apply(this,arguments);try{doneButton();}catch(e){}return x;};
+/* Explicitly remove dynamic controls when their older patches recreate them. */
+function clean(){['auAdmin','wrTop','v34Top','v36Cnt','v24Btn','rtTop','v35Btn'].forEach(id=>{const x=document.getElementById(id);if(x)x.remove();});}
+const mo=new MutationObserver(()=>{clean();});mo.observe(document.querySelector('.topbar'),{childList:true,subtree:true});clean();doneButton();
+console.log('[v47] thanh gọn + lưu sau 3 giây + trạng thái 3 màu');
+})();
+</script>
 </body>
 </html>
 
