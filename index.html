@@ -687,7 +687,7 @@ const Scheduler = {
       if (!(t.durationHours > 0) && !t.milestone) issues.push({ type: 'data', level: 'error', taskIds: [t.id], msg: `${t.taskName || t.id}: thời lượng phải lớn hơn 0.` });
       if (t.executionMode === 'after_dependency' && !t.dependencyIds.length) issues.push({ type: 'data', level: 'info', taskIds: [t.id], msg: `${t.taskName || t.id}: chọn "Chạy sau task phụ thuộc" nhưng chưa chọn task tiền nhiệm.` });
     }
-    const durMs = t => Math.max(0, Math.round((t.durationHours || 0) * MS_H));
+    const durMs = t => Math.max(0, Math.round((t.durationHours || 0) * 60) * MS_MIN);   // làm tròn tới phút – tránh 10:19:59.99 hiển thị thành 10:19
     const anchored = t => t.executionMode === 'fixed' || t.locked || (t.pinned && t.constraintOffsetHours != null);   // v46: pinned = giờ do người dùng đặt
     const fullOrder = order.concat(inCycle), cyc = new Set(inCycle);
     for (const id of fullOrder) {
@@ -11150,7 +11150,7 @@ function setTime(id, s, e, o = {}) {
   let pinned = false;
   const ok = Store.commit(o.label || 'Đặt giờ ' + t0.taskName, pl => {
     const t = pl.tasks.find(x => x.id === id); if (!t) return false;
-    if (Math.abs(t.durationHours - dur) > 1e-6) t.durationHours = dur;
+    if (Math.abs(t.durationHours - dur) > 1e-6) { t.durationHours = dur; t.standardHours = dur / Math.max(1e-9, +t.quantity || 1); }
     const off = (s - P) / MS_H;
     if (t.executionMode === 'fixed') {
       if (o.pin === false) { t.executionMode = (t.dependencyIds || []).length ? 'after_dependency' : 'parallel'; t.constraintType = 'ASAP'; t.constraintOffsetHours = null; t.pinned = false; }
