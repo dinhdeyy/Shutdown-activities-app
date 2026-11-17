@@ -12256,76 +12256,68 @@ console.log('[v47] thanh gọn + lưu sau 3 giây + trạng thái 3 màu');
 })();
 </script>
 
-<!-- v48: safe time editing – no autosave while typing, save on Enter/blur, quick round buttons -->
-<style id="v48-time-edit-style">
-.v48-editing{outline:2px solid #0a84ff!important;box-shadow:0 0 0 4px rgba(10,132,255,.12)!important}
-.v48-time-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px}
-.v48-time-tools button{border:1px solid var(--border,#e5e7eb);background:var(--glass-row,#fff);color:var(--text);border-radius:999px;padding:5px 10px;font-size:11.5px;font-weight:700;cursor:pointer}
-.v48-time-tools button:hover{border-color:#0a84ff;color:#0a84ff}
-.v48-time-tools small{color:var(--muted);font-size:11.5px}
+<!-- v49: stable time editor – explicit apply, preserve exact minutes -->
+<style id="v49-style">
+.v49-editing{outline:2px solid #0a84ff!important;box-shadow:0 0 0 4px rgba(10,132,255,.12)!important}
+.v49-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+.v49-tools button{border:1px solid var(--border,#ddd);border-radius:999px;padding:6px 10px;background:var(--glass-row,#fff);color:var(--text);font-weight:650;cursor:pointer}
+.v49-tools button.primary{background:#0a84ff;color:#fff;border-color:#0a84ff}
+.v49-tools small{font-size:12px;color:var(--muted)}
 </style>
-<script id="v48-time-edit-script">
-(function(){
-'use strict';
-const IDS=new Set(['d_fixed','d_snet']);
-let editing=0,dirty=new Map(),committing=false;
-function isTime(el){return !!(el&&el.closest&&el.closest('#drawer .v46-time')&&el.matches('input[type="datetime-local"]'))||IDS.has(el&&el.id);}
-function parse(v){return U.parseLocalISO(v);}
-function round5(v){const ms=parse(v);if(!isFinite(ms))return v;return U.toLocalISO(Math.round(ms/(5*MS_MIN))*5*MS_MIN);}
-function shift(v,min){const ms=parse(v);if(!isFinite(ms))return v;return U.toLocalISO(ms+min*MS_MIN);}
-function mark(el){if(!dirty.has(el))dirty.set(el,el.value);el.classList.add('v48-editing');}
-function cancel(el){if(dirty.has(el))el.value=dirty.get(el);dirty.delete(el);el.classList.remove('v48-editing');el.blur();}
-function commit(el){
-  if(!dirty.has(el)||committing)return;
-  const old=dirty.get(el), val=el.value;
-  if(!isFinite(parse(val))){el.value=old;toast('Giờ không hợp lệ – giữ nguyên giờ cũ.','warn');dirty.delete(el);el.classList.remove('v48-editing');return;}
-  dirty.delete(el);el.classList.remove('v48-editing');
-  committing=true;
-  try{
-    /* v46 start/end fields already own their change handler. */
-    el.dispatchEvent(new Event('change',{bubbles:true}));
-  }finally{setTimeout(()=>{committing=false;},0);}
+<script id="v49-script">
+(function(){'use strict';
+const MINUTE=60000;
+const draft=new Map();
+function field(el){return el&&el.matches&&el.matches('#drawer .v46-time input[data-v46="s"],#drawer .v46-time input[data-v46="e"]');}
+function card(el){return el.closest('.v46-time');}
+function mark(el){if(!draft.has(el))draft.set(el,el.value);el.classList.add('v49-editing');}
+function clear(el){draft.delete(el);el.classList.remove('v49-editing');}
+function edit(el,value){mark(el);el.value=value;}
+function apply(el){
+ const c=card(el),id=c&&c.dataset.id,t=id&&Store.plan().tasks.find(x=>x.id===id),r=id&&App.res.R.get(id);
+ if(!t||!r)return;
+ const v=U.parseLocalISO(el.value);if(!isFinite(v)){toast('Giờ không hợp lệ.','warn');return;}
+ let start=r.start,end=r.end;
+ if(el.dataset.v46==='s'){start=v;end=v+(r.end-r.start);}else{end=v;}
+ if(end<=start){toast('Giờ kết thúc phải sau giờ bắt đầu.','warn');return;}
+ clear(el);
+ /* Setting an explicit start time must pin the task. Otherwise a predecessor can silently push it back. */
+ const pin=el.dataset.v46==='s'?true:(t.executionMode==='fixed'||!!t.pinned);
+ const result=setTime(id,start,end,{pin,label:'Đặt giờ chính xác '+t.taskName});
+ if(result){toast('Đã cập nhật: '+U.fmtDT(start)+' → '+U.fmtDT(end),'ok');}
 }
-/* Block v40 autosave and other delegated change handlers until editing is explicitly committed. */
-document.addEventListener('input',e=>{if(isTime(e.target)){mark(e.target);e.stopImmediatePropagation();}},true);
-document.addEventListener('change',e=>{
-  if(isTime(e.target)&&!committing){mark(e.target);e.stopImmediatePropagation();}
+function rollback(el){if(draft.has(el))el.value=draft.get(el);clear(el);}
+function tools(){document.querySelectorAll('#drawer .v46-time').forEach(c=>{
+ if(c.querySelector('.v49-tools'))return;
+ const bar=document.createElement('div');bar.className='v49-tools';
+ bar.innerHTML='<small>Chỉnh nhanh:</small><button type="button" data-v49="-5" data-f="s">Bắt đầu −5p</button><button type="button" data-v49="5" data-f="s">+5p</button><button type="button" data-v49="round" data-f="s">Làm tròn bắt đầu</button><button type="button" data-v49="round" data-f="e">Làm tròn kết thúc</button><button type="button" class="primary" data-v49="apply">✓ Áp dụng giờ</button><small>Không tự lưu khi đang gõ · Enter để áp dụng · Esc để hủy</small>';
+ c.appendChild(bar);
+ });}
+/* Stop the old change/input autosave handlers for time fields; commit explicitly instead. */
+document.addEventListener('input',e=>{if(field(e.target)){mark(e.target);e.stopImmediatePropagation();}},true);
+document.addEventListener('change',e=>{if(field(e.target)){mark(e.target);e.stopImmediatePropagation();}},true);
+document.addEventListener('keydown',e=>{if(!field(e.target))return;
+ if(e.key==='Enter'){e.preventDefault();e.stopImmediatePropagation();apply(e.target);}
+ if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();rollback(e.target);e.target.blur();}
 },true);
-document.addEventListener('keydown',e=>{
-  if(!isTime(e.target))return;
-  if(e.key==='Enter'){e.preventDefault();e.stopImmediatePropagation();commit(e.target);e.target.blur();}
-  if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();cancel(e.target);}
-},true);
-document.addEventListener('focusout',e=>{if(isTime(e.target)&&dirty.has(e.target))commit(e.target);},true);
-/* Prevent Drawer.close/v40 from seeing a pending timer generated by these fields. */
+/* Focusout does NOT save. This prevents native datetime widgets from submitting half-edited values. */
 document.addEventListener('pointerdown',e=>{
-  const b=e.target.closest&&e.target.closest('[data-v48]');if(!b)return;
-  e.preventDefault();e.stopImmediatePropagation();
-  const card=b.closest('.v46-time'),target=card&&card.querySelector(`input[data-v46="${b.dataset.field}"]`);if(!target)return;
-  mark(target);
-  target.value=b.dataset.v48==='round'?round5(target.value):shift(target.value,+b.dataset.v48);
-  commit(target);
+ const b=e.target.closest&&e.target.closest('.v49-tools [data-v49]');if(!b)return;
+ e.preventDefault();e.stopImmediatePropagation();
+ const c=b.closest('.v46-time');if(!c)return;
+ if(b.dataset.v49==='apply'){
+  const el=[...c.querySelectorAll('input[data-v46="s"],input[data-v46="e"]')].find(x=>draft.has(x));
+  if(el)apply(el);else toast('Chưa có giờ nào thay đổi.','ok');return;
+ }
+ const el=c.querySelector('input[data-v46="'+b.dataset.f+'"]');if(!el)return;
+ const ms=U.parseLocalISO(el.value);if(!isFinite(ms))return;
+ const next=b.dataset.v49==='round'?Math.round(ms/(5*MINUTE))*5*MINUTE:ms+Number(b.dataset.v49)*MINUTE;
+ edit(el,U.toLocalISO(next));apply(el);
 },true);
-function tools(){
-  document.querySelectorAll('#drawer .v46-time').forEach(card=>{
-    if(card.querySelector('.v48-time-tools'))return;
-    const row=document.createElement('div');row.className='v48-time-tools';
-    row.innerHTML='<small>Chỉnh giờ:</small><button data-field="s" data-v48="-5">Bắt đầu −5p</button><button data-field="s" data-v48="5">+5p</button><button data-field="s" data-v48="round">Làm tròn</button><button data-field="e" data-v48="-5">Kết thúc −5p</button><button data-field="e" data-v48="5">+5p</button><button data-field="e" data-v48="round">Làm tròn</button><small>Enter hoặc bấm ra ngoài để lưu · Esc để hủy</small>';
-    card.appendChild(row);
-  });
-}
-const oldDrawerRender=Drawer.render;
-Drawer.render=function(){const r=oldDrawerRender.apply(this,arguments);try{tools();}catch(e){}return r;};
-const oldAppRender=App.render;
-App.render=function(){
-  /* Never redraw the drawer while a time field is being edited. */
-  const active=document.activeElement,hold=isTime(active)&&dirty.has(active),drawer=document.getElementById('drawer'),html=hold&&drawer?drawer.innerHTML:null;
-  const r=oldAppRender.apply(this,arguments);
-  if(hold&&drawer&&html!==null){drawer.innerHTML=html;const el=drawer.querySelector('#'+CSS.escape(active.id));if(el){el.focus();try{el.setSelectionRange(active.selectionStart,active.selectionEnd);}catch(e){}}}
-  try{tools();}catch(e){}return r;
-};
+const oldRender=Drawer.render;
+Drawer.render=function(){const x=oldRender.apply(this,arguments);tools();return x;};
 setTimeout(tools,0);
-console.log('[v48] sửa giờ an toàn – lưu khi Enter/blur, không lưu giữa lúc nhập');
+console.log('[v49] Chỉnh giờ chính xác, chỉ lưu khi xác nhận');
 })();
 </script>
 </body>
