@@ -12256,68 +12256,107 @@ console.log('[v47] thanh gọn + lưu sau 3 giây + trạng thái 3 màu');
 })();
 </script>
 
-<!-- v49: stable time editor – explicit apply, preserve exact minutes -->
-<style id="v49-style">
-.v49-editing{outline:2px solid #0a84ff!important;box-shadow:0 0 0 4px rgba(10,132,255,.12)!important}
-.v49-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
-.v49-tools button{border:1px solid var(--border,#ddd);border-radius:999px;padding:6px 10px;background:var(--glass-row,#fff);color:var(--text);font-weight:650;cursor:pointer}
-.v49-tools button.primary{background:#0a84ff;color:#fff;border-color:#0a84ff}
-.v49-tools small{font-size:12px;color:var(--muted)}
+<!-- v50: SỬA GIỜ CHÍNH XÁC – gõ thoải mái, chỉ lưu khi bấm Áp dụng / Enter / rời khỏi mục Giờ -->
+<style id="v50-style">
+.v46-time.v50-dirty{border-color:#0a84ff!important;box-shadow:0 0 0 3px rgba(10,132,255,.12)!important}
+.v50-edit{outline:2px solid #0a84ff!important;outline-offset:1px}
+.v50-bar{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 2px;padding:10px 12px;border-radius:14px;background:rgba(10,132,255,.08)}
+.v46-time.v50-dirty .v50-bar{display:flex}
+.v50-bar b{font-size:13px;color:#0a84ff;margin-right:auto}
+.v50-bar button{border:0;border-radius:999px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer}
+.v50-bar .ok{background:#0a84ff;color:#fff}.v50-bar .no{background:rgba(120,120,128,.15);color:var(--text)}
+.v50-round{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.v50-round button{border:1px solid var(--border,#e5e7eb);background:var(--glass-row,#fff);color:var(--text);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:650;cursor:pointer}
+.v50-round button:hover{border-color:#0a84ff;color:#0a84ff}
 </style>
-<script id="v49-script">
+<script id="v50-script">
 (function(){'use strict';
-const MINUTE=60000;
-const draft=new Map();
-function field(el){return el&&el.matches&&el.matches('#drawer .v46-time input[data-v46="s"],#drawer .v46-time input[data-v46="e"]');}
-function card(el){return el.closest('.v46-time');}
-function mark(el){if(!draft.has(el))draft.set(el,el.value);el.classList.add('v49-editing');}
-function clear(el){draft.delete(el);el.classList.remove('v49-editing');}
-function edit(el,value){mark(el);el.value=value;}
-function apply(el){
- const c=card(el),id=c&&c.dataset.id,t=id&&Store.plan().tasks.find(x=>x.id===id),r=id&&App.res.R.get(id);
- if(!t||!r)return;
- const v=U.parseLocalISO(el.value);if(!isFinite(v)){toast('Giờ không hợp lệ.','warn');return;}
- let start=r.start,end=r.end;
- if(el.dataset.v46==='s'){start=v;end=v+(r.end-r.start);}else{end=v;}
- if(end<=start){toast('Giờ kết thúc phải sau giờ bắt đầu.','warn');return;}
- clear(el);
- /* Setting an explicit start time must pin the task. Otherwise a predecessor can silently push it back. */
- const pin=el.dataset.v46==='s'?true:(t.executionMode==='fixed'||!!t.pinned);
- const result=setTime(id,start,end,{pin,label:'Đặt giờ chính xác '+t.taskName});
- if(result){toast('Đã cập nhật: '+U.fmtDT(start)+' → '+U.fmtDT(end),'ok');}
+const KEYS=['s','e','dh','dm'];
+const MIN=60000;
+const inCard=el=>el&&el.closest&&el.closest('#drawer .v46-time');
+const isField=el=>inCard(el)&&el.dataset&&KEYS.includes(el.dataset.v46);
+let pending=null;            // {box,key,orig}
+function mark(el){const box=inCard(el);if(!box)return;
+  if(!pending||pending.box!==box){pending={box,key:el.dataset.v46,orig:snapshot(box)};}
+  pending.key=el.dataset.v46; el.classList.add('v50-edit'); box.classList.add('v50-dirty'); ensureBar(box);}
+function snapshot(box){const o={};KEYS.forEach(k=>{const x=box.querySelector('[data-v46="'+k+'"]');if(x)o[k]=x.value;});return o;}
+function cancel(){if(!pending)return;const{box,orig}=pending;KEYS.forEach(k=>{const x=box.querySelector('[data-v46="'+k+'"]');if(x){x.value=orig[k];x.classList.remove('v50-edit');}});box.classList.remove('v50-dirty');pending=null;}
+function val(box,k){const x=box.querySelector('[data-v46="'+k+'"]');return x?x.value:'';}
+function apply(){
+  if(!pending)return;
+  const{box,key}=pending,id=box.dataset.id,err=m=>{const e=box.querySelector('.v46-err');if(e)e.textContent=m;};
+  const t=Store.plan().tasks.find(x=>x.id===id),r=App.res&&App.res.R.get(id);if(!t||!r)return;
+  if(window.Auth&&!Auth.ok){toast('Cần đăng nhập để đổi giờ.','warn');return;}
+  const S=U.parseLocalISO(val(box,'s')),E=U.parseLocalISO(val(box,'e'));
+  const dur=U.num(val(box,'dh'),0)+U.num(val(box,'dm'),0)/60;
+  let s=r.start,e=r.end;
+  if(key==='s'){if(!isFinite(S))return err('Giờ bắt đầu chưa đúng.');s=S;e=s+(r.end-r.start);}
+  else if(key==='e'){if(!isFinite(E))return err('Giờ kết thúc chưa đúng.');e=E;}
+  else{if(!(dur>0))return err('Thời lượng phải lớn hơn 0.');e=s+dur*3600000;}
+  if(e<=s)return err('Giờ kết thúc phải sau giờ bắt đầu.');
+  const pinBox=box.querySelector('[data-v46="pin"]');
+  const pin=(pinBox&&pinBox.checked)?true:undefined;     // không ghim: muộn hơn task trước → mốc "không sớm hơn"; sớm hơn → tự ghim
+  pending=null;
+  const res=window.V46&&V46.setTime(id,s,e,{pin,label:'Đặt giờ '+t.taskName});
+  if(!res){err('Không lưu được.');return;}
+  const nr=App.res.R.get(id);
+  toast('Đã đặt "'+t.taskName+'": '+U.fmtDT(nr.start)+' → '+U.fmtDT(nr.end),'ok');
+  const y=(document.querySelector('#drawer .drawer-b')||{}).scrollTop||0;
+  Drawer.open(id);
+  requestAnimationFrame(()=>{const b=document.querySelector('#drawer .drawer-b');if(b)b.scrollTop=y;});
 }
-function rollback(el){if(draft.has(el))el.value=draft.get(el);clear(el);}
-function tools(){document.querySelectorAll('#drawer .v46-time').forEach(c=>{
- if(c.querySelector('.v49-tools'))return;
- const bar=document.createElement('div');bar.className='v49-tools';
- bar.innerHTML='<small>Chỉnh nhanh:</small><button type="button" data-v49="-5" data-f="s">Bắt đầu −5p</button><button type="button" data-v49="5" data-f="s">+5p</button><button type="button" data-v49="round" data-f="s">Làm tròn bắt đầu</button><button type="button" data-v49="round" data-f="e">Làm tròn kết thúc</button><button type="button" class="primary" data-v49="apply">✓ Áp dụng giờ</button><small>Không tự lưu khi đang gõ · Enter để áp dụng · Esc để hủy</small>';
- c.appendChild(bar);
- });}
-/* Stop the old change/input autosave handlers for time fields; commit explicitly instead. */
-document.addEventListener('input',e=>{if(field(e.target)){mark(e.target);e.stopImmediatePropagation();}},true);
-document.addEventListener('change',e=>{if(field(e.target)){mark(e.target);e.stopImmediatePropagation();}},true);
-document.addEventListener('keydown',e=>{if(!field(e.target))return;
- if(e.key==='Enter'){e.preventDefault();e.stopImmediatePropagation();apply(e.target);}
- if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();rollback(e.target);e.target.blur();}
+function ensureBar(box){
+  if(box.querySelector('.v50-bar'))return;
+  const bar=document.createElement('div');bar.className='v50-bar';
+  bar.innerHTML='<b>✏️ Đang sửa giờ – chưa lưu</b><button type="button" class="no" data-v50="no">Hủy</button><button type="button" class="ok" data-v50="ok">✓ Áp dụng</button>';
+  const after=box.querySelector('.v46-dur')||box.querySelector('.v46-g');after.after(bar);
+}
+function addRound(box){
+  if(box.querySelector('.v50-round'))return;
+  const s=U.parseLocalISO(val(box,'s')),e=U.parseLocalISO(val(box,'e'));
+  const odd=x=>isFinite(x)&&new Date(x).getMinutes()%5!==0;
+  if(!odd(s)&&!odd(e))return;
+  const div=document.createElement('div');div.className='v50-round';
+  div.innerHTML=(odd(s)?'<button type="button" data-v50r="s">Làm tròn bắt đầu → '+U.fmtHM(Math.round(s/(5*MIN))*5*MIN)+'</button>':'')
+    +(odd(e)?'<button type="button" data-v50r="e">Làm tròn kết thúc → '+U.fmtHM(Math.round(e/(5*MIN))*5*MIN)+'</button>':'');
+  (box.querySelector('.v46-g')).after(div);
+}
+/* đăng ký trên window ngay khi nạp → chạy TRƯỚC bộ lưu tức thì của v46 và tự lưu v40 */
+window.addEventListener('input',e=>{if(isField(e.target)){e.stopImmediatePropagation();mark(e.target);}},true);
+window.addEventListener('change',e=>{if(isField(e.target)){e.stopImmediatePropagation();mark(e.target);}},true);
+window.addEventListener('keydown',e=>{
+  if(!isField(e.target))return;
+  if(e.key==='Enter'){e.preventDefault();e.stopImmediatePropagation();mark(e.target);apply();}
+  else if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();cancel();e.target.blur();}
 },true);
-/* Focusout does NOT save. This prevents native datetime widgets from submitting half-edited values. */
-document.addEventListener('pointerdown',e=>{
- const b=e.target.closest&&e.target.closest('.v49-tools [data-v49]');if(!b)return;
- e.preventDefault();e.stopImmediatePropagation();
- const c=b.closest('.v46-time');if(!c)return;
- if(b.dataset.v49==='apply'){
-  const el=[...c.querySelectorAll('input[data-v46="s"],input[data-v46="e"]')].find(x=>draft.has(x));
-  if(el)apply(el);else toast('Chưa có giờ nào thay đổi.','ok');return;
- }
- const el=c.querySelector('input[data-v46="'+b.dataset.f+'"]');if(!el)return;
- const ms=U.parseLocalISO(el.value);if(!isFinite(ms))return;
- const next=b.dataset.v49==='round'?Math.round(ms/(5*MINUTE))*5*MINUTE:ms+Number(b.dataset.v49)*MINUTE;
- edit(el,U.toLocalISO(next));apply(el);
+/* rời hẳn khỏi mục Giờ (bấm ra chỗ khác) → tự áp dụng */
+window.addEventListener('focusout',e=>{
+  if(!pending||!isField(e.target))return;
+  const to=e.relatedTarget;if(to&&inCard(to))return;
+  setTimeout(()=>{if(pending&&!inCard(document.activeElement))apply();},150);
 },true);
-const oldRender=Drawer.render;
-Drawer.render=function(){const x=oldRender.apply(this,arguments);tools();return x;};
-setTimeout(tools,0);
-console.log('[v49] Chỉnh giờ chính xác, chỉ lưu khi xác nhận');
+window.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-v50],[data-v50r]');if(!b)return;
+  e.preventDefault();e.stopImmediatePropagation();
+  if(b.dataset.v50==='ok')return apply();
+  if(b.dataset.v50==='no')return cancel();
+  const box=inCard(b),k=b.dataset.v50r,x=box.querySelector('[data-v46="'+k+'"]'),ms=U.parseLocalISO(x.value);
+  x.value=U.toLocalISO(Math.round(ms/(5*MIN))*5*MIN);mark(x);apply();
+},true);
+/* đang sửa dở thì không cho app vẽ lại panel (tránh mất số đang gõ) */
+function boot(){
+  if(typeof Drawer==='undefined'||typeof App==='undefined'||!Drawer.render)return setTimeout(boot,300);
+  const _dr=Drawer.render;
+  Drawer.render=function(){if(pending&&pending.box.isConnected&&!this.__v50force)return;pending=null;const o=_dr.apply(this,arguments);try{const b=document.querySelector('#drawer .v46-time');if(b)addRound(b);}catch(x){}return o;};
+  const _rc=Drawer.refreshCalc;
+  if(_rc)Drawer.refreshCalc=function(){if(pending&&pending.box.isConnected)return;const o=_rc.apply(this,arguments);try{const b=document.querySelector('#drawer .v46-time');if(b)addRound(b);}catch(x){}return o;};
+  const _ar=App.render;
+  App.render=function(){const o=_ar.apply(this,arguments);try{const b=document.querySelector('#drawer .v46-time');if(b&&!pending)addRound(b);}catch(x){}return o;};
+  const _open=Drawer.open;
+  Drawer.open=function(){Drawer.__v50force=true;try{return _open.apply(this,arguments);}finally{Drawer.__v50force=false;setTimeout(()=>{const b=document.querySelector('#drawer .v46-time');if(b)addRound(b);},50);}};
+  console.log('[v50] sửa giờ chính xác – lưu khi Áp dụng / Enter / rời mục Giờ');
+}
+setTimeout(boot,6500);
 })();
 </script>
 </body>
