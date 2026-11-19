@@ -3550,7 +3550,7 @@ const Auth = {
 window.Auth = Auth;
 
 const opMode = () => document.body.classList.contains('op-mode');
-const canWrite = () => Auth.ok || opMode();
+const canWrite = () => Auth.ok || opMode() || !!window.__doneGrant;
 
 function askLogin(reason) {
   return new Promise(res => {
@@ -6081,7 +6081,7 @@ try {
 if (typeof sb === 'undefined' || typeof cloudSave !== 'function') { console.warn('[v9] Chưa có Supabase.'); return; }
 const pill = document.createElement('div'); pill.id = 'v9Sync'; pill.title = 'Bấm để thử đồng bộ lại'; document.body.appendChild(pill);
 let timer = null, retry = null, tries = 0, pending = false, busy = false, warned = false;
-const canWrite = () => !(window.Auth && !Auth.ok) || document.body.classList.contains('op-mode');
+const canWrite = () => !(window.Auth && !Auth.ok) || document.body.classList.contains('op-mode') || !!window.__doneGrant;
 function show(state, text) {
   pill.className = state ? 'show ' + state : '';
   pill.innerHTML = state ? `<i></i>${text}` : '';
@@ -9900,7 +9900,7 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 .grow.v36-done:hover{opacity:.9;filter:none}
 .grow.v36-done .c-name,.grow.v36-done .outlbl b{text-decoration:line-through;text-decoration-color:rgba(48,209,88,.8)}
 .v36-tag{display:inline-block;margin-left:6px;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:700;font-style:normal;background:rgba(48,209,88,.18);color:#15803d}
-body.ro .v36-ck{pointer-events:none}
+
 #v36Cnt{font-weight:700}
 </style>
 <script>
@@ -9915,7 +9915,7 @@ const fmt = ms => { if (!ms) return ''; const d = new Date(ms), p = n => String(
 
 /* ---------------- đổi trạng thái ---------------- */
 function setDone(id, on) {
-  if (needLogin()) return;
+  if (window.Auth && !Auth.ok) { window.__doneGrant = true; clearTimeout(window.__doneGrantT); window.__doneGrantT = setTimeout(() => { window.__doneGrant = false; }, 10000); }
   Store.commit(on ? 'Đánh dấu đã thực hiện' : 'Đánh dấu chưa thực hiện', () => {
     const t = Store.plan().tasks.find(x => x.id === id); if (!t) return false;
     if (on) { t.progress = 100; t.doneAt = Date.now(); t.doneBy = who(); }
@@ -9935,12 +9935,12 @@ function panel(t) {
   const d = document.getElementById('drawer'); if (!d || !t || !t.id || App.drawerIsNew || t.normalRun) return;
   hideEvidence(d);
   d.querySelectorAll('.v36-box').forEach(x => x.remove());
-  const cur = Store.plan().tasks.find(x => x.id === t.id) || t, done = isDone(cur), ro = !canEdit();
+  const cur = Store.plan().tasks.find(x => x.id === t.id) || t, done = isDone(cur), ro = false;   // ai cũng đánh dấu được
   const box = document.createElement('div'); box.className = 'v36-box';
   box.innerHTML = `<h5>Trạng thái thực hiện</h5>
     <div class="v36-seg"><button type="button" class="todo ${done ? '' : 'on'}" data-v36="0" ${ro ? 'disabled' : ''}>⏳ Chưa thực hiện</button>
       <button type="button" class="done ${done ? 'on' : ''}" data-v36="1" ${ro ? 'disabled' : ''}>✅ Đã thực hiện</button></div>
-    <div class="v36-meta">${done ? `✓ Hoàn thành${cur.doneBy ? ' – <b>' + esc(cur.doneBy) + '</b>' : ''}${cur.doneAt ? ' · ' + fmt(cur.doneAt) : ''}` : ro ? 'Đăng nhập để cập nhật trạng thái.' : 'Bấm “Đã thực hiện” khi task làm xong – lưu ngay.'}</div>`;
+    <div class="v36-meta">${done ? `✓ Hoàn thành${cur.doneBy ? ' – <b>' + esc(cur.doneBy) + '</b>' : ''}${cur.doneAt ? ' · ' + fmt(cur.doneAt) : ''}` : 'Bấm “Đã thực hiện” khi task làm xong – lưu ngay (không cần đăng nhập).'}</div>`;
   box.onclick = e => { const b = e.target.closest('[data-v36]'); if (!b || b.disabled) return;
     const on = b.dataset.v36 === '1'; if (on === isDone(Store.plan().tasks.find(x => x.id === t.id))) return;
     setDone(t.id, on); panel(Store.plan().tasks.find(x => x.id === t.id)); };
@@ -11619,7 +11619,7 @@ function meName() { var n = ''; try { n = (typeof SafeStore !== 'undefined' && S
 
 function tokOf(d) { return { rev: d && d.rev != null ? +d.rev : null, savedAt: +(d && d.savedAt) || 0 }; }
 function tokStr(t) { return (t.rev == null ? 'x' : t.rev) + '|' + t.savedAt; }
-function canWrite() { return !(window.Auth && !Auth.ok) || document.body.classList.contains('op-mode'); }
+function canWrite() { return !(window.Auth && !Auth.ok) || document.body.classList.contains('op-mode') || !!window.__doneGrant; }
 
 /* ---- thanh trạng thái nhỏ ---- */
 var st = document.createElement('style');
@@ -12219,12 +12219,14 @@ Gantt.taskRow=function(t,g,p){
   return h.replace(/<span class="stdot"[^>]*><\/span>/,ctl);
 };
 function toggleDone(id){
-  if(window.Auth&&!Auth.ok){const b=document.getElementById('auBadge');if(b)b.click();return;}
-  Store.commit('Cập nhật hoàn thành task',p=>{
+  const guest=!!(window.Auth&&!Auth.ok);
+  if(guest){window.__doneGrant=true;clearTimeout(window.__doneGrantT);window.__doneGrantT=setTimeout(()=>{window.__doneGrant=false;},10000);}
+  const ok=Store.commit('Cập nhật hoàn thành task',p=>{
     const t=p.tasks.find(x=>x.id===id);if(!t)return false;
     if((t.progress||0)>=100){t.progress=0;delete t.doneAt;delete t.doneBy;}
-    else{t.progress=100;t.doneAt=Date.now();t.doneBy=(window.SafeStore&&(SafeStore.get('op.name')||SafeStore.get('lead.name')))||'';}
+    else{t.progress=100;t.doneAt=Date.now();t.doneBy=(window.SafeStore&&(SafeStore.get('cs.name')||SafeStore.get('op.name')||SafeStore.get('lead.name')))||(window.Auth&&Auth.user)||'';}
   });
+  if(guest&&ok){try{Store.flush();}catch(e){}toast('Đã cập nhật trạng thái task.','ok');}
 }
 document.addEventListener('pointerdown',e=>{if(e.target.closest&&e.target.closest('[data-v47done]'))e.stopPropagation();},true);
 document.addEventListener('click',e=>{
