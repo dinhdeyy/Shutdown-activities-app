@@ -788,7 +788,14 @@ const Scheduler = {
       taskCount: plan.tasks.length, processCount: new Set(plan.tasks.map(t => t.process)).size,
       start: wS, end: wE, windowHours: plan.tasks.length ? (wE - wS) / MS_H : 0, manHours, sumDuration: durSum,
       maxParallel: maxPar, maxParallelAt: maxAt, conflictCount: conflicts.length, criticalCount: crit,
-      progress: durSum > 0 ? progSum / durSum : 0,
+      // Tiến độ theo số task thực tế, đồng bộ với Dashboard và nút Done.
+      // Normal Run / Hold là task hỗ trợ, không tính vào tỷ lệ hoàn thành.
+      progress: (() => {
+        const realTasks = plan.tasks.filter(t => !t.normalRun && !t.hold);
+        if (!realTasks.length) return 0;
+        const done = realTasks.filter(t => Number(t.progress) >= 100).length;
+        return done === realTasks.length ? 100 : 100 * done / realTasks.length;
+      })(),
       assignedCount: plan.tasks.filter(t => t.assignee).length,
     };
   },
