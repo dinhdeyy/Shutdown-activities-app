@@ -9806,7 +9806,9 @@ function cmp(that, other, ...a) {
   if (RANK) { const x = RANK.get(String(that)), y = RANK.get(String(other)); if (x !== undefined && y !== undefined) return x - y; }
   return _lc.call(that, other, ...a);
 }
-function withRank(fn, self, args) {
+function withRank(fn, self, args) { return fn.apply(self, args);   /* v51: không đổi String.prototype.localeCompare nữa */
+}
+function __oldWithRank(fn, self, args) {
   if (!isOn()) return fn.apply(self, args);
   const p = Store.plan(), r = p && ranks(p);
   RANK = r ? r.rank : null;
@@ -9862,7 +9864,7 @@ function boot() {
     let tm;
     App.render = function (...a) {
       const o = withRank(_ar, this, a);
-      try { btn(); domFix(); } catch (e) { console.warn('[v35]', e); }
+      try { btn(); } catch (e) { console.warn('[v35]', e); }   /* v51: bỏ domFix – đảo DOM làm lệch mũi tên & thanh */
       if (!busy) { clearTimeout(tm); tm = setTimeout(renumber, 350); }
       return o;
     };
@@ -12366,6 +12368,42 @@ function boot(){
   console.log('[v50] sửa giờ chính xác – lưu khi Áp dụng / Enter / rời mục Giờ');
 }
 setTimeout(boot,6500);
+})();
+</script>
+
+<!-- v51: Gantt luôn xếp theo thứ tự thực hiện ngay khi dựng dòng (không đảo DOM) -->
+<script id="v51-script">
+(function(){'use strict';
+function boot(){
+  if(typeof Gantt==='undefined'||!Gantt.buildRows||!window.App)return setTimeout(boot,300);
+  const _b=Gantt.buildRows;
+  Gantt.buildRows=function(){
+    const out=_b.apply(this,arguments);
+    try{
+      const R=App.res&&App.res.R;if(!R)return out;
+      const st=t=>{const r=R.get(t.id);return r?r.start:Infinity;};
+      const first=list=>{let m=Infinity;list.forEach(t=>{if(!t.normalRun&&!t.hold){const v=st(t);if(v<m)m=v;}});if(m===Infinity)list.forEach(t=>{const v=st(t);if(v<m)m=v;});return m;};
+      /* gom lại thành cây nhánh → process → task */
+      const br=[];let b=null,p=null;
+      out.rows.forEach(r=>{
+        if(r.type==='branch'){b={head:r,procs:[],loose:[]};br.push(b);p=null;}
+        else if(r.type==='proc'){p={head:r,tasks:[]};(b||(b={head:null,procs:[],loose:[]},br.push(b),b)).procs.push(p);}
+        else if(r.type==='task'){if(p)p.tasks.push(r);else (b||(b={head:null,procs:[],loose:[]},br.push(b),b)).loose.push(r);}
+        else (b||(b={head:null,procs:[],loose:[]},br.push(b),b)).loose.push(r);
+      });
+      const tk=r=>r.task;
+      br.forEach(x=>{x.procs.forEach(q=>{q.tasks.sort((a,c)=>(tk(a).normalRun?0:1)-(tk(c).normalRun?0:1)||st(tk(a))-st(tk(c))||tk(a).order-tk(c).order);q.k=first(q.head.tasks||q.tasks.map(tk));});
+        x.procs.sort((a,c)=>a.k-c.k);x.k=x.procs.length?Math.min(...x.procs.map(q=>q.k)):Infinity;});
+      br.sort((a,c)=>a.k-c.k);
+      const rows=[];br.forEach(x=>{if(x.head)rows.push(x.head);x.loose.forEach(r=>rows.push(r));x.procs.forEach(q=>{rows.push(q.head);q.tasks.forEach(r=>rows.push(r));});});
+      if(rows.length===out.rows.length){out.rows.length=0;rows.forEach(r=>out.rows.push(r));this.rows=out.rows;}
+    }catch(e){console.warn('[v51]',e);}
+    return out;
+  };
+  if(App.view==='gantt')Gantt.render();
+  console.log('[v51] Gantt xếp theo giờ thực hiện – thanh & mũi tên khớp nhau');
+}
+setTimeout(boot,6700);
 })();
 </script>
 </body>
